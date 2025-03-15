@@ -1,0 +1,24 @@
+{
+  "configurations" : [
+    {
+      "id" : "F151F575-670F-453D-AE96-689E4A60C17C",
+      "name" : "Test Scheme Action",
+      "options" : {
+
+      }
+    }
+  ],
+  "defaultOptions" : {
+
+  },
+  "testTargets" : [
+    {
+      "target" : {
+        "containerPath" : "container:",
+        "identifier" : "SwiftCardanoChainTests",
+        "name" : "SwiftCardanoChainTests"
+      }
+    }
+  ],
+  "version" : 1
+}
