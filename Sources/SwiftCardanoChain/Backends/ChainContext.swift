@@ -1,0 +1,102 @@
+import Foundation
+import SwiftCardanoCore
+
+/// Enum representing transaction data input types.
+enum TransactionData {
+    case transaction(Transaction)
+    case bytes(Data)
+    case string(String)
+}
+
+/// Interfaces through which the library interacts with the Cardano blockchain.
+protocol ChainContext {
+    
+    /// Get current protocol parameters
+    var protocolParam: () async throws -> ProtocolParameters { get }
+    
+    /// Get chain genesis parameters
+    var genesisParam: () async throws -> GenesisParameters { get }
+    
+    /// Get current network
+    var network: SwiftCardanoCore.Network { get }
+    
+    /// Current epoch number
+    var epoch: () async throws -> Int { get }
+    
+    /// Slot number of last block
+    var lastBlockSlot: () async throws -> Int { get }
+    
+    /// Get all UTxOs associated with an address.
+    ///
+    /// - Parameter address: An address, potentially bech32 encoded.
+    /// - Returns: A list of UTxOs.
+    func utxos(address: String) async throws -> [UTxO]
+    
+    /// Submit a serialized transaction to the blockchain.
+    ///
+    /// - Parameter cbor: The serialized transaction to be submitted.
+    /// - Throws: `InvalidArgumentException` when the transaction is invalid.
+    /// - Throws: `TransactionFailedException` when submission fails.
+    func submitTxCBOR(cbor: Data) async throws -> String
+    
+    /// Evaluate execution units of a transaction.
+    ///
+    /// - Parameter tx: The transaction to be evaluated.
+    /// - Returns: A dictionary mapping redeemer strings to execution units.
+    func evaluateTx(tx: Transaction) async throws -> [String: ExecutionUnits]
+    
+    /// Evaluate execution units of a transaction.
+    ///
+    /// - Parameter cbor: The serialized transaction to be evaluated.
+    /// - Returns: A dictionary mapping redeemer strings to execution units.
+    func evaluateTxCBOR(cbor: Data) async throws -> [String: ExecutionUnits]
+    
+    /// Get the stake address information.
+    /// - Parameter address: The stake address.
+    /// - Returns: List of `StakeAddressInfo` object.
+    func stakeAddressInfo(address: String) async throws -> [StakeAddressInfo]
+}
+
+// MARK: - Default Implementation
+extension ChainContext {
+    
+    /// Get all UTxOs associated with an address.
+    ///
+    /// - Parameter address: An address encoded with bech32.
+    /// - Returns: A list of UTxOs.
+    func utxos(address: String) -> [UTxO] {
+        return _utxos(address: address)
+    }
+    
+    /// Internal method to fetch UTxOs for an address.
+    ///
+    /// - Parameter address: An address encoded with bech32.
+    /// - Returns: A list of UTxOs.
+    func _utxos(address: String) -> [UTxO] {
+        fatalError("Must be implemented by conforming types.")
+    }
+    
+    /// Submit a transaction to the blockchain.
+    ///
+    /// - Parameter tx: The transaction to be submitted.
+    /// - Throws: `InvalidArgumentException` when the transaction is invalid.
+    /// - Throws: `TransactionFailedException` when submission fails.
+    func submitTx(tx: TransactionData) async throws -> String {
+        switch tx {
+        case .transaction(let transaction):
+            return try await submitTxCBOR(cbor: transaction.toCBOR())
+        case .bytes(let data):
+            return try await submitTxCBOR(cbor: data)
+        case .string(let string):
+            return try await submitTxCBOR(cbor: string.hexStringToData)
+        }
+    }
+    
+    /// Evaluate execution units of a transaction.
+    ///
+    /// - Parameter tx: The transaction to be evaluated.
+    /// - Returns: A dictionary mapping redeemer strings to execution units.
+    func evaluateTx(tx: Transaction) async throws -> [String: ExecutionUnits] {
+        return try await evaluateTxCBOR(cbor: tx.toCBOR())
+    }
+}
