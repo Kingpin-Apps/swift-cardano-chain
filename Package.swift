@@ -18,11 +18,9 @@ let package = Package(
             targets: ["SwiftCardanoChain"]),
     ],
     dependencies: [
-//        .package(url: "https://github.com/Kingpin-Apps/swift-cardano-core.git", from: "0.1.13"),
-//        .package(url: "https://github.com/Kingpin-Apps/swift-blockfrost-api.git", branch: "main"),
-        .package(path: "/Users/hadderley/Projects/AGL/Kingpin-Apps/swift-cardano-core"),
-        .package(path: "/Users/hadderley/Projects/AGL/Kingpin-Apps/swift-blockfrost-api"),
-        .package(url: "https://github.com/zunda-pixel/PotentCodables.git", branch: "update-library"),
+        .package(url: "https://github.com/Kingpin-Apps/swift-cardano-core.git", branch: "main"),
+        .package(url: "https://github.com/Kingpin-Apps/swift-blockfrost-api.git", from: "0.1.3"),
+        .package(url: "https://github.com/zunda-pixel/PotentCodables.git", revision: "46b99b90b1538c0d682596dde9aa88f3cd339502"),
     ],
     targets: [
         // Targets are the basic building blocks of a package, defining a module or a test suite.
@@ -37,7 +35,10 @@ let package = Package(
         ),
         .testTarget(
             name: "SwiftCardanoChainTests",
-            dependencies: ["SwiftCardanoChain"]
+            dependencies: ["SwiftCardanoChain"],
+            resources: [
+               .copy("data")
+           ]
         ),
     ]
 )

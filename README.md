@@ -13,4 +13,15 @@ Then, to use it in your source code, add:
 
 ```swift
 import SwiftCardanoChain
+
+let blockfrostChainContext = try await BlockFrostChainContext(
+    network: .preview,
+    environmentVariable: "BLOCKFROST_API_KEY"
+)
+
+    
+let cardanoCliChainContext = try CardanoCliChainContext(
+    configFile: URL(fileURLWithPath: "/path/to/preview/config.json"),
+    network: .preview
+)
 ```

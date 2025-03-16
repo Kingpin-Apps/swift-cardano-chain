@@ -9,7 +9,9 @@
     }
   ],
   "defaultOptions" : {
+    "environmentVariableEntries" : [
 
+    ]
   },
   "testTargets" : [
     {

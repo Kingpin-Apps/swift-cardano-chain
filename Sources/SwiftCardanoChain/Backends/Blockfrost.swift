@@ -187,20 +187,30 @@ public class BlockFrostChainContext: ChainContext {
     // MARK: - Initialization
 
     public init(
-        projectId: String,
+        projectId: String? = nil,
         network: SwiftCardanoChain.Network? = .mainnet,
-        basePath: String? = nil
+        basePath: String? = nil,
+        environmentVariable: String? = nil
     ) async throws {
-        self._projectId = projectId
         self._network = network ?? .mainnet
+        
+        if let projectId = projectId {
+            self._projectId = projectId
+        } else {
+            if let projectId = ProcessInfo.processInfo.environment[environmentVariable!] {
+                self._projectId = projectId
+            } else {
+                throw CardanoChainError.valueError("Project ID not provided and environment variable not set.")
+            }
+        }
         
         switch network {
             case .mainnet:
-                self.api = Blockfrost(network: .mainnet, projectId: projectId)
+                self.api = Blockfrost(network: .mainnet, projectId: projectId, basePath: basePath, environmentVariable: environmentVariable)
             case .preprod:
-                self.api = Blockfrost(network: .preprod, projectId: projectId)
+                self.api = Blockfrost(network: .preprod, projectId: projectId, basePath: basePath, environmentVariable: environmentVariable)
             case .preview:
-                self.api = Blockfrost(network: .preview, projectId: projectId)
+                self.api = Blockfrost(network: .preview, projectId: projectId, basePath: basePath, environmentVariable: environmentVariable)
             default:
                 throw CardanoChainError
                     .unsupportedNetwork(
@@ -365,10 +375,11 @@ public class BlockFrostChainContext: ChainContext {
     /// Gets the UTxOs for a given address.
     /// - Parameter address: The address to get the `UTxO`s for.
     /// - Returns: A list of `UTxO`s.
-    public func _utxos(address: String) async throws -> [UTxO] {
+    public func utxos(address: Address) async throws -> [UTxO] {
         let addressUtxos = try await api.client.getAddressesAddressUtxos(
             Operations.GetAddressesAddressUtxos.Input(
-                path: Operations.GetAddressesAddressUtxos.Input.Path(address: address)
+                path: Operations.GetAddressesAddressUtxos.Input
+                    .Path(address: address.toBech32())
             )
         )
         
@@ -427,8 +438,9 @@ public class BlockFrostChainContext: ChainContext {
                         .getScript(scriptHash: referenceScriptHash)
                 }
 
+                let address = try Address(from: result.address)
                 let txOut = TransactionOutput(
-                    address: try Address(from: address),
+                    address: address,
                     amount: amount,
                     datumHash: datumHash,
                     datum: datum,
@@ -501,11 +513,11 @@ public class BlockFrostChainContext: ChainContext {
     /// - Parameter address: The stake address.
     /// - Returns: A list of `StakeAddressInfo` object.
     /// - Throws: `CardanoChainError.blockfrostError` if the stake address info cannot be fetched.
-    public func stakeAddressInfo(address: String) async throws -> [StakeAddressInfo] {
+    public func stakeAddressInfo(address: Address) async throws -> [StakeAddressInfo] {
         let rewardsState = try await api.client.getAccountsStakeAddress(
             Operations.GetAccountsStakeAddress.Input(
                 path: Operations.GetAccountsStakeAddress.Input
-                    .Path(stakeAddress: address)
+                    .Path(stakeAddress: address.toBech32())
                 )
             )
         

@@ -30,7 +30,7 @@ protocol ChainContext {
     ///
     /// - Parameter address: An address, potentially bech32 encoded.
     /// - Returns: A list of UTxOs.
-    func utxos(address: String) async throws -> [UTxO]
+    func utxos(address: Address) async throws -> [UTxO]
     
     /// Submit a serialized transaction to the blockchain.
     ///
@@ -54,28 +54,11 @@ protocol ChainContext {
     /// Get the stake address information.
     /// - Parameter address: The stake address.
     /// - Returns: List of `StakeAddressInfo` object.
-    func stakeAddressInfo(address: String) async throws -> [StakeAddressInfo]
+    func stakeAddressInfo(address: Address) async throws -> [StakeAddressInfo]
 }
 
 // MARK: - Default Implementation
-extension ChainContext {
-    
-    /// Get all UTxOs associated with an address.
-    ///
-    /// - Parameter address: An address encoded with bech32.
-    /// - Returns: A list of UTxOs.
-    func utxos(address: String) -> [UTxO] {
-        return _utxos(address: address)
-    }
-    
-    /// Internal method to fetch UTxOs for an address.
-    ///
-    /// - Parameter address: An address encoded with bech32.
-    /// - Returns: A list of UTxOs.
-    func _utxos(address: String) -> [UTxO] {
-        fatalError("Must be implemented by conforming types.")
-    }
-    
+extension ChainContext {    
     /// Submit a transaction to the blockchain.
     ///
     /// - Parameter tx: The transaction to be submitted.
