@@ -2,14 +2,14 @@ import Foundation
 import SwiftCardanoCore
 
 /// Enum representing transaction data input types.
-enum TransactionData {
+public enum TransactionData {
     case transaction(Transaction)
     case bytes(Data)
     case string(String)
 }
 
 /// Interfaces through which the library interacts with the Cardano blockchain.
-protocol ChainContext {
+public protocol ChainContext {
     
     /// Get current protocol parameters
     var protocolParam: () async throws -> ProtocolParameters { get }
@@ -58,7 +58,7 @@ protocol ChainContext {
 }
 
 // MARK: - Default Implementation
-extension ChainContext {    
+public extension ChainContext {
     /// Submit a transaction to the blockchain.
     ///
     /// - Parameter tx: The transaction to be submitted.

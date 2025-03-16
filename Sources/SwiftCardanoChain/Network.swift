@@ -46,7 +46,7 @@ public enum Network {
     }
     
     /// Returns the command line arguments for the network
-    var arguments: [String] {
+    public var arguments: [String] {
         switch self {
         case .mainnet:
             return ["--mainnet"]
