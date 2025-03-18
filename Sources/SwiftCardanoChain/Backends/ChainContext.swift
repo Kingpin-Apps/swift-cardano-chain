@@ -12,10 +12,10 @@ public enum TransactionData {
 public protocol ChainContext {
     
     /// Get current protocol parameters
-    var protocolParam: () async throws -> ProtocolParameters { get }
+    var protocolParameters: () async throws -> ProtocolParameters { get }
     
     /// Get chain genesis parameters
-    var genesisParam: () async throws -> GenesisParameters { get }
+    var genesisParameters: () async throws -> GenesisParameters { get }
     
     /// Get current network
     var network: SwiftCardanoCore.Network { get }

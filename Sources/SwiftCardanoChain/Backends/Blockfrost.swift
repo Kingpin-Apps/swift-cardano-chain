@@ -59,7 +59,7 @@ public class BlockFrostChainContext: ChainContext {
         }
     }
     
-    public lazy var genesisParam: () async throws -> GenesisParameters  = { [weak self] in
+    public lazy var genesisParameters: () async throws -> GenesisParameters  = { [weak self] in
         guard let self = self else {
             throw CardanoChainError.blockfrostError("Self is nil")
         }
@@ -88,7 +88,7 @@ public class BlockFrostChainContext: ChainContext {
         return self._genesisParam!
     }
 
-    public lazy var protocolParam: () async throws -> ProtocolParameters  = { [weak self] in
+    public lazy var protocolParameters: () async throws -> ProtocolParameters  = { [weak self] in
         guard let self = self else {
             throw CardanoChainError.blockfrostError("Self is nil")
         }
@@ -250,19 +250,13 @@ public class BlockFrostChainContext: ChainContext {
         switch script {
             case .plutusV1Script(let script):
                 newScript =
-                    .plutusV1Script(
-                        try CBORDecoder().decode(PlutusV1Script.self, from: script)
-                    )
+                    .plutusV1Script(script)
             case .plutusV2Script(let script):
                 newScript =
-                    .plutusV2Script(
-                        try CBORDecoder().decode(PlutusV2Script.self, from: script)
-                    )
+                    .plutusV2Script(script)
             case .plutusV3Script(let script):
                 newScript =
-                    .plutusV3Script(
-                        try CBORDecoder().decode(PlutusV3Script.self, from: script)
-                    )
+                    .plutusV3Script(script)
         }
         
         let newScriptHash = try scriptHash(script: newScript.toScriptType)
@@ -316,7 +310,7 @@ public class BlockFrostChainContext: ChainContext {
                     )
                     do {
                         let cbor = try scriptCBOR.ok.body.json.cbor!
-                        let v1script = PlutusV1Script(Data(hex: cbor))
+                        let v1script = PlutusV1Script(data: Data(hex: cbor))
                         return try tryFixScript(
                             hash: scriptHash,
                             script: .plutusV1Script(v1script)
@@ -334,7 +328,7 @@ public class BlockFrostChainContext: ChainContext {
                     )
                     do {
                         let cbor = try scriptCBOR.ok.body.json.cbor!
-                        let v1script = PlutusV2Script(Data(hex: cbor))
+                        let v1script = PlutusV2Script(data: Data(hex: cbor))
                         return try tryFixScript(
                             hash: scriptHash,
                             script: .plutusV2Script(v1script)

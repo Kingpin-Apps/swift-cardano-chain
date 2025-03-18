@@ -82,7 +82,7 @@ public class CardanoCliChainContext: ChainContext {
         return slot
     }
 
-    public lazy var genesisParam: () async throws -> GenesisParameters = { [weak self] in
+    public lazy var genesisParameters: () async throws -> GenesisParameters = { [weak self] in
         guard var self = self else {
             throw CardanoChainError.valueError("Self is nil")
         }
@@ -103,7 +103,7 @@ public class CardanoCliChainContext: ChainContext {
         return self._genesisParameters!
     }
 
-    public lazy var protocolParam: () async throws -> ProtocolParameters = { [weak self] in
+    public lazy var protocolParameters: () async throws -> ProtocolParameters = { [weak self] in
         guard var self = self else {
             throw CardanoChainError.valueError("Self is nil")
         }
@@ -321,7 +321,7 @@ public class CardanoCliChainContext: ChainContext {
             }
 
             // Create PlutusV1Script from CBOR
-            let v1script = PlutusV1Script(cborData)
+            let v1script = PlutusV1Script(data: cborData)
             return .plutusV1Script(v1script)
         } else if scriptType == "PlutusScriptV2" {
             guard let cborHex = script["cborHex"] as? String,
@@ -331,7 +331,7 @@ public class CardanoCliChainContext: ChainContext {
             }
 
             // Create PlutusV2Script from CBOR
-            let v2script = PlutusV2Script(cborData)
+            let v2script = PlutusV2Script(data: cborData)
             return .plutusV2Script(v2script)
         } else {
             // Create NativeScript from dictionary

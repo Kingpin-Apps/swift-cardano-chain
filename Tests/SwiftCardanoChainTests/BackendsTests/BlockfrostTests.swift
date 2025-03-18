@@ -12,8 +12,8 @@ struct BlockfrostChainContextTests {
             environmentVariable: "BLOCKFROST_API_KEY"
         )
         
-        let genesisParam = try await chainContext.genesisParam()
-        let protocolParam = try await chainContext.protocolParam()
+        let genesisParam = try await chainContext.genesisParameters()
+        let protocolParam = try await chainContext.protocolParameters()
         let lastBlockSlot = try await chainContext.lastBlockSlot()
         let epoch = try await chainContext.epoch()
         let network = chainContext.network
