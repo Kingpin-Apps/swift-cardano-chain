@@ -1,3 +1,9 @@
+## 0.1.3 (2025-03-17)
+
+### Fix
+
+- updates to work with latest version of core
+
 ## 0.1.2 (2025-03-16)
 
 ### Fix
