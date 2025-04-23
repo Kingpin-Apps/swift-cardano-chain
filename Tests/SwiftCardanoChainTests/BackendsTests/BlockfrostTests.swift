@@ -7,7 +7,7 @@ import SwiftCardanoCore
 struct BlockfrostChainContextTests {
     @Test("Test Initialization")
     func testInit() async throws {
-        let chainContext = try await BlockFrostChainContext(
+        let chainContext = try await BlockFrostChainContext<Never>(
             network: .preview,
             environmentVariable: "BLOCKFROST_API_KEY"
         )

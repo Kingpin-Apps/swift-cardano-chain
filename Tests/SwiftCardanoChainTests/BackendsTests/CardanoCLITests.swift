@@ -3,7 +3,7 @@ import Foundation
 import SwiftCardanoCore
 @testable import SwiftCardanoChain
 
-@Suite("CardanoCLI Chain Context Tests", .enabled(if: CardanoCliChainContext.getCardanoCliPath() != nil && ProcessInfo.processInfo.environment["CARDANO_NODE_SOCKET_PATH"] != nil))
+@Suite("CardanoCLI Chain Context Tests", .enabled(if: CardanoCliChainContext<Never>.getCardanoCliPath() != nil && ProcessInfo.processInfo.environment["CARDANO_NODE_SOCKET_PATH"] != nil))
 struct CardanoCLIContextTests {
     @Test("Test Initialization")
     func testInit() async throws {
@@ -16,7 +16,7 @@ struct CardanoCLIContextTests {
             return
         }
         
-        let chainContext = try CardanoCliChainContext(
+        let chainContext = try CardanoCliChainContext<Never>(
             configFile: URL(fileURLWithPath: configFilePath),
             network: .preview
         )

@@ -16,7 +16,9 @@ public struct ChainTip: Codable {
 }
 
 /// A Cardano CLI wrapper for interacting with the Cardano blockchain
-public class CardanoCliChainContext: ChainContext {
+public class CardanoCliChainContext<T: Codable & Hashable>: ChainContext {
+    public typealias ReedemerType = T
+    
     // MARK: - Properties
 
     private let binary: URL
@@ -250,7 +252,7 @@ public class CardanoCliChainContext: ChainContext {
             }
         } catch {
             throw CardanoChainError.valueError(
-                "Failed to run command: \(error.localizedDescription)")
+                "Failed to run command: \(error.localizedDescription): \(cmd)")
         }
     }
 
