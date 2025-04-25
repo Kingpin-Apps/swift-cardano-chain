@@ -1,5 +1,5 @@
 {
-  "originHash" : "73edd5000ac6016f5d2cbf46dcdfa5a30bd5fc1ad55cb6e53c579107b3bb1b3c",
+  "originHash" : "f4ade1e9a281e1f9890ca9fbecb233bc324a70ff3f97682a6da024fce2aef540",
   "pins" : [
     {
       "identity" : "base32",
@@ -69,7 +69,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/KINGH242/PotentCodables.git",
       "state" : {
-        "revision" : "4893bd4d2d14af52916174874c87805540570737"
+        "revision" : "1b3880253008d76dc16e48d6140a81d061214324",
+        "version" : "3.6.0"
       }
     },
     {
@@ -113,7 +114,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/Kingpin-Apps/swift-cardano-core.git",
       "state" : {
-        "revision" : "2e205fd4dc719bb094ffc0d7e756e1b43a4ca96d"
+        "revision" : "cad27f060534af6eb92a109020118702a63c783e",
+        "version" : "0.1.26"
       }
     },
     {
