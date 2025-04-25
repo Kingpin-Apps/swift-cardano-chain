@@ -1,3 +1,9 @@
+## 0.1.10 (2025-04-25)
+
+### Fix
+
+- lock packages to tagged version
+
 ## 0.1.9 (2025-04-24)
 
 ### Fix
