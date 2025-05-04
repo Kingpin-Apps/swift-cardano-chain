@@ -385,7 +385,7 @@ public class BlockFrostChainContext<T: Codable & Hashable>: ChainContext {
 
             for result in results {
                 let txIn = TransactionInput(
-                    transactionId: try TransactionId(from: result.txHash),
+                    transactionId: try TransactionId(from: .string(result.txHash)),
                     index: UInt16(result.outputIndex)
                 )
 
@@ -422,7 +422,7 @@ public class BlockFrostChainContext<T: Codable & Hashable>: ChainContext {
                 var script: ScriptType? = nil
                 
                 if result.dataHash != nil && result.inlineDatum == nil {
-                    datumHash = try DatumHash(from: result.dataHash!)
+                    datumHash = try DatumHash(from: .string(result.dataHash!))
                 }
                 
                 if let inlineDatum = result.inlineDatum {
@@ -434,7 +434,7 @@ public class BlockFrostChainContext<T: Codable & Hashable>: ChainContext {
                         .getScript(scriptHash: referenceScriptHash)
                 }
 
-                let address = try Address(from: result.address)
+                let address = try Address(from: .string(result.address))
                 let txOut = TransactionOutput(
                     address: address,
                     amount: amount,

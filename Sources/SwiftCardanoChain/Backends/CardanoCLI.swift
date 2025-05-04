@@ -390,7 +390,7 @@ public class CardanoCliChainContext<T: Codable & Hashable>: ChainContext {
 
             let txId = String(parts[0])
             let txIn = TransactionInput(
-                transactionId: try TransactionId(from: txId),
+                transactionId: try TransactionId(from: .string(txId)),
                 index: UInt16(txIdx)
             )
 
@@ -415,7 +415,7 @@ public class CardanoCliChainContext<T: Codable & Hashable>: ChainContext {
 
                     for (assetHexName, assetAmount) in assets {
                         // Create Asset and add to MultiAsset
-                        let policy = try ScriptHash(from: policyId)
+                        let policy = try ScriptHash(from: .string(policyId))
                         let assetName = AssetName(from: assetHexName)
 
                         // Initialize the Asset for this policy if it doesn't exist
@@ -434,7 +434,7 @@ public class CardanoCliChainContext<T: Codable & Hashable>: ChainContext {
             // Handle datum hash
             var datumHash: DatumHash? = nil
             if let datumHashStr = utxo["datumhash"] as? String {
-                datumHash = try DatumHash(from: datumHashStr)
+                datumHash = try DatumHash(from: .string(datumHashStr))
             }
 
             // Handle datum
@@ -453,7 +453,9 @@ public class CardanoCliChainContext<T: Codable & Hashable>: ChainContext {
                 script = try await getScript(from: referenceScript)
             }
 
-            let address = try Address(from: utxo["address"] as? String ?? "")
+            let address = try Address(
+                from: .string(utxo["address"] as! String)
+            )
             let txOut = TransactionOutput(
                 address: address,
                 amount: value,

@@ -18,7 +18,7 @@ struct BlockfrostChainContextTests {
         let epoch = try await chainContext.epoch()
         let network = chainContext.network
         
-        let utxos = try await chainContext.utxos(address: Address(from: "addr_test1qp4kux2v7xcg9urqssdffff5p0axz9e3hcc43zz7pcuyle0e20hkwsu2ndpd9dh9anm4jn76ljdz0evj22stzrw9egxqmza5y3"))
+        let utxos = try await chainContext.utxos(address: Address(from: .string("addr_test1qp4kux2v7xcg9urqssdffff5p0axz9e3hcc43zz7pcuyle0e20hkwsu2ndpd9dh9anm4jn76ljdz0evj22stzrw9egxqmza5y3")))
         
         #expect(chainContext != nil)
         #expect(genesisParam != nil)
