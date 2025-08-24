@@ -1,5 +1,5 @@
 {
-  "originHash" : "920c032b42930e954d674e5bcb3088b89ef28dd3fa9ad2253808855502a23a9f",
+  "originHash" : "71c82aae92cb9c827c00e44a881fb62484245eed8878c4938ddd25ff832c6fb0",
   "pins" : [
     {
       "identity" : "base32",
@@ -42,8 +42,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/krzyzanowskim/CryptoSwift.git",
       "state" : {
-        "revision" : "729e01bc9b9dab466ac85f21fb9ee2bc1c61b258",
-        "version" : "1.8.4"
+        "revision" : "e45a26384239e028ec87fbcc788f513b67e10d8f",
+        "version" : "1.9.0"
       }
     },
     {
@@ -114,8 +114,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/Kingpin-Apps/swift-cardano-core.git",
       "state" : {
-        "revision" : "2bc2b79e18ca91480f0c1396e4042e9b9a07eefe",
-        "version" : "0.1.28"
+        "revision" : "fc614196b380c871b7ca8b83d7117f9ba0c9b834",
+        "version" : "0.1.29"
       }
     },
     {
