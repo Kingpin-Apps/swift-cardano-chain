@@ -1,3 +1,9 @@
+## 0.1.12 (2025-08-24)
+
+### Fix
+
+- update cardano core version
+
 ## 0.1.11 (2025-05-04)
 
 ### Fix
