@@ -2,7 +2,7 @@ import Foundation
 import SwiftCardanoCore
 
 /// Enum representing transaction data input types.
-public enum TransactionData<T: Codable & Hashable> {
+public enum TransactionData<T: CBORSerializable & Hashable> {
     case transaction(Transaction<T>)
     case bytes(Data)
     case string(String)
@@ -10,7 +10,7 @@ public enum TransactionData<T: Codable & Hashable> {
 
 /// Interfaces through which the library interacts with the Cardano blockchain.
 public protocol ChainContext {
-    associatedtype ReedemerType: Codable & Hashable
+    associatedtype ReedemerType: CBORSerializable & Hashable
     
     /// Get current protocol parameters
     var protocolParameters: () async throws -> ProtocolParameters { get }
@@ -68,7 +68,7 @@ public extension ChainContext {
     func submitTx(tx: TransactionData<ReedemerType>) async throws -> String {
         switch tx {
         case .transaction(let transaction):
-            return try await submitTxCBOR(cbor: transaction.toCBOR())
+            return try await submitTxCBOR(cbor: transaction.toCBORData())
         case .bytes(let data):
             return try await submitTxCBOR(cbor: data)
         case .string(let string):
@@ -81,6 +81,6 @@ public extension ChainContext {
     /// - Parameter tx: The transaction to be evaluated.
     /// - Returns: A dictionary mapping redeemer strings to execution units.
     func evaluateTx(tx: Transaction<ReedemerType>) async throws -> [String: ExecutionUnits] {
-        return try await evaluateTxCBOR(cbor: tx.toCBOR())
+        return try await evaluateTxCBOR(cbor: tx.toCBORData())
     }
 }

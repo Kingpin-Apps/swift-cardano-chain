@@ -16,7 +16,7 @@ public struct ChainTip: Codable {
 }
 
 /// A Cardano CLI wrapper for interacting with the Cardano blockchain
-public class CardanoCliChainContext<T: Codable & Hashable>: ChainContext {
+public class CardanoCliChainContext<T: CBORSerializable & Hashable>: ChainContext {
     public typealias ReedemerType = T
     
     // MARK: - Properties
