@@ -1,3 +1,9 @@
+## 0.1.16 (2025-09-06)
+
+### Fix
+
+- update core and improve tests
+
 ## 0.1.15 (2025-08-31)
 
 ### Fix
