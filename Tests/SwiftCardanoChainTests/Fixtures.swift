@@ -1,5 +1,4 @@
 import Foundation
-import OpenAPIKitCore
 import Testing
 import HTTPTypes
 import SwiftCardanoCore
