@@ -17,46 +17,27 @@ struct StakeAddressInfoTests {
         // Test initialization with all parameters
         let info = StakeAddressInfo(
             address: sampleAddress,
-            delegationDeposit: sampleDelegationDeposit,
             rewardAccountBalance: sampleRewardBalance,
+            delegationDeposit: sampleDelegationDeposit,
             stakeDelegation: sampleStakeDelegation,
             voteDelegation: sampleVoteDelegation,
             delegateRepresentative: sampleDelegateRepresentative
         )
 
         #expect(info.address == sampleAddress)
-        #expect(info.delegationDeposit == sampleDelegationDeposit)
+        #expect(info.stakeRegistrationDeposit == sampleDelegationDeposit)
         #expect(info.rewardAccountBalance == sampleRewardBalance)
         #expect(info.stakeDelegation == sampleStakeDelegation)
         #expect(info.voteDelegation == sampleVoteDelegation)
         #expect(info.delegateRepresentative == sampleDelegateRepresentative)
     }
 
-    @Test func testInitializationWithNilValues() {
-        // Test initialization with nil values
-        let info = StakeAddressInfo(
-            address: nil,
-            delegationDeposit: sampleDelegationDeposit,
-            rewardAccountBalance: sampleRewardBalance,
-            stakeDelegation: nil,
-            voteDelegation: nil,
-            delegateRepresentative: nil
-        )
-
-        #expect(info.address == nil)
-        #expect(info.delegationDeposit == sampleDelegationDeposit)
-        #expect(info.rewardAccountBalance == sampleRewardBalance)
-        #expect(info.stakeDelegation == nil)
-        #expect(info.voteDelegation == nil)
-        #expect(info.delegateRepresentative == nil)
-    }
-
     @Test func testEquality() {
         // Create two identical instances
         let info1 = StakeAddressInfo(
             address: sampleAddress,
-            delegationDeposit: sampleDelegationDeposit,
             rewardAccountBalance: sampleRewardBalance,
+            delegationDeposit: sampleDelegationDeposit,
             stakeDelegation: sampleStakeDelegation,
             voteDelegation: sampleVoteDelegation,
             delegateRepresentative: sampleDelegateRepresentative
@@ -64,8 +45,8 @@ struct StakeAddressInfoTests {
 
         let info2 = StakeAddressInfo(
             address: sampleAddress,
-            delegationDeposit: sampleDelegationDeposit,
             rewardAccountBalance: sampleRewardBalance,
+            delegationDeposit: sampleDelegationDeposit,
             stakeDelegation: sampleStakeDelegation,
             voteDelegation: sampleVoteDelegation,
             delegateRepresentative: sampleDelegateRepresentative
@@ -77,8 +58,8 @@ struct StakeAddressInfoTests {
         // Test inequality with different values
         let info3 = StakeAddressInfo(
             address: sampleAddress,
-            delegationDeposit: sampleDelegationDeposit + 1000,
             rewardAccountBalance: sampleRewardBalance,
+            delegationDeposit: sampleDelegationDeposit + 1000,
             stakeDelegation: sampleStakeDelegation,
             voteDelegation: sampleVoteDelegation,
             delegateRepresentative: sampleDelegateRepresentative
@@ -91,8 +72,8 @@ struct StakeAddressInfoTests {
         // Create an instance to encode
         let info = StakeAddressInfo(
             address: sampleAddress,
-            delegationDeposit: sampleDelegationDeposit,
             rewardAccountBalance: sampleRewardBalance,
+            delegationDeposit: sampleDelegationDeposit,
             stakeDelegation: sampleStakeDelegation,
             voteDelegation: sampleVoteDelegation,
             delegateRepresentative: sampleDelegateRepresentative
@@ -114,12 +95,12 @@ struct StakeAddressInfoTests {
         // Create a JSON string with the expected format
         let jsonString = """
             {
-                "stake_address": "\(sampleAddress)",
-                "delegation_deposit": \(sampleDelegationDeposit),
-                "reward_account_balance": \(sampleRewardBalance),
-                "stake_delegation": "\(sampleStakeDelegation)",
-                "vote_delegation": "\(sampleVoteDelegation)",
-                "delegate_representative": "\(sampleDelegateRepresentative)"
+                "address": "\(sampleAddress)",
+                "stakeRegistrationDeposit": \(sampleDelegationDeposit),
+                "rewardAccountBalance": \(sampleRewardBalance),
+                "stakeDelegation": "\(sampleStakeDelegation)",
+                "voteDelegation": "\(sampleVoteDelegation)",
+                "delegateRepresentative": "\(sampleDelegateRepresentative)"
             }
             """
 
@@ -132,7 +113,7 @@ struct StakeAddressInfoTests {
 
         // Verify all properties were decoded correctly
         #expect(decodedInfo.address == sampleAddress)
-        #expect(decodedInfo.delegationDeposit == sampleDelegationDeposit)
+        #expect(decodedInfo.stakeRegistrationDeposit == sampleDelegationDeposit)
         #expect(decodedInfo.rewardAccountBalance == sampleRewardBalance)
         #expect(decodedInfo.stakeDelegation == sampleStakeDelegation)
         #expect(decodedInfo.voteDelegation == sampleVoteDelegation)
@@ -143,8 +124,8 @@ struct StakeAddressInfoTests {
         // Create a JSON string with missing optional values
         let jsonString = """
             {
-                "delegation_deposit": \(sampleDelegationDeposit),
-                "reward_account_balance": \(sampleRewardBalance)
+                "address": "\(sampleAddress)",
+                "rewardAccountBalance": \(sampleRewardBalance)
             }
             """
 
@@ -156,8 +137,8 @@ struct StakeAddressInfoTests {
         let decodedInfo = try decoder.decode(StakeAddressInfo.self, from: jsonData)
 
         // Verify required properties were decoded correctly and optional ones are nil
-        #expect(decodedInfo.address == nil)
-        #expect(decodedInfo.delegationDeposit == sampleDelegationDeposit)
+        #expect(decodedInfo.address == sampleAddress)
+        #expect(decodedInfo.stakeRegistrationDeposit == 0)
         #expect(decodedInfo.rewardAccountBalance == sampleRewardBalance)
         #expect(decodedInfo.stakeDelegation == nil)
         #expect(decodedInfo.voteDelegation == nil)
@@ -168,8 +149,8 @@ struct StakeAddressInfoTests {
         // Create a JSON string with missing numeric values that should use defaults
         let jsonString = """
             {
-                "stake_address": "\(sampleAddress)",
-                "stake_delegation": "\(sampleStakeDelegation)"
+                "address": "\(sampleAddress)",
+                "stakeDelegation": "\(sampleStakeDelegation)"
             }
             """
 
@@ -182,7 +163,7 @@ struct StakeAddressInfoTests {
 
         // Verify default values were applied
         #expect(decodedInfo.address == sampleAddress)
-        #expect(decodedInfo.delegationDeposit == 0)
+        #expect(decodedInfo.stakeRegistrationDeposit == 0)
         #expect(decodedInfo.rewardAccountBalance == 0)
         #expect(decodedInfo.stakeDelegation == sampleStakeDelegation)
         #expect(decodedInfo.voteDelegation == nil)

@@ -15,21 +15,15 @@ public class BlockFrostChainContext<T: CBORSerializable & Hashable>: ChainContex
 
     // MARK: - Properties
 
-    private let api: Blockfrost
+    private var api: Blockfrost
     private var epochInfo: Components.Schemas.EpochContent?
     private var _epoch: Int?
     private var _genesisParam: GenesisParameters?
     private var _protocolParam: ProtocolParameters?
     private let _network: SwiftCardanoChain.Network
-    private let _projectId: String
     
     public var network: SwiftCardanoCore.Network {
-        switch self._network {
-            case .mainnet:
-                return .mainnet
-            default:
-                return .testnet
-        }
+        return _network.network
     }
     
     public lazy var epoch: () async throws -> Int = { [weak self] in
@@ -192,36 +186,36 @@ public class BlockFrostChainContext<T: CBORSerializable & Hashable>: ChainContex
         projectId: String? = nil,
         network: SwiftCardanoChain.Network? = .mainnet,
         basePath: String? = nil,
-        environmentVariable: String? = nil
+        environmentVariable: String? = nil,
+        client: Client? = nil,
     ) async throws {
         self._network = network ?? .mainnet
-        
-        if let projectId = projectId {
-            self._projectId = projectId
-        } else {
-            if let projectId = ProcessInfo.processInfo.environment[environmentVariable!] {
-                self._projectId = projectId
-            } else {
-                throw CardanoChainError.valueError("Project ID not provided and environment variable not set.")
-            }
-        }
-        
+                
+        let blockfrostNetwork: SwiftBlockfrostAPI.Network
         switch network {
             case .mainnet:
-                self.api = Blockfrost(network: .mainnet, projectId: projectId, basePath: basePath, environmentVariable: environmentVariable)
+                blockfrostNetwork = .mainnet
             case .preprod:
-                self.api = Blockfrost(network: .preprod, projectId: projectId, basePath: basePath, environmentVariable: environmentVariable)
+                blockfrostNetwork = .preprod
             case .preview:
-                self.api = Blockfrost(network: .preview, projectId: projectId, basePath: basePath, environmentVariable: environmentVariable)
+                blockfrostNetwork = .preview
             default:
-                throw CardanoChainError
-                    .unsupportedNetwork(
-                        "Unsupported network: \(String(describing: network))"
-                    )
+                throw CardanoChainError.unsupportedNetwork(
+                    "Unsupported network: \(String(describing: network))"
+                )
         }
+        
+        self.api = try Blockfrost(
+            network: blockfrostNetwork,
+            projectId: projectId,
+            basePath: basePath,
+            environmentVariable: environmentVariable,
+            client: client
+        )
 
         // Initialize with empty epoch info, will be updated on first access
         let epochInfo = try await api.client.getEpochsLatest()
+        
         do {
             self.epochInfo = try epochInfo.ok.body.json
         } catch {
@@ -234,7 +228,7 @@ public class BlockFrostChainContext<T: CBORSerializable & Hashable>: ChainContex
     /// A helper function to try to fix script hash issues
     ///
     /// - Parameters:
-    ///   - scriptHash: The script hash string
+    ///   - hash: The script hash string
     ///   - script: The script object
     /// - Returns: The fixed script object
     /// - Throws: ValueError if the script cannot be recovered from hash
@@ -522,12 +516,10 @@ public class BlockFrostChainContext<T: CBORSerializable & Hashable>: ChainContex
             return [
                 StakeAddressInfo(
                     address: stakeInfo.stakeAddress,
-                    delegationDeposit: Int(stakeInfo.controlledAmount)!,
                     rewardAccountBalance: Int(
                         stakeInfo.withdrawableAmount
                     )!,
                     stakeDelegation: stakeInfo.poolId,
-                    voteDelegation: nil,
                     delegateRepresentative: stakeInfo.drepId
                 )
             ]

@@ -19,7 +19,7 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/Kingpin-Apps/swift-cardano-core.git", .upToNextMinor(from: "0.1.32")),
-        .package(url: "https://github.com/Kingpin-Apps/swift-blockfrost-api.git", from: "0.1.3"),
+        .package(url: "https://github.com/Kingpin-Apps/swift-blockfrost-api.git", from: "0.1.4"),
         .package(url: "https://github.com/KINGH242/PotentCodables.git", .upToNextMinor(from: "3.6.0")),
     ],
     targets: [

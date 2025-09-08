@@ -67,12 +67,12 @@ public extension ChainContext {
     /// - Throws: `TransactionFailedException` when submission fails.
     func submitTx(tx: TransactionData<ReedemerType>) async throws -> String {
         switch tx {
-        case .transaction(let transaction):
-            return try await submitTxCBOR(cbor: transaction.toCBORData())
-        case .bytes(let data):
-            return try await submitTxCBOR(cbor: data)
-        case .string(let string):
-            return try await submitTxCBOR(cbor: string.hexStringToData)
+            case .transaction(let transaction):
+                return try await submitTxCBOR(cbor: transaction.toCBORData())
+            case .bytes(let data):
+                return try await submitTxCBOR(cbor: data)
+            case .string(let string):
+                return try await submitTxCBOR(cbor: string.hexStringToData)
         }
     }
     

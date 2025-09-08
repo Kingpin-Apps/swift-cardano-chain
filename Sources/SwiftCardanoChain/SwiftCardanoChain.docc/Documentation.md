@@ -1,30 +1,6 @@
-![GitHub Workflow Status](https://github.com/Kingpin-Apps/swift-cardano-chain/actions/workflows/swift.yml/badge.svg)
-[![](https://img.shields.io/endpoint?url=https%3A%2F%2Fswiftpackageindex.com%2Fapi%2Fpackages%2FKingpin-Apps%2Fswift-cardano-chain%2Fbadge%3Ftype%3Dswift-versions)](https://swiftpackageindex.com/Kingpin-Apps/swift-cardano-chain)
-[![](https://img.shields.io/endpoint?url=https%3A%2F%2Fswiftpackageindex.com%2Fapi%2Fpackages%2FKingpin-Apps%2Fswift-cardano-chain%2Fbadge%3Ftype%3Dplatforms)](https://swiftpackageindex.com/Kingpin-Apps/swift-cardano-chain)
+# ``SwiftCardanoChain``
 
-# SwiftCardanoChain - Swift implementation of Cardano Chain Contexts
-
-SwiftCardanoChain is a Swift implementation of Cardano Data Types with CBOR (and JSON) serialization.
-
-## Usage
-To add SwiftCardanoChain as dependency to your Xcode project, select `File` > `Swift Packages` > `Add Package Dependency`, enter its repository URL: `https://github.com/Kingpin-Apps/swift-cardano-chain.git` and import `SwiftCardanoChain`.
-
-Then, to use it in your source code, add:
-
-```swift
-import SwiftCardanoChain
-
-let blockfrostChainContext = try await BlockFrostChainContext(
-    network: .preview,
-    environmentVariable: "BLOCKFROST_API_KEY"
-)
-
-    
-let cardanoCliChainContext = try CardanoCliChainContext(
-    configFile: URL(fileURLWithPath: "/path/to/preview/config.json"),
-    network: .preview
-)
-```
+A Swift implementation of Cardano Chain Contexts for interacting with the Cardano blockchain.
 
 ## Overview
 
@@ -454,3 +430,26 @@ let cliContext = try CardanoCliChainContext<Never>(
     datumCacheSize: 1000          // Cache up to 1000 datums
 )
 ```
+
+## Topics
+
+### Chain Contexts
+
+- ``BlockFrostChainContext``
+- ``CardanoCliChainContext``
+- ``ChainContext``
+
+### Data Types
+
+- ``TransactionData``
+- ``CardanoChainError``
+- ``Network``
+
+### Blockchain Operations
+
+- Reading UTxOs
+- Submitting Transactions
+- Evaluating Execution Units
+- Querying Protocol Parameters
+- Accessing Genesis Parameters
+- Stake Address Information

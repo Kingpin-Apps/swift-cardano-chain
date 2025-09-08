@@ -1,7 +1,8 @@
 import Foundation
+import SwiftCardanoCore
 
 /// Network ID
-public enum Network {
+public enum Network: Sendable, Equatable {
     case mainnet
     case preprod
     case preview
@@ -60,6 +61,16 @@ public enum Network {
             return ["--testnet-magic", "\(testnetMagic!)"]
         case .custom(let magic):
             return ["--testnet-magic", "\(magic)"]
+        }
+    }
+    
+    /// Returns the SwiftCardanoCore.Network for the network
+    public var network: SwiftCardanoCore.Network {
+        switch self {
+            case .mainnet:
+                return .mainnet
+            default:
+                return .testnet
         }
     }
 }

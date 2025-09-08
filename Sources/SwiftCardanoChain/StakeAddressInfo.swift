@@ -4,10 +4,10 @@ import Foundation
 public struct StakeAddressInfo: Codable, Equatable {
     
     /// Stake address
-    public let address: String?
+    public let address: String
     
-    /// Delegation deposit
-    public let delegationDeposit: Int
+    /// StakeRegistration deposit
+    public let stakeRegistrationDeposit: Int?
     
     /// Reward account balance
     public let rewardAccountBalance: Int
@@ -23,18 +23,25 @@ public struct StakeAddressInfo: Codable, Equatable {
     
     /// Custom coding keys to map multiple alias names from JSON
     private enum CodingKeys: String, CodingKey {
-        case address = "stake_address"
-        case delegationDeposit = "delegation_deposit"
-        case rewardAccountBalance = "reward_account_balance"
-        case stakeDelegation = "stake_delegation"
-        case voteDelegation = "vote_delegation"
-        case delegateRepresentative = "delegate_representative"
+        case address
+        case stakeRegistrationDeposit
+        case rewardAccountBalance
+        case stakeDelegation
+        case voteDelegation
+        case delegateRepresentative
     }
     
-    public init(address: String?, delegationDeposit: Int, rewardAccountBalance: Int, stakeDelegation: String?, voteDelegation: String?, delegateRepresentative: String?) {
+    public init(
+        address: String,
+        rewardAccountBalance: Int,
+        delegationDeposit: Int? = nil,
+        stakeDelegation: String? = nil,
+        voteDelegation: String? = nil,
+        delegateRepresentative: String? = nil
+    ) {
         self.address = address
-        self.delegationDeposit = delegationDeposit
         self.rewardAccountBalance = rewardAccountBalance
+        self.stakeRegistrationDeposit = delegationDeposit
         self.stakeDelegation = stakeDelegation
         self.voteDelegation = voteDelegation
         self.delegateRepresentative = delegateRepresentative
@@ -44,8 +51,9 @@ public struct StakeAddressInfo: Codable, Equatable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         
-        self.address = try? container.decodeIfPresent(String.self, forKey: .address)
-        self.delegationDeposit = try container.decodeIfPresent(Int.self, forKey: .delegationDeposit) ?? 0
+        self.address = try container
+            .decodeIfPresent(String.self, forKey: .address)!
+        self.stakeRegistrationDeposit = try container.decodeIfPresent(Int.self, forKey: .stakeRegistrationDeposit) ?? 0
         self.rewardAccountBalance = try container.decodeIfPresent(Int.self, forKey: .rewardAccountBalance) ?? 0
         self.stakeDelegation = try? container.decodeIfPresent(String.self, forKey: .stakeDelegation)
         self.voteDelegation = try? container.decodeIfPresent(String.self, forKey: .voteDelegation)
@@ -57,7 +65,7 @@ public struct StakeAddressInfo: Codable, Equatable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         
         try container.encodeIfPresent(address, forKey: .address)
-        try container.encode(delegationDeposit, forKey: .delegationDeposit)
+        try container.encode(stakeRegistrationDeposit, forKey: .stakeRegistrationDeposit)
         try container.encode(rewardAccountBalance, forKey: .rewardAccountBalance)
         try container.encodeIfPresent(stakeDelegation, forKey: .stakeDelegation)
         try container.encodeIfPresent(voteDelegation, forKey: .voteDelegation)

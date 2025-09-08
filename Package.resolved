@@ -1,5 +1,5 @@
 {
-  "originHash" : "11df659b69817cddece9410beecd5c93aa5729d5c9ed70b73b46d3049f8fc488",
+  "originHash" : "055c263954f7a38252689451d5fa4c6a00b2d845a240294ccd41f15b3155eeed",
   "pins" : [
     {
       "identity" : "base32",
@@ -105,8 +105,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/Kingpin-Apps/swift-blockfrost-api.git",
       "state" : {
-        "revision" : "2a26ef262e95a652dfd81d5aab8e1ba41c7fd57f",
-        "version" : "0.1.3"
+        "revision" : "922709777c2381569c6da0dd1925204f8f5ffd1b",
+        "version" : "0.1.4"
       }
     },
     {
