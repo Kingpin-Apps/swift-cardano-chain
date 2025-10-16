@@ -18,8 +18,8 @@ public protocol ChainContext {
     /// Get chain genesis parameters
     var genesisParameters: () async throws -> GenesisParameters { get }
     
-    /// Get current network
-    var network: SwiftCardanoCore.Network { get }
+    /// Get current network id
+    var networkId: NetworkId { get }
     
     /// Current epoch number
     var epoch: () async throws -> Int { get }

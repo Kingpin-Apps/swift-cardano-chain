@@ -7,12 +7,12 @@ import SwiftBlockfrostAPI
 @Suite("Blockfrost Chain Context Tests",)
 struct BlockfrostChainContextTests {
     @Test("Test Initialization", arguments: [
-        (SwiftCardanoChain.Network.mainnet, SwiftCardanoCore.Network.mainnet),
-        (SwiftCardanoChain.Network.preprod, SwiftCardanoCore.Network.testnet),
-        (SwiftCardanoChain.Network.preview, SwiftCardanoCore.Network.testnet),
+        (Network.mainnet, NetworkId.mainnet),
+        (Network.preprod, NetworkId.testnet),
+        (Network.preview, NetworkId.testnet),
         
     ])
-    func testInit(_ networks: (SwiftCardanoChain.Network, SwiftCardanoCore.Network)) async throws {
+    func testInit(_ networks: (SwiftCardanoCore.Network, NetworkId)) async throws {
         let chainContext = try await BlockFrostChainContext<Never>(
             projectId: "fake-project-id",
             network: networks.0,
@@ -25,7 +25,7 @@ struct BlockfrostChainContextTests {
         )
         
         let epoch = try await chainContext.epoch()
-        let network = chainContext.network
+        let network = chainContext.networkId
         
         #expect(network == networks.1)
         #expect(epoch == 500)
@@ -173,13 +173,11 @@ struct BlockfrostChainContextTests {
             stakeAddressInfo[0].rewardAccountBalance == 319154618165
         )
         #expect(
-            stakeAddressInfo[0].stakeDelegation == "pool1pu5jlj4q9w9jlxeu370a3c9myx47md5j5m2str0naunn2q3lkdy"
+            stakeAddressInfo[0].stakeDelegation?.bech32 == "pool1pu5jlj4q9w9jlxeu370a3c9myx47md5j5m2str0naunn2q3lkdy"
         )
         #expect(
-            stakeAddressInfo[0].voteDelegation == nil
-        )
-        #expect(
-            stakeAddressInfo[0].delegateRepresentative == "drep15cfxz9exyn5rx0807zvxfrvslrjqfchrd4d47kv9e0f46uedqtc"
+            try stakeAddressInfo[0].voteDelegation?
+                .id() == "drep15cfxz9exyn5rx0807zvxfrvslrjqfchrd4d47kv9e0f46uedqtc"
         )
     }
 }

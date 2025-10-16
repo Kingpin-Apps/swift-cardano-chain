@@ -7,7 +7,7 @@ let package = Package(
     name: "SwiftCardanoChain",
     platforms: [
       .iOS(.v14),
-      .macOS(.v14),
+      .macOS(.v15),
       .watchOS(.v7),
       .tvOS(.v14),
     ],
@@ -18,8 +18,9 @@ let package = Package(
             targets: ["SwiftCardanoChain"]),
     ],
     dependencies: [
-        .package(url: "https://github.com/Kingpin-Apps/swift-cardano-core.git", .upToNextMinor(from: "0.1.32")),
-        .package(url: "https://github.com/Kingpin-Apps/swift-blockfrost-api.git", from: "0.1.4"),
+        .package(url: "https://github.com/Kingpin-Apps/swift-cardano-core.git", .upToNextMinor(from: "0.2.4")),
+        .package(url: "https://github.com/Kingpin-Apps/swift-cardano-utils.git", .upToNextMinor(from: "0.1.9")),
+        .package(url: "https://github.com/Kingpin-Apps/swift-blockfrost-api.git", from: "0.1.5"),
         .package(url: "https://github.com/KINGH242/PotentCodables.git", .upToNextMinor(from: "3.6.0")),
     ],
     targets: [
@@ -30,6 +31,7 @@ let package = Package(
             dependencies: [
                 "PotentCodables",
                 .product(name: "SwiftCardanoCore", package: "swift-cardano-core"),
+                .product(name: "SwiftCardanoUtils", package: "swift-cardano-utils"),
                 .product(name: "SwiftBlockfrostAPI", package: "swift-blockfrost-api"),
             ]
         ),

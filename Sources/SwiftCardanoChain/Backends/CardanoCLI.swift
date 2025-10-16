@@ -2,166 +2,16 @@ import Foundation
 import PotentCBOR
 import PotentCodables
 import SwiftCardanoCore
+import SwiftCardanoUtils
 
-/// Structure representing the chain tip
-public struct ChainTip: Codable {
-    let block: Int
-    let epoch: Int
-    let era: String
-    let hash: String
-    let slot: Int
-    let slotInEpoch: Int
-    let slotsToEpochEnd: Int
-    let syncProgress: String
-}
-
-public protocol CLIClient {
-    var binary: URL { get }
-    var socket: URL? { get }
-    
-    func runCommand(_ cmd: [String]) throws -> String
-    static func getCardanoCliPath() -> URL?
-}
-
-public struct CardanoCLIClient: CLIClient {
-    public let binary: URL
-    public let socket: URL?
-    
-    /// Initialize a new CardanoCLIClient
-    /// - Parameters:
-    ///  - binary: Path to the cardano-cli binary. If nil, it will
-    ///  attempt to find it in the system PATH.
-    ///  - socket: Path to the cardano-node socket. If nil, it will
-    ///  attempt to read it from the CARDANO_NODE_SOCKET_PATH environment variable.
-    ///  - Throws: CardanoChainError if the binary or socket are not found or invalid.
-    ///  Note: If both parameters are nil, the initializer will attempt to
-    ///  find the binary in the system PATH and read the socket from
-    ///  the CARDANO_NODE_SOCKET_PATH environment variable.
-    ///
-    ///  - Important: The CARDANO_NODE_SOCKET_PATH environment variable
-    ///  will be set to the provided socket path or the value from the
-    ///  environment variable if socket is nil.
-    public init(binary: URL?, socket: URL?) throws {
-        if let binary = binary {
-            // Check if the binary exists
-            var isDirectory: ObjCBool = false
-            if !FileManager.default.fileExists(atPath: binary.path, isDirectory: &isDirectory)
-                || isDirectory.boolValue
-            {
-                throw CardanoChainError.cardanoCLIError("cardano-cli binary file not found: \(binary.path)")
-            }
-            
-            // Check if is executable
-            if !FileManager.default.isExecutableFile(atPath: binary.path) {
-                throw CardanoChainError.cardanoCLIError("cardano-cli binary file is not executable: \(binary.path)")
-            }
-            
-            self.binary = binary
-        } else if let binary = Self.getCardanoCliPath() {
-            self.binary = binary
-        } else {
-            throw CardanoChainError.cardanoCLIError("cardano-cli binary not found")
-        }
-        
-        var isDirectory: ObjCBool = false
-        if socket != nil {
-            if !FileManager.default
-                .fileExists(
-                    atPath: socket!.path,
-                    isDirectory: &isDirectory
-                ) {
-                throw CardanoChainError.cardanoCLIError("cardano-node socket not found: \(socket!.path)")
-            } else if isDirectory.boolValue {
-                throw CardanoChainError.cardanoCLIError("\(socket!.path) is not a socket file")
-            }
-            self.socket = socket
-        } else if let socket = ProcessInfo.processInfo.environment["CARDANO_NODE_SOCKET_PATH"] {
-            self.socket = URL(fileURLWithPath: socket)
-        } else {
-            throw CardanoChainError.cardanoCLIError("CARDANO_NODE_SOCKET_PATH not set")
-        }
-        
-        setenv("CARDANO_NODE_SOCKET_PATH", self.socket!.path, 1)
-    }
-    
-    /// Get the path to the cardano-cli binary using `which cardano-cli`
-    /// - Returns: URL to the cardano-cli binary or nil if not found
-    /// - Note: This method relies on the system's PATH environment variable
-    public static func getCardanoCliPath() -> URL? {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/which")
-        process.arguments = ["cardano-cli"]
-        
-        let outputPipe = Pipe()
-        let errorPipe = Pipe()
-        
-        process.standardOutput = outputPipe
-        process.standardError = errorPipe
-        process.environment = ProcessInfo.processInfo.environment
-
-        do {
-            try process.run()
-            process.waitUntilExit()
-            
-            if process.terminationStatus == 0 {
-                let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
-                if let outputString = String(data: outputData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines), !outputString.isEmpty {
-                    return URL(fileURLWithPath: outputString)
-                }
-            } else {
-                let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
-                let errorMessage = String(data: errorData, encoding: .utf8) ?? "Unknown error"
-                print("Failed to run command: \(errorMessage)")
-            }
-        } catch {
-            print("Failed to run command: \(error.localizedDescription)")
-        }
-        
-        return nil
-    }
-    
-    /// Run a command using the cardano-cli
-    ///
-    /// - Parameter cmd: Command as an array of strings
-    /// - Returns: The stdout if the command runs successfully
-    /// - Throws: CardanoChainError if the command fails
-    public func runCommand(_ cmd: [String]) throws -> String {
-        let process = Process()
-        process.executableURL = self.binary
-        process.arguments = cmd
-
-        let outputPipe = Pipe()
-        let errorPipe = Pipe()
-        process.standardOutput = outputPipe
-        process.standardError = errorPipe
-
-        do {
-            try process.run()
-            process.waitUntilExit()
-
-            if process.terminationStatus == 0 {
-                let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
-                return String(data: outputData, encoding: .utf8)?.trimmingCharacters(
-                    in: .whitespacesAndNewlines) ?? ""
-            } else {
-                let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
-                let errorMessage = String(data: errorData, encoding: .utf8) ?? "Unknown error"
-                throw CardanoChainError.valueError(errorMessage)
-            }
-        } catch {
-            throw CardanoChainError.valueError(
-                "Failed to run command: \(error.localizedDescription): \(cmd)")
-        }
-    }
-}
 
 /// A Cardano CLI wrapper for interacting with the Cardano blockchain
 public class CardanoCliChainContext<T: CBORSerializable & Hashable>: ChainContext {
     public typealias ReedemerType = T
     
     // MARK: - Properties
-
-    private let client: any CLIClient
+    
+    private let cli: CardanoCLI
     private let configFile: URL
     private var lastKnownBlockSlot: Int = 0
     private var lastChainTipFetch: TimeInterval = 0
@@ -170,19 +20,14 @@ public class CardanoCliChainContext<T: CBORSerializable & Hashable>: ChainContex
     private var datumCache: [String: Any]
     private let cache = Cache<String, Int>()
     private let cacheTTL: TimeInterval = 1.0  // 1 second TTL
-    private let _network: SwiftCardanoChain.Network
+    private let _network: Network
     private var _genesisParameters: GenesisParameters?
     private var _protocolParameters: ProtocolParameters?
 
     // MARK: - ChainContext Protocol Properties
 
-    public var network: SwiftCardanoCore.Network {
-        switch self._network {
-        case .mainnet:
-            return .mainnet
-        default:
-            return .testnet
-        }
+    public var networkId: NetworkId {
+        self._network.networkId
     }
 
     public lazy var era: () async throws -> String = { [weak self] in
@@ -190,7 +35,7 @@ public class CardanoCliChainContext<T: CBORSerializable & Hashable>: ChainContex
             throw CardanoChainError.valueError("Self is nil")
         }
 
-        let chainTip = try self.queryChainTip()
+        let chainTip = try await cli.query.tip()
         return chainTip.era
     }
 
@@ -199,7 +44,7 @@ public class CardanoCliChainContext<T: CBORSerializable & Hashable>: ChainContex
             throw CardanoChainError.valueError("Self is nil")
         }
         
-        let chainTip = try self.queryChainTip()
+        let chainTip = try await cli.query.tip()
         return chainTip.epoch
     }
 
@@ -214,7 +59,7 @@ public class CardanoCliChainContext<T: CBORSerializable & Hashable>: ChainContex
             return cachedValue
         }
 
-        let chainTip = try self.queryChainTip()
+        let chainTip = try await cli.query.tip()
         let slot = chainTip.slot
 
         // Update cache
@@ -249,8 +94,8 @@ public class CardanoCliChainContext<T: CBORSerializable & Hashable>: ChainContex
             throw CardanoChainError.valueError("Self is nil")
         }
 
-        if try self.isChainTipUpdated() || self._protocolParameters == nil {
-            self._protocolParameters = try self.queryCurrentProtocolParams()
+        if try await self.isChainTipUpdated() || self._protocolParameters == nil {
+            self._protocolParameters = try await self.queryCurrentProtocolParams()
         }
 
         return self._protocolParameters!
@@ -273,12 +118,12 @@ public class CardanoCliChainContext<T: CBORSerializable & Hashable>: ChainContex
         configFile: URL,
         binary: URL? = nil,
         socket: URL? = nil,
-        network: SwiftCardanoChain.Network? = .mainnet,
+        network: Network? = .mainnet,
         refetchChainTipInterval: TimeInterval? = nil,
         utxoCacheSize: Int = 10000,
         datumCacheSize: Int = 10000,
-        client: (any CLIClient)? = nil
-    ) throws {
+        cli: CardanoCLI? = nil
+    ) async throws {
         
         self.configFile = configFile
         self.refetchChainTipInterval = refetchChainTipInterval ?? 1000
@@ -286,10 +131,12 @@ public class CardanoCliChainContext<T: CBORSerializable & Hashable>: ChainContex
         self.datumCache = [:]
         self._network = network ?? .mainnet
         
-        if client != nil {
-            self.client = client!
+        if let cli = cli {
+            self.cli = cli
         } else {
-            self.client = try CardanoCLIClient(binary: nil, socket: nil)
+            self.cli = try await CardanoCLI(
+                configuration: Config.default()
+            )
         }
     }
 
@@ -297,25 +144,20 @@ public class CardanoCliChainContext<T: CBORSerializable & Hashable>: ChainContex
     ///
     /// - Returns: The chain tip as a dictionary
     /// - Throws: CardanoChainError if the query fails
-    private func queryChainTip() throws -> ChainTip {
-        let result = try client.runCommand(["query", "tip"] + self._network.arguments)
-        guard let data = result.data(using: .utf8),
-              let chainTip = try? JSONDecoder().decode(ChainTip.self, from: data)
-        else {
-            throw CardanoChainError.valueError("Failed to parse chain tip JSON")
-        }
+    private func queryChainTip() async throws -> ChainTip {
+        let result = try await cli.query.tip()
 
         self.lastChainTipFetch = Date().timeIntervalSince1970
 
-        return chainTip
+        return result
     }
 
     /// Query the current protocol parameters
     ///
     /// - Returns: The protocol parameters as a dictionary
     /// - Throws: CardanoChainError if the query fails
-    private func queryCurrentProtocolParams() throws -> ProtocolParameters {
-        let result = try client.runCommand(["query", "protocol-parameters"] + self._network.arguments)
+    private func queryCurrentProtocolParams() async throws -> ProtocolParameters {
+        let result = try await cli.query.protocolParameters()
         guard let data = result.data(using: .utf8) else {
             throw CardanoChainError.valueError("Failed to parse protocol parameters JSON")
         }
@@ -329,13 +171,13 @@ public class CardanoCliChainContext<T: CBORSerializable & Hashable>: ChainContex
     ///
     /// - Returns: True if the chain tip has been updated, false otherwise
     /// - Throws: CardanoChainError if the query fails
-    private func isChainTipUpdated() throws -> Bool {
+    private func isChainTipUpdated() async throws -> Bool {
         // Fetch at almost every refetchChainTipInterval seconds
         if Date().timeIntervalSince1970 - lastChainTipFetch < refetchChainTipInterval {
             return false
         }
 
-        let chainTip = try queryChainTip()
+        let chainTip = try await queryChainTip()
 
         return Double(chainTip.syncProgress) != 100.0
     }
@@ -403,106 +245,7 @@ public class CardanoCliChainContext<T: CBORSerializable & Hashable>: ChainContex
         }
 
         // Query the UTxOs
-        let result = try client.runCommand(
-            ["query", "utxo", "--address", address.toBech32(), "--out-file", "/dev/stdout"]
-                + self._network.arguments
-        )
-
-        guard let data = result.data(using: .utf8),
-            let rawUtxos = try? JSONSerialization.jsonObject(with: data, options: [])
-                as? [String: [String: Any]]
-        else {
-            throw CardanoChainError.valueError("Failed to parse UTxOs JSON")
-        }
-
-        var utxos: [UTxO] = []
-
-        for (txHash, utxo) in rawUtxos {
-            let parts = txHash.split(separator: "#")
-            guard parts.count == 2,
-                let txIdx = Int(parts[1])
-            else {
-                continue
-            }
-
-            let txId = String(parts[0])
-            let txIn = TransactionInput(
-                transactionId: try TransactionId(from: .string(txId)),
-                index: UInt16(txIdx)
-            )
-
-            guard let utxoValue = utxo["value"] as? [String: Any] else {
-                continue
-            }
-
-            var value = Value(coin: 0)
-            var multiAsset = MultiAsset([:])
-
-            for (asset, amount) in utxoValue {
-                if asset == "lovelace" {
-                    if let lovelace = amount as? Int {
-                        value.coin = Int(lovelace)
-                    }
-                } else {
-                    let policyId = asset
-
-                    guard let assets = amount as? [String: Int] else {
-                        continue
-                    }
-
-                    for (assetHexName, assetAmount) in assets {
-                        // Create Asset and add to MultiAsset
-                        let policy = try ScriptHash(from: .string(policyId))
-                        let assetName = AssetName(from: assetHexName)
-
-                        // Initialize the Asset for this policy if it doesn't exist
-                        if multiAsset[policy] == nil {
-                            multiAsset[policy] = Asset([:])
-                        }
-                        // Add the asset to the policy
-                        multiAsset[policy]?[assetName] = assetAmount
-                    }
-                }
-            }
-
-            // Set the multi-asset on the value
-            value.multiAsset = multiAsset
-
-            // Handle datum hash
-            var datumHash: DatumHash? = nil
-            if let datumHashStr = utxo["datumhash"] as? String {
-                datumHash = try DatumHash(from: .string(datumHashStr))
-            }
-
-            // Handle datum
-            var datum: Datum? = nil
-            if let datumStr = utxo["datum"] as? String, let datumData = Data(hexString: datumStr) {
-                datum = .cbor(CBOR(datumData))
-            } else if let inlineDatum = utxo["inlineDatum"] as? [AnyValue: AnyValue] {
-                // Convert inline datum dictionary to RawPlutusData
-                // This would require proper implementation of RawPlutusData.fromDict
-                datum = .dict(inlineDatum)
-            }
-
-            // Handle reference script
-            var script: ScriptType? = nil
-            if let referenceScript = utxo["referenceScript"] as? [String: Any] {
-                script = try await getScript(from: referenceScript)
-            }
-
-            let address = try Address(
-                from: .string(utxo["address"] as! String)
-            )
-            let txOut = TransactionOutput(
-                address: address,
-                amount: value,
-                datumHash: datumHash,
-                datum: datum,
-                script: script
-            )
-
-            utxos.append(UTxO(input: txIn, output: txOut))
-        }
+        let utxos = try await cli.utxos(address: address)
 
         // Cache the UTxOs
         utxoCache[cacheKey] = (utxos, Date().timeIntervalSince1970)
@@ -541,30 +284,19 @@ public class CardanoCliChainContext<T: CBORSerializable & Hashable>: ChainContex
 
         // Submit the transaction
         do {
-            let _ = try client.runCommand(
-                ["transaction", "submit", "--tx-file", tempFile.path] + self._network.arguments)
+            let _ = try await cli.transaction.submit(arguments: ["--tx-file", tempFile.path])
         } catch {
-            do {
-                let _ = try client.runCommand(
-                    ["latest", "transaction", "submit", "--tx-file", tempFile.path]
-                        + self._network.arguments)
-            } catch {
-                throw CardanoChainError.transactionFailed(
-                    "Failed to submit transaction: \(error.localizedDescription)")
-            }
+            throw CardanoChainError.transactionFailed(
+                "Failed to submit transaction: \(error.localizedDescription)")
         }
 
         // Get the transaction ID
         var txid: String
         do {
-            txid = try client.runCommand(["transaction", "txid", "--tx-file", tempFile.path])
+            txid = try await cli.transaction.txId(arguments: ["--tx-file", tempFile.path])
         } catch {
-            do {
-                txid = try client.runCommand(["latest", "transaction", "txid", "--tx-file", tempFile.path])
-            } catch {
-                throw CardanoChainError.valueError(
-                    "Unable to get transaction id for \(tempFile.path)")
-            }
+            throw CardanoChainError.valueError(
+                "Unable to get transaction id for \(tempFile.path)")
         }
 
         return txid
@@ -576,41 +308,15 @@ public class CardanoCliChainContext<T: CBORSerializable & Hashable>: ChainContex
     /// - Returns: List of StakeAddressInfo objects
     /// - Throws: CardanoChainError if the query fails
     public func stakeAddressInfo(address: Address) async throws -> [StakeAddressInfo] {
-        let result = try client.runCommand(
-            [
-                "query",
-                "stake-address-info",
-                "--address",
-                address.toBech32(),
-                "--out-file",
-                "/dev/stdout",
-            ] + self._network.arguments)
-
-        guard let data = result.data(using: .utf8),
-            let infoArray = try? JSONSerialization.jsonObject(with: data, options: [])
-                as? [[String: Any]]
-        else {
-            throw CardanoChainError.valueError("Failed to parse stake address info JSON")
-        }
-
-        return try infoArray.map { rewardsState in
-            StakeAddressInfo(
-                address: try address.toBech32(),
-                rewardAccountBalance: rewardsState["rewardAccountBalance"] as? Int ?? 0,
-                delegationDeposit: rewardsState["delegationDeposit"] as? Int ?? 0,
-                stakeDelegation: rewardsState["stakeDelegation"] as? String,
-                voteDelegation: rewardsState["voteDelegation"] as? String,
-                delegateRepresentative: nil
-            )
-        }
+        return try await cli.stakeAddressInfo(address: address)
     }
 
     /// Get the cardano-cli version
     ///
     /// - Returns: The cardano-cli version
     /// - Throws: CardanoChainError if the query fails
-    public func version() throws -> String {
-        return try client.runCommand(["version"])
+    public func version() async throws -> String {
+        return try await cli.version()
     }
 
     /// Evaluate execution units of a transaction

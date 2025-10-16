@@ -20,10 +20,10 @@ public class BlockFrostChainContext<T: CBORSerializable & Hashable>: ChainContex
     private var _epoch: Int?
     private var _genesisParam: GenesisParameters?
     private var _protocolParam: ProtocolParameters?
-    private let _network: SwiftCardanoChain.Network
+    private let _network: SwiftCardanoCore.Network
     
-    public var network: SwiftCardanoCore.Network {
-        return _network.network
+    public var networkId: NetworkId {
+        self._network.networkId
     }
     
     public lazy var epoch: () async throws -> Int = { [weak self] in
@@ -184,7 +184,7 @@ public class BlockFrostChainContext<T: CBORSerializable & Hashable>: ChainContex
 
     public init(
         projectId: String? = nil,
-        network: SwiftCardanoChain.Network? = .mainnet,
+        network: SwiftCardanoCore.Network? = .mainnet,
         basePath: String? = nil,
         environmentVariable: String? = nil,
         client: Client? = nil,
@@ -519,8 +519,12 @@ public class BlockFrostChainContext<T: CBORSerializable & Hashable>: ChainContex
                     rewardAccountBalance: Int(
                         stakeInfo.withdrawableAmount
                     )!,
-                    stakeDelegation: stakeInfo.poolId,
-                    delegateRepresentative: stakeInfo.drepId
+                    stakeDelegation: stakeInfo.poolId != nil ? try PoolId(
+                        from: stakeInfo.poolId!
+                    ) : nil,
+                    voteDelegation: stakeInfo.drepId != nil ? try DRep(
+                        from: stakeInfo.drepId!
+                    ) : nil,
                 )
             ]
         } catch {

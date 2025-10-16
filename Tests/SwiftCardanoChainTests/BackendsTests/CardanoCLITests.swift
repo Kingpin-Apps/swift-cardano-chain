@@ -1,6 +1,9 @@
 import Testing
 import Foundation
 import SwiftCardanoCore
+import SwiftCardanoUtils
+import Mockable
+import Command
 @testable import SwiftCardanoChain
 
 @Suite("CardanoCLI Chain Context Tests")
@@ -11,44 +14,59 @@ struct CardanoCLIContextTests {
         inDirectory: "data")
     
     @Test("Test Initialization", arguments: [
-        (SwiftCardanoChain.Network.mainnet, SwiftCardanoCore.Network.mainnet),
-        (SwiftCardanoChain.Network.preprod, SwiftCardanoCore.Network.testnet),
-        (SwiftCardanoChain.Network.preview, SwiftCardanoCore.Network.testnet),
+        (Network.mainnet, NetworkId.mainnet),
+        (Network.preprod, NetworkId.testnet),
+        (Network.preview, NetworkId.testnet),
         
     ])
-    func testInit(_ networks: (SwiftCardanoChain.Network, SwiftCardanoCore.Network)) async throws {
-        let chainContext = try CardanoCliChainContext<Never>(
+    func testInit(_ networks: (Network, NetworkId)) async throws {
+        let config = createMockConfig()
+        let runner = createCardaonCLIMockCommandRunner(config: config)
+        
+        let cli = try await CardanoCLI(configuration: config, commandRunner: runner)
+        
+        let chainContext = try await CardanoCliChainContext<Never>(
             configFile: URL(fileURLWithPath: configFilePath!),
             network: networks.0,
-            client: MockCardanoCLIClient()
+            cli: cli
         )
         
         let epoch = try await chainContext.epoch()
-        let network = chainContext.network
+        let network = chainContext.networkId
         
         #expect(network == networks.1)
-        #expect(epoch == 500)
+        #expect(epoch == 450)
     }
     
     @Test("Test lastBlockSlot")
     func testLastBlockSlot() async throws {
-        let chainContext = try CardanoCliChainContext<Never>(
+        let config = createMockConfig()
+        let runner = createCardaonCLIMockCommandRunner(config: config)
+        
+        let cli = try await CardanoCLI(configuration: config, commandRunner: runner)
+        
+        let chainContext = try await CardanoCliChainContext<Never>(
             configFile: URL(fileURLWithPath: configFilePath!),
             network: .preview,
-            client: MockCardanoCLIClient()
+            cli: cli
         )
         
         let lastBlockSlot = try await chainContext.lastBlockSlot()
         
-        #expect(lastBlockSlot == 41008115)
+        #expect(lastBlockSlot == 123456789)
     }
     
     @Test("Test genesisParameters")
     func testGenesisParameters() async throws {
-        let chainContext = try CardanoCliChainContext<Never>(
+        let config = createMockConfig()
+        let runner = createCardaonCLIMockCommandRunner(config: config)
+        
+        let cli = try await CardanoCLI(configuration: config, commandRunner: runner)
+        
+        let chainContext = try await CardanoCliChainContext<Never>(
             configFile: URL(fileURLWithPath: configFilePath!),
             network: .preview,
-            client: MockCardanoCLIClient()
+            cli: cli
         )
         
         let genesisParameters = try await chainContext.genesisParameters()
@@ -68,10 +86,30 @@ struct CardanoCLIContextTests {
     
     @Test("Test protocolParameters")
     func testProtocolParameters() async throws {
-        let chainContext = try CardanoCliChainContext<Never>(
+        let config = createMockConfig()
+        let runner = createCardaonCLIMockCommandRunner(config: config)
+        
+        given(runner)
+            .run(
+                arguments: .value([config.cardano.cli!.string] + CLICommands.protocolParams),
+                environment: .any,
+                workingDirectory: .any
+            )
+            .willReturn(
+                AsyncThrowingStream<CommandEvent, any Error> { continuation in
+                    continuation.yield(
+                        .standardOutput([UInt8](CLIResponse.protocolParams.utf8))
+                    )
+                    continuation.finish()
+                }
+            )
+        
+        let cli = try await CardanoCLI(configuration: config, commandRunner: runner)
+        
+        let chainContext = try await CardanoCliChainContext<Never>(
             configFile: URL(fileURLWithPath: configFilePath!),
             network: .preview,
-            client: MockCardanoCLIClient()
+            cli: cli
         )
         
         let protocolParameters = try await chainContext.protocolParameters()
@@ -82,10 +120,30 @@ struct CardanoCLIContextTests {
     
     @Test("Test utxos")
     func testUTxOs() async throws {
-        let chainContext = try CardanoCliChainContext<Never>(
+        let config = createMockConfig()
+        let runner = createCardaonCLIMockCommandRunner(config: config)
+        
+        given(runner)
+            .run(
+                arguments: .value([config.cardano.cli!.string] + CLICommands.utxos),
+                environment: .any,
+                workingDirectory: .any
+            )
+            .willReturn(
+                AsyncThrowingStream<CommandEvent, any Error> { continuation in
+                    continuation.yield(
+                        .standardOutput([UInt8](CLIResponse.utxos.utf8))
+                    )
+                    continuation.finish()
+                }
+            )
+        
+        let cli = try await CardanoCLI(configuration: config, commandRunner: runner)
+        
+        let chainContext = try await CardanoCliChainContext<Never>(
             configFile: URL(fileURLWithPath: configFilePath!),
             network: .preview,
-            client: MockCardanoCLIClient()
+            cli: cli
         )
         
         let address = try Address(
@@ -103,10 +161,140 @@ struct CardanoCLIContextTests {
     
     @Test("Test submitTxCBOR")
     func testSubmitTxCBOR() async throws {
-        let chainContext = try CardanoCliChainContext<Never>(
+        let config = createMockConfig()
+        let runner = createCardaonCLIMockCommandRunner(config: config)
+        
+        given(runner)
+            .run(
+                arguments: .value([config.cardano.cli!.string] + CLICommands.queryTip),
+                environment: .any,
+                workingDirectory: .any
+            )
+            .willReturn(
+                AsyncThrowingStream<CommandEvent, any Error> { continuation in
+                    continuation.yield(
+                        .standardOutput([UInt8](CLIResponse.tip100.utf8))
+                    )
+                    continuation.finish()
+                }
+            )
+            .run(
+                arguments: .any,
+                environment: .any,
+                workingDirectory: .any
+            )
+            .willReturn(
+                AsyncThrowingStream<CommandEvent, any Error> { continuation in
+                    continuation.yield(
+                        .standardOutput([])
+                    )
+                    continuation.finish()
+                }
+            )
+            .run(
+                arguments: .any,
+                environment: .any,
+                workingDirectory: .any
+            )
+            .willReturn(
+                AsyncThrowingStream<CommandEvent, any Error> { continuation in
+                    continuation.yield(
+                        .standardOutput(
+                            [UInt8]("d1662b24fa9fe985fc2dce47455df399cb2e31e1e1819339e885801cc3578908".utf8)
+                        )
+                    )
+                    continuation.finish()
+                }
+            )
+            .run(
+                arguments: .value([config.cardano.cli!.string] + CLICommands.queryTip),
+                environment: .any,
+                workingDirectory: .any
+            )
+            .willReturn(
+                AsyncThrowingStream<CommandEvent, any Error> { continuation in
+                    continuation.yield(
+                        .standardOutput([UInt8](CLIResponse.tip100.utf8))
+                    )
+                    continuation.finish()
+                }
+            )
+            .run(
+                arguments: .any,
+                environment: .any,
+                workingDirectory: .any
+            )
+            .willReturn(
+                AsyncThrowingStream<CommandEvent, any Error> { continuation in
+                    continuation.yield(
+                        .standardOutput([])
+                    )
+                    continuation.finish()
+                }
+            )
+            .run(
+                arguments: .any,
+                environment: .any,
+                workingDirectory: .any
+            )
+            .willReturn(
+                AsyncThrowingStream<CommandEvent, any Error> { continuation in
+                    continuation.yield(
+                        .standardOutput(
+                            [UInt8]("d1662b24fa9fe985fc2dce47455df399cb2e31e1e1819339e885801cc3578908".utf8)
+                        )
+                    )
+                    continuation.finish()
+                }
+            )
+            .run(
+                arguments: .value([config.cardano.cli!.string] + CLICommands.queryTip),
+                environment: .any,
+                workingDirectory: .any
+            )
+            .willReturn(
+                AsyncThrowingStream<CommandEvent, any Error> { continuation in
+                    continuation.yield(
+                        .standardOutput([UInt8](CLIResponse.tip100.utf8))
+                    )
+                    continuation.finish()
+                }
+            )
+            .run(
+                arguments: .any,
+                environment: .any,
+                workingDirectory: .any
+            )
+            .willReturn(
+                AsyncThrowingStream<CommandEvent, any Error> { continuation in
+                    continuation.yield(
+                        .standardOutput([])
+                    )
+                    continuation.finish()
+                }
+            )
+            .run(
+                arguments: .any,
+                environment: .any,
+                workingDirectory: .any
+            )
+            .willReturn(
+                AsyncThrowingStream<CommandEvent, any Error> { continuation in
+                    continuation.yield(
+                        .standardOutput(
+                            [UInt8]("d1662b24fa9fe985fc2dce47455df399cb2e31e1e1819339e885801cc3578908".utf8)
+                        )
+                    )
+                    continuation.finish()
+                }
+            )
+        
+        let cli = try await CardanoCLI(configuration: config, commandRunner: runner)
+        
+        let chainContext = try await CardanoCliChainContext<Never>(
             configFile: URL(fileURLWithPath: configFilePath!),
             network: .preview,
-            client: MockCardanoCLIClient()
+            cli: cli
         )
         
         let txCBOR = "84a70081825820b35a4ba9ef3ce21adcd6879d08553642224304704d206c74d3ffb3e6eed3ca28000d80018182581d60cc30497f4ff962f4c1dca54cceefe39f86f1d7179668009f8eb71e598200a1581cec8b7d1dd0b124e8333d3fa8d818f6eac068231a287554e9ceae490ea24f5365636f6e6454657374746f6b656e1a009896804954657374746f6b656e1a00989680021a000493e00e8009a1581cec8b7d1dd0b124e8333d3fa8d818f6eac068231a287554e9ceae490ea24f5365636f6e6454657374746f6b656e1a009896804954657374746f6b656e1a00989680075820592a2df0e091566969b3044626faa8023dabe6f39c78f33bed9e105e55159221a200828258206443a101bdb948366fc87369336224595d36d8b0eee5602cba8b81a024e584735840846f408dee3b101fda0f0f7ca89e18b724b7ca6266eb29775d3967d6920cae7457accb91def9b77571e15dd2ede38b12cf92496ce7382fa19eb90ab7f73e49008258205797dc2cc919dfec0bb849551ebdf30d96e5cbe0f33f734a87fe826db30f7ef95840bdc771aa7b8c86a8ffcbe1b7a479c68503c8aa0ffde8059443055bf3e54b92f4fca5e0b9ca5bb11ab23b1390bb9ffce414fa398fc0b17f4dc76fe9f7e2c99c09018182018482051a075bcd1582041a075bcd0c8200581c9139e5c0a42f0f2389634c3dd18dc621f5594c5ba825d9a8883c66278200581c835600a2be276a18a4bebf0225d728f090f724f4c0acd591d066fa6ff5d90103a100a11902d1a16b7b706f6c6963795f69647da16d7b706f6c6963795f6e616d657da66b6465736372697074696f6e6a3c6f7074696f6e616c3e65696d6167656a3c72657175697265643e686c6f636174696f6ea367617277656176656a3c6f7074696f6e616c3e6568747470736a3c6f7074696f6e616c3e64697066736a3c72657175697265643e646e616d656a3c72657175697265643e667368613235366a3c72657175697265643e64747970656a3c72657175697265643e"
@@ -130,10 +318,30 @@ struct CardanoCLIContextTests {
     
     @Test("Test stakeAddressInfo")
     func testStakeAddressInfo() async throws {
-        let chainContext = try CardanoCliChainContext<Never>(
+        let config = createMockConfig()
+        let runner = createCardaonCLIMockCommandRunner(config: config)
+        
+        given(runner)
+            .run(
+                arguments: .value([config.cardano.cli!.string] + CLICommands.stakeAddressInfo),
+                environment: .any,
+                workingDirectory: .any
+            )
+            .willReturn(
+                AsyncThrowingStream<CommandEvent, any Error> { continuation in
+                    continuation.yield(
+                        .standardOutput([UInt8](CLIResponse.stakeAddressInfo.utf8))
+                    )
+                    continuation.finish()
+                }
+            )
+        
+        let cli = try await CardanoCLI(configuration: config, commandRunner: runner)
+        
+        let chainContext = try await CardanoCliChainContext<Never>(
             configFile: URL(fileURLWithPath: configFilePath!),
             network: .preview,
-            client: MockCardanoCLIClient()
+            cli: cli
         )
         
         let address = try Address(
@@ -148,19 +356,17 @@ struct CardanoCLIContextTests {
             stakeAddressInfo[0].address == "stake_test1upyz3gk6mw5he20apnwfn96cn9rscgvmmsxc9r86dh0k66gswf59n"
         )
         #expect(
-            stakeAddressInfo[0].stakeRegistrationDeposit == 0
+            stakeAddressInfo[0].stakeRegistrationDeposit == 2000000
         )
         #expect(
-            stakeAddressInfo[0].rewardAccountBalance == 319154618165
+            stakeAddressInfo[0].rewardAccountBalance == 100000000000
         )
         #expect(
-            stakeAddressInfo[0].stakeDelegation == "pool1pu5jlj4q9w9jlxeu370a3c9myx47md5j5m2str0naunn2q3lkdy"
+            stakeAddressInfo[0].stakeDelegation?.bech32 == "pool1m5947rydk4n0ywe6ctlav0ztt632lcwjef7fsy93sflz7ctcx6z"
         )
         #expect(
-            stakeAddressInfo[0].voteDelegation == "keyHash-9be9b6efd0649b354b682f6875174d0ac9056cea40a8da6fd3935d82"
-        )
-        #expect(
-            stakeAddressInfo[0].delegateRepresentative == nil
+            try stakeAddressInfo[0].voteDelegation?
+                .idHex() == "b02f7b335aebf284bbdc20bdc3b59e4e183ae2cfc47ad2d8bc19a241"
         )
     }
 }

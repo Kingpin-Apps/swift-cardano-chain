@@ -1,4 +1,5 @@
 import Testing
+import SwiftCardanoCore
 
 @testable import SwiftCardanoChain
 
