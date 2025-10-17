@@ -1,3 +1,9 @@
+## 0.1.20 (2025-10-16)
+
+### Fix
+
+- add init from cardano config
+
 ## 0.1.19 (2025-10-16)
 
 ### Fix
