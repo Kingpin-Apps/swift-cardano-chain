@@ -4,14 +4,11 @@ import SwiftCardanoCore
 import SwiftCardanoUtils
 import Mockable
 import Command
+import SystemPackage
 @testable import SwiftCardanoChain
 
 @Suite("CardanoCLI Chain Context Tests")
 struct CardanoCLIContextTests {
-    let configFilePath = Bundle.module.path(
-        forResource: "config",
-        ofType: "json",
-        inDirectory: "data")
     
     @Test("Test Initialization", arguments: [
         (Network.mainnet, NetworkId.mainnet),
@@ -26,7 +23,7 @@ struct CardanoCLIContextTests {
         let cli = try await CardanoCLI(configuration: config, commandRunner: runner)
         
         let chainContext = try await CardanoCliChainContext<Never>(
-            configFile: URL(fileURLWithPath: configFilePath!),
+            nodeConfig: FilePath(configFilePath!),
             network: networks.0,
             cli: cli
         )
@@ -46,7 +43,7 @@ struct CardanoCLIContextTests {
         let cli = try await CardanoCLI(configuration: config, commandRunner: runner)
         
         let chainContext = try await CardanoCliChainContext<Never>(
-            configFile: URL(fileURLWithPath: configFilePath!),
+            nodeConfig: FilePath(configFilePath!),
             network: .preview,
             cli: cli
         )
@@ -64,7 +61,7 @@ struct CardanoCLIContextTests {
         let cli = try await CardanoCLI(configuration: config, commandRunner: runner)
         
         let chainContext = try await CardanoCliChainContext<Never>(
-            configFile: URL(fileURLWithPath: configFilePath!),
+            nodeConfig: FilePath(configFilePath!),
             network: .preview,
             cli: cli
         )
@@ -107,7 +104,7 @@ struct CardanoCLIContextTests {
         let cli = try await CardanoCLI(configuration: config, commandRunner: runner)
         
         let chainContext = try await CardanoCliChainContext<Never>(
-            configFile: URL(fileURLWithPath: configFilePath!),
+            nodeConfig: FilePath(configFilePath!),
             network: .preview,
             cli: cli
         )
@@ -141,7 +138,7 @@ struct CardanoCLIContextTests {
         let cli = try await CardanoCLI(configuration: config, commandRunner: runner)
         
         let chainContext = try await CardanoCliChainContext<Never>(
-            configFile: URL(fileURLWithPath: configFilePath!),
+            nodeConfig: FilePath(configFilePath!),
             network: .preview,
             cli: cli
         )
@@ -292,7 +289,7 @@ struct CardanoCLIContextTests {
         let cli = try await CardanoCLI(configuration: config, commandRunner: runner)
         
         let chainContext = try await CardanoCliChainContext<Never>(
-            configFile: URL(fileURLWithPath: configFilePath!),
+            nodeConfig: FilePath(configFilePath!),
             network: .preview,
             cli: cli
         )
@@ -339,7 +336,7 @@ struct CardanoCLIContextTests {
         let cli = try await CardanoCLI(configuration: config, commandRunner: runner)
         
         let chainContext = try await CardanoCliChainContext<Never>(
-            configFile: URL(fileURLWithPath: configFilePath!),
+            nodeConfig: FilePath(configFilePath!),
             network: .preview,
             cli: cli
         )

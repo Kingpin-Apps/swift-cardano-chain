@@ -3,6 +3,7 @@ import PotentCBOR
 import PotentCodables
 import SwiftCardanoCore
 import SwiftCardanoUtils
+import SystemPackage
 
 
 /// A Cardano CLI wrapper for interacting with the Cardano blockchain
@@ -12,7 +13,6 @@ public class CardanoCliChainContext<T: CBORSerializable & Hashable>: ChainContex
     // MARK: - Properties
     
     private let cli: CardanoCLI
-    private let configFile: URL
     private var lastKnownBlockSlot: Int = 0
     private var lastChainTipFetch: TimeInterval = 0
     private var refetchChainTipInterval: TimeInterval
@@ -72,10 +72,14 @@ public class CardanoCliChainContext<T: CBORSerializable & Hashable>: ChainContex
         guard var self = self else {
             throw CardanoChainError.valueError("Self is nil")
         }
+        
+        guard let nodeConfig = self.cli.configuration.cardano.config else {
+            throw CardanoChainError.valueError("Cardano node config is nil")
+        }
 
         if self._genesisParameters == nil {
             self._genesisParameters = try GenesisParameters(
-                nodeConfigFilePath: self.configFile.path
+                nodeConfigFilePath: nodeConfig.string
             )
 
             // Set the refetch chain tip interval if not provided
@@ -106,38 +110,64 @@ public class CardanoCliChainContext<T: CBORSerializable & Hashable>: ChainContex
     /// Initialize a new CardanoCliChainContext
     ///
     /// - Parameters:
-    ///   - configFile: Path to the cardano-node config file
+    ///   - nodeConfig: Path to the cardano-node config file
     ///   - binary: Path to the cardano-cli binary
     ///   - socket: Path to the cardano-node socket
     ///   - network: Network to use
+    ///   - era: Era to use
+    ///   - ttlBuffer: The time to live buffer
     ///   - refetchChainTipInterval: Interval in seconds to refetch the chain tip
     ///   - utxoCacheSize: Size of the UTxO cache
     ///   - datumCacheSize: Size of the datum cache
     ///   - client: An instance of a CLIClient. If nil, a default CardanoCLIClient will be created.
     public init(
-        configFile: URL,
-        binary: URL? = nil,
-        socket: URL? = nil,
-        network: Network? = .mainnet,
+        nodeConfig: FilePath? = nil,
+        binary: FilePath? = nil,
+        socket: FilePath? = nil,
+        network: Network = .mainnet,
+        era: Era = .conway,
+        ttlBuffer: Int = 3600,
         refetchChainTipInterval: TimeInterval? = nil,
         utxoCacheSize: Int = 10000,
         datumCacheSize: Int = 10000,
         cli: CardanoCLI? = nil
     ) async throws {
-        
-        self.configFile = configFile
         self.refetchChainTipInterval = refetchChainTipInterval ?? 1000
         self.utxoCache = [:]
         self.datumCache = [:]
-        self._network = network ?? .mainnet
+        self._network = network
         
         if let cli = cli {
             self.cli = cli
-        } else {
+        } else if let nodeConfig = nodeConfig,
+                  let binary = binary,
+                  let socket = socket {
             self.cli = try await CardanoCLI(
-                configuration: Config.default()
+                configuration: Config(
+                    cardano: CardanoConfig(
+                        cli: binary,
+                        socket: socket,
+                        config: nodeConfig,
+                        network: self._network,
+                        era: era,
+                        ttlBuffer: 3600
+                    )
+                )
             )
+        } else {
+            self.cli = try await CardanoCLI(configuration: Config.default())
         }
+    }
+    
+    public init(cardanoConfig: CardanoConfig) async throws {
+        self.refetchChainTipInterval = 1000
+        self.utxoCache = [:]
+        self.datumCache = [:]
+        self._network = cardanoConfig.network
+        
+        self.cli = try await CardanoCLI(
+            configuration: Config(cardano: cardanoConfig)
+        )
     }
 
     /// Query the chain tip

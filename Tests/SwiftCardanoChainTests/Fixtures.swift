@@ -11,6 +11,12 @@ import SystemPackage
 import Command
 @testable import SwiftCardanoChain
 
+let configFilePath = Bundle.module.path(
+    forResource: "config",
+    ofType: "json",
+    inDirectory: "data"
+)
+
 /// Creates a mock executable that returns specific outputs based on arguments
 func createMockCardanoCLI(withResponses responses: [String: String] = [:]) -> String {
     let tempDir = FileManager.default.temporaryDirectory
@@ -37,7 +43,7 @@ func createMockConfig() -> Config {
         hwCli: nil,
         signer: nil,
         socket: FilePath("/tmp/test-socket"),
-        config: FilePath("/tmp/mock-config.json"),
+        config: FilePath(configFilePath!),
         topology: nil,
         database: nil,
         port: nil,
