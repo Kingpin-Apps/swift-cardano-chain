@@ -1,3 +1,9 @@
+## 0.1.22 (2025-10-19)
+
+### Fix
+
+- remove RedeemerType from ChainContexts
+
 ## 0.1.21 (2025-10-19)
 
 ### Fix
