@@ -9,9 +9,7 @@ public enum TransactionData{
 }
 
 /// Interfaces through which the library interacts with the Cardano blockchain.
-public protocol ChainContext {
-    associatedtype ReedemerType: CBORSerializable & Hashable
-    
+public protocol ChainContext {    
     /// Get current protocol parameters
     var protocolParameters: () async throws -> ProtocolParameters { get }
     

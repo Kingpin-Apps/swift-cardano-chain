@@ -13,7 +13,7 @@ struct BlockfrostChainContextTests {
         
     ])
     func testInit(_ networks: (SwiftCardanoCore.Network, NetworkId)) async throws {
-        let chainContext = try await BlockFrostChainContext<Never>(
+        let chainContext = try await BlockFrostChainContext(
             projectId: "fake-project-id",
             network: networks.0,
             client: Client(
@@ -33,7 +33,7 @@ struct BlockfrostChainContextTests {
     
     @Test("Test lastBlockSlot")
     func testLastBlockSlot() async throws {
-        let chainContext = try await BlockFrostChainContext<Never>(
+        let chainContext = try await BlockFrostChainContext(
             projectId: "fake-project-id",
             network: .preview,
             client: Client(
@@ -49,7 +49,7 @@ struct BlockfrostChainContextTests {
     
     @Test("Test genesisParameters")
     func testGenesisParameters() async throws {
-        let chainContext = try await BlockFrostChainContext<Never>(
+        let chainContext = try await BlockFrostChainContext(
             projectId: "fake-project-id",
             network: .preview,
             client: Client(
@@ -75,7 +75,7 @@ struct BlockfrostChainContextTests {
     
     @Test("Test protocolParameters")
     func testProtocolParameters() async throws {
-        let chainContext = try await BlockFrostChainContext<Never>(
+        let chainContext = try await BlockFrostChainContext(
             projectId: "fake-project-id",
             network: .preview,
             client: Client(
@@ -92,7 +92,7 @@ struct BlockfrostChainContextTests {
     
     @Test("Test utxos")
     func testUTxOs() async throws {
-        let chainContext = try await BlockFrostChainContext<Never>(
+        let chainContext = try await BlockFrostChainContext(
             projectId: "fake-project-id",
             network: .preview,
             client: Client(
@@ -116,7 +116,7 @@ struct BlockfrostChainContextTests {
     
     @Test("Test submitTxCBOR")
     func testSubmitTxCBOR() async throws {
-        let chainContext = try await BlockFrostChainContext<Never>(
+        let chainContext = try await BlockFrostChainContext(
             projectId: "fake-project-id",
             network: .preview,
             client: Client(
@@ -146,7 +146,7 @@ struct BlockfrostChainContextTests {
     
     @Test("Test stakeAddressInfo")
     func testStakeAddressInfo() async throws {
-        let chainContext = try await BlockFrostChainContext<Never>(
+        let chainContext = try await BlockFrostChainContext(
             projectId: "fake-project-id",
             network: .preview,
             client: Client(

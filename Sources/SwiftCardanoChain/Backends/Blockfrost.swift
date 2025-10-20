@@ -10,9 +10,8 @@ import OpenAPIRuntime
 ///   - projectId: A BlockFrost project ID obtained from https://blockfrost.io.
 ///   - network: Network to use.
 ///   - baseUrl: Base URL for the BlockFrost API. Defaults to the preprod url.
-public class BlockFrostChainContext<T: CBORSerializable & Hashable>: ChainContext {
-    public typealias ReedemerType = T
-
+public class BlockFrostChainContext: ChainContext {
+    
     // MARK: - Properties
 
     private var api: Blockfrost
