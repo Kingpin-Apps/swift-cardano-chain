@@ -2,8 +2,8 @@ import Foundation
 import SwiftCardanoCore
 
 /// Enum representing transaction data input types.
-public enum TransactionData<T: CBORSerializable & Hashable> {
-    case transaction(Transaction<T>)
+public enum TransactionData{
+    case transaction(Transaction)
     case bytes(Data)
     case string(String)
 }
@@ -44,7 +44,7 @@ public protocol ChainContext {
     ///
     /// - Parameter tx: The transaction to be evaluated.
     /// - Returns: A dictionary mapping redeemer strings to execution units.
-    func evaluateTx(tx: Transaction<ReedemerType>) async throws -> [String: ExecutionUnits]
+    func evaluateTx(tx: Transaction) async throws -> [String: ExecutionUnits]
     
     /// Evaluate execution units of a transaction.
     ///
@@ -65,7 +65,7 @@ public extension ChainContext {
     /// - Parameter tx: The transaction to be submitted.
     /// - Throws: `InvalidArgumentException` when the transaction is invalid.
     /// - Throws: `TransactionFailedException` when submission fails.
-    func submitTx(tx: TransactionData<ReedemerType>) async throws -> String {
+    func submitTx(tx: TransactionData) async throws -> String {
         switch tx {
             case .transaction(let transaction):
                 return try await submitTxCBOR(cbor: transaction.toCBORData())
@@ -80,7 +80,7 @@ public extension ChainContext {
     ///
     /// - Parameter tx: The transaction to be evaluated.
     /// - Returns: A dictionary mapping redeemer strings to execution units.
-    func evaluateTx(tx: Transaction<ReedemerType>) async throws -> [String: ExecutionUnits] {
+    func evaluateTx(tx: Transaction) async throws -> [String: ExecutionUnits] {
         return try await evaluateTxCBOR(cbor: tx.toCBORData())
     }
 }

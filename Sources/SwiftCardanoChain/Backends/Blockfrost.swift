@@ -412,16 +412,21 @@ public class BlockFrostChainContext<T: CBORSerializable & Hashable>: ChainContex
                 )
                 
                 var datumHash: DatumHash? = nil
-                var datum: Datum? = nil
+                var datumOption: DatumOption? = nil
                 var script: ScriptType? = nil
                 
                 if result.dataHash != nil && result.inlineDatum == nil {
                     datumHash = try DatumHash(from: .string(result.dataHash!))
                 }
                 
-                if let inlineDatum = result.inlineDatum {
-                    datum = .cbor(CBOR(Data(hex: inlineDatum)))
+                if let inlineDatum = result.inlineDatum,
+                    let datumData = Data(hexString: inlineDatum) {
+                    datumOption = try DatumOption.fromCBOR(data: datumData)
                 }
+//                else if let inlineDatum = result.inlineDatum as? [AnyHashable: Any] {
+//                    let plutusData = try PlutusData.fromDict(inlineDatum)
+//                    datumOption = DatumOption(datum: plutusData)
+//                }
 
                 if let referenceScriptHash = result.referenceScriptHash {
                     script = try? await self
@@ -433,7 +438,7 @@ public class BlockFrostChainContext<T: CBORSerializable & Hashable>: ChainContex
                     address: address,
                     amount: amount,
                     datumHash: datumHash,
-                    datum: datum,
+                    datumOption: datumOption,
                     script: script
                 )
 
