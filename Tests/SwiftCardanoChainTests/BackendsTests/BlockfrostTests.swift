@@ -173,7 +173,7 @@ struct BlockfrostChainContextTests {
             stakeAddressInfo[0].rewardAccountBalance == 319154618165
         )
         #expect(
-            stakeAddressInfo[0].stakeDelegation?.bech32 == "pool1pu5jlj4q9w9jlxeu370a3c9myx47md5j5m2str0naunn2q3lkdy"
+            try stakeAddressInfo[0].stakeDelegation?.id() == "pool1pu5jlj4q9w9jlxeu370a3c9myx47md5j5m2str0naunn2q3lkdy"
         )
         #expect(
             try stakeAddressInfo[0].voteDelegation?

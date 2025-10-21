@@ -452,15 +452,11 @@ public class KoiosChainContext: ChainContext {
                 let info = StakeAddressInfo(
                     address: (stakeInfo.stakeAddress?.value as? String) ?? "",
                     rewardAccountBalance: Int(stakeInfo.rewardsAvailable ?? "0") ?? 0,
-                    stakeDelegation: try PoolId(
-                        from: .string(
-                            stakeInfo.delegatedPool ?? ""
-                        )
+                    stakeDelegation: try PoolOperator(
+                        from: stakeInfo.delegatedPool ?? ""
                     ),
                     voteDelegation: try DRep(
-                        from: .string(
-                            stakeInfo.delegatedDrep ?? ""
-                        )
+                        from: stakeInfo.delegatedDrep ?? ""
                     )
                 )
                 result.append(info)

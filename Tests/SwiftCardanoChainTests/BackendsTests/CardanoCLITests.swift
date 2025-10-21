@@ -359,11 +359,11 @@ struct CardanoCLIContextTests {
             stakeAddressInfo[0].rewardAccountBalance == 100000000000
         )
         #expect(
-            stakeAddressInfo[0].stakeDelegation?.bech32 == "pool1m5947rydk4n0ywe6ctlav0ztt632lcwjef7fsy93sflz7ctcx6z"
+            try stakeAddressInfo[0].stakeDelegation?.id() == "pool1m5947rydk4n0ywe6ctlav0ztt632lcwjef7fsy93sflz7ctcx6z"
         )
         #expect(
             try stakeAddressInfo[0].voteDelegation?
-                .idHex() == "b02f7b335aebf284bbdc20bdc3b59e4e183ae2cfc47ad2d8bc19a241"
+                .id((.hex, .cip105)) == "b02f7b335aebf284bbdc20bdc3b59e4e183ae2cfc47ad2d8bc19a241"
         )
     }
 }

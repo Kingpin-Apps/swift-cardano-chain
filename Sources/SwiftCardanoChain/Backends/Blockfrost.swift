@@ -525,7 +525,7 @@ public class BlockFrostChainContext: ChainContext {
                     rewardAccountBalance: Int(
                         stakeInfo.withdrawableAmount
                     )!,
-                    stakeDelegation: stakeInfo.poolId != nil ? try PoolId(
+                    stakeDelegation: stakeInfo.poolId != nil ? try PoolOperator(
                         from: stakeInfo.poolId!
                     ) : nil,
                     voteDelegation: stakeInfo.drepId != nil ? try DRep(
