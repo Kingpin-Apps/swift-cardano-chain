@@ -10,7 +10,7 @@ import SystemPackage
 public class CardanoCliChainContext: ChainContext {    
     // MARK: - Properties
     
-    private let cli: CardanoCLI
+    public let cli: CardanoCLI
     private var lastKnownBlockSlot: Int = 0
     private var lastChainTipFetch: TimeInterval = 0
     private var refetchChainTipInterval: TimeInterval
@@ -28,13 +28,13 @@ public class CardanoCliChainContext: ChainContext {
         self._network.networkId
     }
 
-    public lazy var era: () async throws -> String = { [weak self] in
+    public lazy var era: () async throws -> Era? = { [weak self] in
         guard var self = self else {
             throw CardanoChainError.valueError("Self is nil")
         }
 
-        let chainTip = try await cli.query.tip()
-        return chainTip.era
+        let era = try await cli.getEra()
+        return era
     }
 
     public lazy var epoch: () async throws -> Int = { [weak self] in
@@ -42,8 +42,8 @@ public class CardanoCliChainContext: ChainContext {
             throw CardanoChainError.valueError("Self is nil")
         }
         
-        let chainTip = try await cli.query.tip()
-        return chainTip.epoch
+        let epoch = try await cli.getEpoch()
+        return epoch
     }
 
     public lazy var lastBlockSlot: () async throws -> Int = { [weak self] in
@@ -57,8 +57,7 @@ public class CardanoCliChainContext: ChainContext {
             return cachedValue
         }
 
-        let chainTip = try await cli.query.tip()
-        let slot = chainTip.slot
+        let slot = try await cli.getTip()
 
         // Update cache
         self.cache.insert(slot, forKey: cacheKey)
@@ -205,9 +204,9 @@ public class CardanoCliChainContext: ChainContext {
             return false
         }
 
-        let chainTip = try await queryChainTip()
+        let syncProgress = try await cli.getSyncProgress()
 
-        return Double(chainTip.syncProgress) != 100.0
+        return syncProgress != 100.0
     }
 
     /// Get a script object from a reference script dictionary

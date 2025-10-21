@@ -9,12 +9,12 @@ import OpenAPIRuntime
 /// - Parameters:
 ///   - projectId: A BlockFrost project ID obtained from https://blockfrost.io.
 ///   - network: Network to use.
-///   - baseUrl: Base URL for the BlockFrost API. Defaults to the preprod url.
+///   - baseUrl: Base URL for the BlockFrost API. Defaults to the mainnet url.
 public class BlockFrostChainContext: ChainContext {
     
     // MARK: - Properties
 
-    private var api: Blockfrost
+    public var api: Blockfrost
     private var epochInfo: Components.Schemas.EpochContent?
     private var _epoch: Int?
     private var _genesisParam: GenesisParameters?
@@ -31,12 +31,12 @@ public class BlockFrostChainContext: ChainContext {
         }
         
         if try await self.checkEpochAndUpdate() || self._epoch == nil {
-            let latestEpoch = try await api.client.getEpochsLatest()
+            let response = try await api.client.getEpochsLatest()
             do {
-                self.epochInfo = try latestEpoch.ok.body.json
+                self.epochInfo = try response.ok.body.json
                 self._epoch = self.epochInfo?.epoch
             } catch {
-                throw CardanoChainError.blockfrostError("Failed to get epoch info: \(latestEpoch)")
+                throw CardanoChainError.blockfrostError("Failed to get epoch info: \(response)")
             }
         }
         return self._epoch ?? 0
@@ -46,11 +46,11 @@ public class BlockFrostChainContext: ChainContext {
         guard let self = self else {
             throw CardanoChainError.blockfrostError("Self is nil")
         }
-        let blocksLatest = try await api.client.getBlocksLatest()
+        let response = try await api.client.getBlocksLatest()
         do {
-            return try blocksLatest.ok.body.json.slot!
+            return try response.ok.body.json.slot!
         } catch {
-            throw CardanoChainError.blockfrostError("Failed to get blocksLatest: \(blocksLatest)")
+            throw CardanoChainError.blockfrostError("Failed to get blocksLatest: \(response)")
         }
     }
     
@@ -60,9 +60,9 @@ public class BlockFrostChainContext: ChainContext {
         }
         
         if try await self.checkEpochAndUpdate() || self._genesisParam == nil {
-            let params = try await api.client.getGenesis()
+            let response = try await api.client.getGenesis()
             do {
-                let genesis = try params.ok.body.json
+                let genesis = try response.ok.body.json
                 self._genesisParam = GenesisParameters(
                     activeSlotsCoefficient: genesis.activeSlotsCoefficient,
                     epochLength: genesis.epochLength,
@@ -77,7 +77,7 @@ public class BlockFrostChainContext: ChainContext {
                     updateQuorum: genesis.updateQuorum
                 )
             } catch {
-                throw CardanoChainError.blockfrostError("Failed to get getGenesis: \(params)")
+                throw CardanoChainError.blockfrostError("Failed to get getGenesis: \(response)")
             }
         }
         return self._genesisParam!
@@ -89,9 +89,9 @@ public class BlockFrostChainContext: ChainContext {
         }
         
         if try await self.checkEpochAndUpdate() || self._protocolParam == nil {
-            let params = try await api.client.getEpochsLatestParameters()
+            let response = try await api.client.getEpochsLatestParameters()
             do {
-                let protocolParams = try params.ok.body.json
+                let protocolParams = try response.ok.body.json
                 
                 let costModels = protocolParams.costModels.unsafelyUnwrapped.additionalProperties.value
                 
@@ -173,7 +173,7 @@ public class BlockFrostChainContext: ChainContext {
                 )
                                                          
             } catch {
-                throw CardanoChainError.blockfrostError("Failed to get getEpochsLatestParameters: \(params)")
+                throw CardanoChainError.blockfrostError("Failed to get getEpochsLatestParameters: \(response)")
             }
         }
         return self._protocolParam!
@@ -212,13 +212,15 @@ public class BlockFrostChainContext: ChainContext {
             client: client
         )
 
-        // Initialize with empty epoch info, will be updated on first access
-        let epochInfo = try await api.client.getEpochsLatest()
-        
+        // Initialize epoch info
         do {
-            self.epochInfo = try epochInfo.ok.body.json
+            let response = try await api.client.getEpochsLatest()
+            self.epochInfo = try response.ok.body.json
         } catch {
-            throw CardanoChainError.blockfrostError("Failed to get epoch info: \(epochInfo)")
+            throw CardanoChainError
+                .blockfrostError(
+                    "Failed to get epoch info: \(error.localizedDescription)"
+                )
         }
     }
 
