@@ -1,3 +1,9 @@
+## 0.1.23 (2025-10-21)
+
+### Fix
+
+- add Koios chain context and AddressInfo
+
 ## 0.1.22 (2025-10-19)
 
 ### Fix
