@@ -1,3 +1,9 @@
+## 0.1.25 (2025-10-23)
+
+### Fix
+
+- update to lates core and utils
+
 ## 0.1.24 (2025-10-21)
 
 ### Fix
