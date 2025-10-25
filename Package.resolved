@@ -1,5 +1,5 @@
 {
-  "originHash" : "41627edd6040d96d8ebce1543d9b1bbfa71e21c46f50f0330cd9646a3f02c9d7",
+  "originHash" : "5f47f2a5b8be996fa42b6999a92bf58aeb9a9a7923531c2a0bd8982849925271",
   "pins" : [
     {
       "identity" : "base32",
@@ -213,8 +213,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/Kingpin-Apps/swift-koios.git",
       "state" : {
-        "revision" : "8cd7d3f5ae75101ab7ae5eee1a27312017bd6896",
-        "version" : "0.1.2"
+        "revision" : "d37c472adcaed2906c6f828b69b1e4eacf63cf5e",
+        "version" : "0.1.3"
       }
     },
     {

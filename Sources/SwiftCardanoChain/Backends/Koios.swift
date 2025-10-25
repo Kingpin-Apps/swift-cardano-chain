@@ -491,4 +491,21 @@ public class KoiosChainContext: ChainContext {
             throw CardanoChainError.koiosError("Failed to get asset addresses: \(error)")
         }
     }
+    
+    public func poolInfo(poolIds: [String]) async throws -> Components.Schemas.PoolInfo {
+        let response = try await api.client.poolInfo(
+            Operations.PoolInfo.Input(
+                body: .json(.init(
+                    _poolBech32Ids: poolIds
+                ))
+            )
+        )
+        
+        do {
+            let poolInfos = try response.ok.body.json
+            return poolInfos
+        } catch {
+            throw CardanoChainError.koiosError("Failed to get pool info: \(error)")
+        }
+    }
 }
