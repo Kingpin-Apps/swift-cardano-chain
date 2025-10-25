@@ -1,3 +1,9 @@
+## 0.1.28 (2025-10-24)
+
+### Fix
+
+- update swift koios version
+
 ## 0.1.27 (2025-10-24)
 
 ### Fix
