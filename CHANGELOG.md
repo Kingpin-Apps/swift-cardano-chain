@@ -1,3 +1,9 @@
+## 0.1.29 (2025-10-26)
+
+### Fix
+
+- bump core and utils to latest version
+
 ## 0.1.28 (2025-10-24)
 
 ### Fix
