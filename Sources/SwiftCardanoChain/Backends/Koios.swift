@@ -450,6 +450,7 @@ public class KoiosChainContext: ChainContext {
             
             for stakeInfo in stakeInfoArray {
                 let info = StakeAddressInfo(
+                    active: stakeInfo.status == .registered,
                     address: (stakeInfo.stakeAddress?.value as? String) ?? "",
                     rewardAccountBalance: Int(stakeInfo.rewardsAvailable ?? "0") ?? 0,
                     stakeDelegation: try PoolOperator(

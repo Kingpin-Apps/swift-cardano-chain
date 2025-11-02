@@ -521,6 +521,8 @@ public class BlockFrostChainContext: ChainContext {
             let stakeInfo  = try rewardsState.ok.body.json
             return [
                 StakeAddressInfo(
+                    active: stakeInfo.active,
+                    activeEpoch: stakeInfo.activeEpoch,
                     address: stakeInfo.stakeAddress,
                     rewardAccountBalance: Int(
                         stakeInfo.withdrawableAmount
