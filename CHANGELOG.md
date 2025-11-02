@@ -1,3 +1,9 @@
+## 0.1.33 (2025-11-02)
+
+### Fix
+
+- use active and active epoch from StakeAddressInfo
+
 ## 0.1.32 (2025-11-01)
 
 ### Fix
