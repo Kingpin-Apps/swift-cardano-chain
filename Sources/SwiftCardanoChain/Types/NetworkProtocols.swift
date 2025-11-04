@@ -2,7 +2,7 @@ import Foundation
 import SwiftCardanoCore
 
 public protocol NetworkDependable<T>: Codable, Hashable, Sendable {
-    associatedtype T
+    associatedtype T: Codable, Hashable, Sendable
     
     var mainnet: T { get }
     var preprod: T? { get }
