@@ -7,6 +7,7 @@ enum CardanoChainError: Error, CustomStringConvertible, Equatable {
     case invalidAdaHandle(String?)
     case koiosError(String?)
     case transactionFailed(String?)
+    case operationError(String?)
     case unsupportedNetwork(String?)
     case valueError(String?)
     
@@ -22,6 +23,8 @@ enum CardanoChainError: Error, CustomStringConvertible, Equatable {
                 return message ?? "Invalid argument error occurred."
             case .koiosError(let message):
                 return message ?? "Failed to retrieve data from Koios."
+            case .operationError(let message):
+                return message ?? "Operation failed error occurred."
             case .transactionFailed(let message):
                 return message ?? "Transaction failed error occurred."
             case .unsupportedNetwork(let message):
@@ -30,4 +33,16 @@ enum CardanoChainError: Error, CustomStringConvertible, Equatable {
                 return message ?? "The value is invalid."
         }
     }
+}
+
+
+public enum AdaHandleError: LocalizedError {
+    case adahandleOfflineMode
+    case adahandleNetworkNotSupported(String)
+    case adahandleNotFound(String)
+    case adahandleInvalidFormat(String)
+    case adahandleInvalidAddress(String)
+    case adahandleAssetNotOnAddress(String, String)
+    case adahandleAPIError(String, Int?)
+    case adahandleAddressMismatch(String, String)
 }

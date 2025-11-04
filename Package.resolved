@@ -1,5 +1,5 @@
 {
-  "originHash" : "de8ead766a94207e63eb6de227ddee3f4d01eb6c8bcadf2415baf5cdba6d2ecd",
+  "originHash" : "2f99fc7573ddc010de5f396e2b8eb1d28da87e064ced6bd92c3ab0b93a9bbb6a",
   "pins" : [
     {
       "identity" : "base32",
@@ -196,6 +196,15 @@
       "location" : "https://github.com/Frizlab/swift-fraction-number.git",
       "state" : {
         "revision" : "5eecb3b1f49c6abfcf1561faf63a86347018d787",
+        "version" : "0.1.0"
+      }
+    },
+    {
+      "identity" : "swift-handles-api",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/Kingpin-Apps/swift-handles-api.git",
+      "state" : {
+        "revision" : "09a95593ddb7a44be62cf49a4ad01b7803e625b5",
         "version" : "0.1.0"
       }
     },

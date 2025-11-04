@@ -3,27 +3,67 @@ import SwiftCardanoCore
 import SystemPackage
 
 public struct AddressInfo: Codable, CustomStringConvertible {
-    var addressFile: FilePath?
-    var name: String?
-    var adaHandle: String?
-    var address: Address?
-    var base16: String?
-    var encoding: String?
-    var era: String?
-    var type: AddressType?
-    var totalAmount: Int?
-    var totalAssetCount: Int?
-    var date: Date
-    var used: Bool
-    var utxos: [UTxO]
-    var stakeAddressInfo: [StakeAddressInfo]
+    public var addressFile: FilePath?
+    public var name: String?
+    public var adaHandle: String?
+    public var address: Address?
+    public var base16: String?
+    public var encoding: String?
+    public var era: String?
+    public var type: AddressType?
+    public var totalAmount: Int?
+    public var totalAssetCount: Int?
+    public var date: Date
+    public var used: Bool
+    public var utxos: [UTxO]
+    public var stakeAddressInfo: [StakeAddressInfo]
     
-    enum AddressType: String, Codable {
+    public enum AddressType: String, Codable {
         case payment
         case stake
+        
+        /// Initialize from bech32 prefix
+        public init?(fromAddressBech32 address: String) {
+            if address.lowercased().hasPrefix("stake") {
+                self = .stake
+            } else if address.lowercased().hasPrefix("addr") {
+                self = .payment
+            } else {
+                return nil
+            }
+        }
+        
+        /// Human-readable description
+        public var description: String {
+            switch self {
+                case .payment:
+                    return "Payment"
+                case .stake:
+                    return "Stake"
+            }
+        }
     }
     
-    init(
+    // MARK: Initializers
+    
+    /// Convenience initializer from address string
+    public init(fromAddressString addressString: String, name: String? = nil) throws {
+        let parsedAddress = try Address(from: .string(addressString))
+        try self.init(name: name, address: parsedAddress)
+    }
+    
+    /// Convenience initializer from file path
+    public init(fromFile filePath: FilePath, name: String? = nil) throws {
+        let addressFromFile = try Address.load(from: filePath.string)
+        try self.init(addressFile: filePath, name: name, address: addressFromFile)
+    }
+    
+    /// Convenience initializer from ada handle
+    public init(fromAdaHandle handle: String, name: String? = nil) throws {
+        try self.init(name: name, adaHandle: handle)
+    }
+    
+    public init(
         addressFile: FilePath? = nil,
         name: String? = nil,
         adaHandle: String? = nil,
@@ -92,6 +132,15 @@ public struct AddressInfo: Codable, CustomStringConvertible {
                 self.type = .stake
             }
             
+        }
+    }
+    
+    public mutating func checkAdaHandle(network: Network) async throws {
+        if let handle = adaHandle {
+            self.address = try await resolveAdahandle(
+                handle: handle,
+                network: network
+            )
         }
     }
     
