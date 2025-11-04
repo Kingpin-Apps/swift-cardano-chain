@@ -1,3 +1,9 @@
+## 0.1.34 (2025-11-04)
+
+### Fix
+
+- add AdaHandle Utils and improve AddressInfo
+
 ## 0.1.33 (2025-11-02)
 
 ### Fix
