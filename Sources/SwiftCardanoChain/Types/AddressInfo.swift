@@ -9,7 +9,7 @@ public struct AddressInfo: Codable, CustomStringConvertible {
     public var address: Address?
     public var base16: String?
     public var encoding: String?
-    public var era: String?
+    public var era: AddressEra?
     public var type: AddressType?
     public var totalAmount: Int?
     public var totalAssetCount: Int?
@@ -44,6 +44,31 @@ public struct AddressInfo: Codable, CustomStringConvertible {
         }
     }
     
+    public enum AddressEra: String, Codable {
+        case byron
+        case shelley
+        
+        /// Initialize from bech32 prefix
+        public init(fromAddress address: Address) {
+            switch address.addressType {
+                case .byron:
+                    self = .byron
+                default:
+                    self = .shelley
+            }
+        }
+        
+        /// Human-readable description
+        public var description: String {
+            switch self {
+                case .byron:
+                    return "Byron"
+                case .shelley:
+                    return "Shelley"
+            }
+        }
+    }
+    
     // MARK: Initializers
     
     /// Convenience initializer from address string
@@ -70,7 +95,7 @@ public struct AddressInfo: Codable, CustomStringConvertible {
         address: Address? = nil,
         base16: String? = nil,
         encoding: String? = nil,
-        era: String? = nil,
+        era: AddressEra? = nil,
         type: AddressType? = nil,
         totalAmount: Int? = nil,
         totalAssetCount: Int? = nil,
@@ -130,6 +155,10 @@ public struct AddressInfo: Codable, CustomStringConvertible {
                 self.type = .payment
             } else if bech32.hasPrefix("stake") {
                 self.type = .stake
+            }
+            
+            if self.era == nil {
+                self.era = AddressEra(fromAddress: addr)
             }
             
         }
