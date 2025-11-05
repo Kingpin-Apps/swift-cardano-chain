@@ -24,7 +24,7 @@ public func convertAssetNameHEX2ASCII(assetName: String) -> String {
 ///   - operation: The async operation to retry
 /// - Returns: The result of the operation
 /// - Throws: The last error encountered if all retries fail
-func withRetry<T>(
+public func withRetry<T>(
     maxRetryAttempts: UInt64 = 5,
     baseRetryDelay: UInt64 = 200,
     operation: () async throws -> T
