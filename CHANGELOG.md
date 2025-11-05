@@ -1,3 +1,9 @@
+## 0.1.38 (2025-11-05)
+
+### Fix
+
+- add name and String convertible implementation
+
 ## 0.1.37 (2025-11-04)
 
 ### Fix
