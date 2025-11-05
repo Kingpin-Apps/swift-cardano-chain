@@ -9,7 +9,11 @@ public enum TransactionData{
 }
 
 /// Interfaces through which the library interacts with the Cardano blockchain.
-public protocol ChainContext {    
+public protocol ChainContext: CustomStringConvertible, CustomDebugStringConvertible {
+    
+    /// The name of the chain context
+    var name: String { get }
+    
     /// Get current protocol parameters
     var protocolParameters: () async throws -> ProtocolParameters { get }
     
@@ -80,5 +84,16 @@ public extension ChainContext {
     /// - Returns: A dictionary mapping redeemer strings to execution units.
     func evaluateTx(tx: Transaction) async throws -> [String: ExecutionUnits] {
         return try await evaluateTxCBOR(cbor: tx.toCBORData())
+    }
+}
+
+// MARK: - StringConvertible Implementation
+public extension ChainContext {
+    var description: String {
+        return name
+    }
+    
+    var debugDescription: String {
+        return "ChainContext(name: \(name), networkId: \(networkId))"
     }
 }

@@ -10,6 +10,7 @@ import SystemPackage
 public class CardanoCliChainContext: ChainContext {    
     // MARK: - Properties
     
+    public var name: String {  "Cardano-CLI" }
     public let cli: CardanoCLI
     private var lastKnownBlockSlot: Int = 0
     private var lastChainTipFetch: TimeInterval = 0

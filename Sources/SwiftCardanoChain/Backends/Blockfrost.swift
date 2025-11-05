@@ -11,8 +11,9 @@ import OpenAPIRuntime
 ///   - network: Network to use.
 ///   - baseUrl: Base URL for the BlockFrost API. Defaults to the mainnet url.
 public class BlockFrostChainContext: ChainContext {
-    
+
     // MARK: - Properties
+    public var name: String {  "Blockfrost" }
 
     public var api: Blockfrost
     private var epochInfo: Components.Schemas.EpochContent?

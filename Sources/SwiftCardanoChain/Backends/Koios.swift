@@ -14,6 +14,7 @@ public class KoiosChainContext: ChainContext {
     
     // MARK: - Properties
     
+    public var name: String {  "Koios" }
     public var api: Koios
     private var epochInfo: Components.Schemas.EpochInfoPayload?
     private var _epoch: Int?
