@@ -18,8 +18,8 @@ public class KoiosChainContext: ChainContext {
     public var api: Koios
     private var epochInfo: Components.Schemas.EpochInfoPayload?
     private var _epoch: Int?
-    private var _genesisParam: GenesisParameters?
-    private var _protocolParam: ProtocolParameters?
+    private var _genesisParameters: GenesisParameters?
+    private var _protocolParameters: ProtocolParameters?
     private let _network: SwiftCardanoCore.Network
     
     public var networkId: NetworkId {
@@ -61,7 +61,7 @@ public class KoiosChainContext: ChainContext {
             throw CardanoChainError.koiosError("Self is nil")
         }
         
-        if try await self.checkEpochAndUpdate() || self._genesisParam == nil {
+        if try await self.checkEpochAndUpdate() || self._genesisParameters == nil {
             let response = try await api.client.genesis()
             do {
                 let payloads = try response.ok.body.json
@@ -94,7 +94,7 @@ public class KoiosChainContext: ChainContext {
                 let slotsPerKesPeriod = try requireInt(genesis.slotsperkesperiod, name: "slotsperkesperiod")
                 let updateQuorum = try requireInt(genesis.updatequorum, name: "updatequorum")
                 
-                self._genesisParam = GenesisParameters(
+                self._genesisParameters = GenesisParameters(
                     activeSlotsCoefficient: activeSlotsCoefficient,
                     epochLength: epochLength,
                     maxKesEvolutions: maxKesEvolutions,
@@ -111,7 +111,7 @@ public class KoiosChainContext: ChainContext {
                 throw CardanoChainError.koiosError("Failed to decode Genesis parameters: \(error)")
             }
         }
-        return self._genesisParam!
+        return self._genesisParameters!
     }
     
     public lazy var protocolParameters: () async throws -> ProtocolParameters  = { [weak self] in
@@ -119,27 +119,11 @@ public class KoiosChainContext: ChainContext {
             throw CardanoChainError.koiosError("Self is nil")
         }
         
-        if try await self.checkEpochAndUpdate() || self._protocolParam == nil {
-            let response = try await api.client.cliProtocolParams()
-            do {
-                let protocolParams = try response.ok.body.json
-                let jsonData = try JSONSerialization
-                    .data(
-                        withJSONObject: protocolParams,
-                        options: [
-                            .prettyPrinted,
-                            .sortedKeys,
-                            .withoutEscapingSlashes
-                        ]
-                    )
-                
-                self._protocolParam = try JSONDecoder().decode(ProtocolParameters.self, from: jsonData)
-                
-            } catch {
-                throw CardanoChainError.koiosError("Failed to get protocol parameters: \(error)")
-            }
+        if try await self.checkEpochAndUpdate() || self._protocolParameters == nil {
+            self._protocolParameters = try await self.queryCurrentProtocolParams()
         }
-        return self._protocolParam!
+        
+        return self._protocolParameters!
     }
     
     // MARK: - Initializers
@@ -188,6 +172,61 @@ public class KoiosChainContext: ChainContext {
         }
     }
     
+    // MARK: - Public Methods
+    
+    /// Query the chain tip
+    ///
+    /// - Returns: The chain tip as a dictionary
+    /// - Throws: CardanoChainError if the query fails
+    public func queryChainTip() async throws -> ChainTip {
+        do {
+            let response = try await api.client.tip()
+            let json = try response.ok.body.json
+            
+            guard let tip = json.first else {
+                throw CardanoChainError.koiosError("Tip response was empty")
+            }
+            
+            return ChainTip(
+                block: Int(tip.blockNo ?? 0),
+                epoch: tip.epochNo?.value as? Int,
+                era: nil,
+                hash: tip.hash?.value as? String,
+                slot: tip.absSlot?.value as? Int,
+                slotInEpoch: tip.epochSlot?.value as? Int,
+                slotsToEpochEnd: nil,
+                syncProgress: nil
+            )
+        } catch {
+            throw CardanoChainError.koiosError("Failed to get tip: \(error)")
+        }
+    }
+    
+    /// Query the current protocol parameters
+    ///
+    /// - Returns: The protocol parameters as a dictionary
+    /// - Throws: CardanoChainError if the query fails
+    public func queryCurrentProtocolParams() async throws -> ProtocolParameters {
+        do {
+            let response = try await api.client.cliProtocolParams()
+            let protocolParams = try response.ok.body.json
+            let jsonData = try JSONSerialization
+                .data(
+                    withJSONObject: protocolParams,
+                    options: [
+                        .prettyPrinted,
+                        .sortedKeys,
+                        .withoutEscapingSlashes
+                    ]
+                )
+            
+            return try JSONDecoder().decode(ProtocolParameters.self, from: jsonData)
+            
+        } catch {
+            throw CardanoChainError.koiosError("Failed to get protocol parameters: \(error)")
+        }
+    }
+    
     // MARK: - Private methods
     
     private func checkEpochAndUpdate() async throws -> Bool {
@@ -216,45 +255,45 @@ public class KoiosChainContext: ChainContext {
         }
         
         switch scriptType {
-        case "plutusV1":
-            guard let bytes = scriptDict["bytes"] as? String else {
-                throw CardanoChainError.koiosError("Missing script bytes")
-            }
-            let script = PlutusV1Script(data: Data(hex: bytes))
-            return .plutusV1Script(script)
-            
-        case "plutusV2":
-            guard let bytes = scriptDict["bytes"] as? String else {
-                throw CardanoChainError.koiosError("Missing script bytes")
-            }
-            let script = PlutusV2Script(data: Data(hex: bytes))
-            return .plutusV2Script(script)
-            
-        case "plutusV3":
-            guard let bytes = scriptDict["bytes"] as? String else {
-                throw CardanoChainError.koiosError("Missing script bytes")
-            }
-            let script = PlutusV3Script(data: Data(hex: bytes))
-            return .plutusV3Script(script)
-            
-        default:
-            // For native scripts, expect a 'value' field with the script JSON
-            guard let value = scriptDict["value"] else {
-                throw CardanoChainError.koiosError("Missing script value for native script")
-            }
-            let jsonData = try JSONSerialization.data(withJSONObject: value)
-            let nativeScript = try JSONDecoder().decode(NativeScript.self, from: jsonData)
-            return .nativeScript(nativeScript)
+            case "plutusV1":
+                guard let bytes = scriptDict["bytes"] as? String else {
+                    throw CardanoChainError.koiosError("Missing script bytes")
+                }
+                let script = PlutusV1Script(data: Data(hex: bytes))
+                return .plutusV1Script(script)
+                
+            case "plutusV2":
+                guard let bytes = scriptDict["bytes"] as? String else {
+                    throw CardanoChainError.koiosError("Missing script bytes")
+                }
+                let script = PlutusV2Script(data: Data(hex: bytes))
+                return .plutusV2Script(script)
+                
+            case "plutusV3":
+                guard let bytes = scriptDict["bytes"] as? String else {
+                    throw CardanoChainError.koiosError("Missing script bytes")
+                }
+                let script = PlutusV3Script(data: Data(hex: bytes))
+                return .plutusV3Script(script)
+                
+            default:
+                // For native scripts, expect a 'value' field with the script JSON
+                guard let value = scriptDict["value"] else {
+                    throw CardanoChainError.koiosError("Missing script value for native script")
+                }
+                let jsonData = try JSONSerialization.data(withJSONObject: value)
+                let nativeScript = try JSONDecoder().decode(NativeScript.self, from: jsonData)
+                return .nativeScript(nativeScript)
         }
     }
     
     // MARK: - ChainContext methods
     
     /// Gets the UTxOs for a given address.
-    /// 
+    ///
     /// This implementation follows the Python reference implementation from pycardano_chain_contexts.
     /// See: /Users/hadderley/Projects/pycardano_chain_contexts/pycardano_chain_contexts/pccontext/backend/koios.py
-    /// 
+    ///
     /// - Parameter address: The address to get the `UTxO`s for.
     /// - Returns: A list of `UTxO`s.
     public func utxos(address: SwiftCardanoCore.Address) async throws -> [UTxO] {
@@ -365,15 +404,15 @@ public class KoiosChainContext: ChainContext {
         )
         
         switch response {
-        case .accepted(let acceptedResponse):
-            do {
-                let result = try acceptedResponse.body.json
-                return result
-            } catch {
-                throw CardanoChainError.koiosError("Failed to parse submit response: \(error)")
-            }
-        default:
-            throw CardanoChainError.transactionFailed("Failed to submit transaction: \(response)")
+            case .accepted(let acceptedResponse):
+                do {
+                    let result = try acceptedResponse.body.json
+                    return result
+                } catch {
+                    throw CardanoChainError.koiosError("Failed to parse submit response: \(error)")
+                }
+            default:
+                throw CardanoChainError.transactionFailed("Failed to submit transaction: \(response)")
         }
     }
     
@@ -400,35 +439,35 @@ public class KoiosChainContext: ChainContext {
         var returnVal: [String: ExecutionUnits] = [:]
         
         switch result {
-        case .ok(let okResponse):
-            do {
-                let evaluationResultsJSON = try okResponse.body.json
-                
-                if let evaluationResults = evaluationResultsJSON.value["result"] as? [[String: Any]] {
-                    for evaluationResult in evaluationResults {
-                        if let validator = evaluationResult["validator"] as? [String: Any],
-                           let purpose = validator["purpose"] as? String,
-                           let index = validator["index"] as? Int,
-                           let budget = evaluationResult["budget"] as? [String: Any],
-                           let memory = budget["memory"] as? Int,
-                           let cpu = budget["cpu"] as? Int {
-                            
-                            // Handle purpose rename as in Python version
-                            let normalizedPurpose = purpose == "withdraw" ? "withdrawal" : purpose
-                            let key = "\(normalizedPurpose):\(index)"
-                            
-                            returnVal[key] = ExecutionUnits(
-                                mem: memory,
-                                steps: cpu
-                            )
+            case .ok(let okResponse):
+                do {
+                    let evaluationResultsJSON = try okResponse.body.json
+                    
+                    if let evaluationResults = evaluationResultsJSON.value["result"] as? [[String: Any]] {
+                        for evaluationResult in evaluationResults {
+                            if let validator = evaluationResult["validator"] as? [String: Any],
+                               let purpose = validator["purpose"] as? String,
+                               let index = validator["index"] as? Int,
+                               let budget = evaluationResult["budget"] as? [String: Any],
+                               let memory = budget["memory"] as? Int,
+                               let cpu = budget["cpu"] as? Int {
+                                
+                                // Handle purpose rename as in Python version
+                                let normalizedPurpose = purpose == "withdraw" ? "withdrawal" : purpose
+                                let key = "\(normalizedPurpose):\(index)"
+                                
+                                returnVal[key] = ExecutionUnits(
+                                    mem: memory,
+                                    steps: cpu
+                                )
+                            }
                         }
                     }
+                } catch {
+                    throw CardanoChainError.koiosError("Failed to parse evaluation response: \(error)")
                 }
-            } catch {
-                throw CardanoChainError.koiosError("Failed to parse evaluation response: \(error)")
-            }
-        default:
-            throw CardanoChainError.koiosError("Failed to evaluate TxCBOR: \(result)")
+            default:
+                throw CardanoChainError.koiosError("Failed to evaluate TxCBOR: \(result)")
         }
         return returnVal
     }

@@ -167,12 +167,14 @@ public class CardanoCliChainContext: ChainContext {
             configuration: Config(cardano: cardanoConfig)
         )
     }
+    
+    // MARK: - Public Methods
 
     /// Query the chain tip
     ///
     /// - Returns: The chain tip as a dictionary
     /// - Throws: CardanoChainError if the query fails
-    private func queryChainTip() async throws -> ChainTip {
+    public func queryChainTip() async throws -> ChainTip {
         let result = try await cli.query.tip()
 
         self.lastChainTipFetch = Date().timeIntervalSince1970
@@ -184,7 +186,7 @@ public class CardanoCliChainContext: ChainContext {
     ///
     /// - Returns: The protocol parameters as a dictionary
     /// - Throws: CardanoChainError if the query fails
-    private func queryCurrentProtocolParams() async throws -> ProtocolParameters {
+    public func queryCurrentProtocolParams() async throws -> ProtocolParameters {
         let result = try await cli.query.protocolParameters()
         guard let data = result.data(using: .utf8) else {
             throw CardanoChainError.valueError("Failed to parse protocol parameters JSON")
@@ -199,7 +201,7 @@ public class CardanoCliChainContext: ChainContext {
     ///
     /// - Returns: True if the chain tip has been updated, false otherwise
     /// - Throws: CardanoChainError if the query fails
-    private func isChainTipUpdated() async throws -> Bool {
+    public func isChainTipUpdated() async throws -> Bool {
         // Fetch at almost every refetchChainTipInterval seconds
         if Date().timeIntervalSince1970 - lastChainTipFetch < refetchChainTipInterval {
             return false
@@ -209,6 +211,8 @@ public class CardanoCliChainContext: ChainContext {
 
         return syncProgress != 100.0
     }
+    
+    // MARK: - Private Methods
 
     /// Get a script object from a reference script dictionary
     ///

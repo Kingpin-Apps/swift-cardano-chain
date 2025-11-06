@@ -18,8 +18,8 @@ public class BlockFrostChainContext: ChainContext {
     public var api: Blockfrost
     private var epochInfo: Components.Schemas.EpochContent?
     private var _epoch: Int?
-    private var _genesisParam: GenesisParameters?
-    private var _protocolParam: ProtocolParameters?
+    private var _genesisParameters: GenesisParameters?
+    private var _protocolParameters: ProtocolParameters?
     private let _network: SwiftCardanoCore.Network
     
     public var networkId: NetworkId {
@@ -60,11 +60,11 @@ public class BlockFrostChainContext: ChainContext {
             throw CardanoChainError.blockfrostError("Self is nil")
         }
         
-        if try await self.checkEpochAndUpdate() || self._genesisParam == nil {
+        if try await self.checkEpochAndUpdate() || self._genesisParameters == nil {
             let response = try await api.client.getGenesis()
             do {
                 let genesis = try response.ok.body.json
-                self._genesisParam = GenesisParameters(
+                self._genesisParameters = GenesisParameters(
                     activeSlotsCoefficient: genesis.activeSlotsCoefficient,
                     epochLength: genesis.epochLength,
                     maxKesEvolutions: genesis.maxKesEvolutions,
@@ -81,7 +81,7 @@ public class BlockFrostChainContext: ChainContext {
                 throw CardanoChainError.blockfrostError("Failed to get getGenesis: \(response)")
             }
         }
-        return self._genesisParam!
+        return self._genesisParameters!
     }
 
     public lazy var protocolParameters: () async throws -> ProtocolParameters  = { [weak self] in
@@ -89,95 +89,11 @@ public class BlockFrostChainContext: ChainContext {
             throw CardanoChainError.blockfrostError("Self is nil")
         }
         
-        if try await self.checkEpochAndUpdate() || self._protocolParam == nil {
-            let response = try await api.client.getEpochsLatestParameters()
-            do {
-                let protocolParams = try response.ok.body.json
-                
-                let costModels = protocolParams.costModels.unsafelyUnwrapped.additionalProperties.value
-                
-                self._protocolParam = ProtocolParameters(
-                    collateralPercentage: protocolParams.collateralPercent!,
-                    committeeMaxTermLength: Int(protocolParams.committeeMaxTermLength!)!,
-                    committeeMinSize: Int(protocolParams.committeeMinSize!)!,
-                    costModels: ProtocolParametersCostModels(
-                        PlutusV1: (costModels["PlutusV1"] as! [String: Int]).map { key, value in
-                                return value
-                            },
-                        PlutusV2: (costModels["PlutusV2"] as! [String: Int]).map { key, value in
-                                return value
-                            },
-                        PlutusV3: (costModels["PlutusV3"] as! [String: Int]).map { key, value in
-                                return value
-                            }
-                    ),
-                    dRepActivity: Int(protocolParams.drepActivity!)!,
-                    dRepDeposit: Int(protocolParams.drepDeposit!)!,
-                    dRepVotingThresholds: DRepVotingThresholds(
-                        committeeNoConfidence: protocolParams.dvtCommitteeNoConfidence!,
-                        committeeNormal: protocolParams.dvtCommitteeNormal!,
-                        hardForkInitiation: protocolParams.dvtHardForkInitiation!,
-                        motionNoConfidence: protocolParams.dvtMotionNoConfidence!,
-                        ppEconomicGroup: protocolParams.dvtPPEconomicGroup!,
-                        ppGovGroup: protocolParams.dvtPPGovGroup!,
-                        ppNetworkGroup: protocolParams.dvtPPNetworkGroup!,
-                        ppTechnicalGroup: protocolParams.dvtPPTechnicalGroup!,
-                        treasuryWithdrawal: protocolParams.dvtTreasuryWithdrawal!,
-                        updateToConstitution: protocolParams.dvtUpdateToConstitution!
-                    ),
-                    executionUnitPrices: ExecutionUnitPrices(
-                        priceMemory: protocolParams.priceMem!,
-                        priceSteps: protocolParams.priceStep!
-                    ),
-                    govActionDeposit: Int(protocolParams.govActionDeposit!)!,
-                    govActionLifetime: Int(protocolParams.govActionLifetime!)!,
-                    maxBlockBodySize: Int(
-                        exactly: protocolParams.maxBlockSize
-                    )!,
-                    maxBlockExecutionUnits: ProtocolParametersExecutionUnits(
-                        memory: Int(protocolParams.maxBlockExMem!)!,
-                        steps: Int64(protocolParams.maxBlockExSteps!)!
-                    ),
-                    maxBlockHeaderSize: Int(protocolParams.maxBlockHeaderSize),
-                    maxCollateralInputs: protocolParams.maxCollateralInputs!,
-                    maxTxExecutionUnits: ProtocolParametersExecutionUnits(
-                        memory: Int(protocolParams.maxTxExMem!)!,
-                        steps: Int64(protocolParams.maxTxExSteps!)!
-                    ),
-                    maxTxSize: protocolParams.maxTxSize,
-                    maxValueSize: Int(protocolParams.maxValSize!)!,
-                    minFeeRefScriptCostPerByte: Int(
-                        protocolParams.minFeeRefScriptCostPerByte!
-                    ),
-                    minPoolCost: Int(protocolParams.minPoolCost)!,
-                    monetaryExpansion: protocolParams.rho,
-                    poolPledgeInfluence: protocolParams.a0,
-                    poolRetireMaxEpoch: protocolParams.eMax,
-                    poolVotingThresholds: ProtocolParametersPoolVotingThresholds(
-                        committeeNoConfidence: protocolParams.pvtMotionNoConfidence!,
-                        committeeNormal: protocolParams.pvtCommitteeNormal!,
-                        hardForkInitiation: protocolParams.pvtHardForkInitiation!,
-                        motionNoConfidence: protocolParams.pvtMotionNoConfidence!,
-                        ppSecurityGroup: protocolParams.pvtPPSecurityGroup!
-                    ),
-                    protocolVersion: ProtocolParametersProtocolVersion(
-                        major: protocolParams.protocolMajorVer,
-                        minor: protocolParams.protocolMinorVer
-                    ),
-                    stakeAddressDeposit: Int(protocolParams.keyDeposit)!,
-                    stakePoolDeposit: Int(protocolParams.poolDeposit)!,
-                    stakePoolTargetNum: protocolParams.nOpt,
-                    treasuryCut: protocolParams.tau,
-                    txFeeFixed: protocolParams.minFeeB,
-                    txFeePerByte: protocolParams.minFeeA,
-                    utxoCostPerByte: Int(protocolParams.coinsPerUtxoSize!)!
-                )
-                                                         
-            } catch {
-                throw CardanoChainError.blockfrostError("Failed to get getEpochsLatestParameters: \(response)")
-            }
+        if try await self.checkEpochAndUpdate() || self._protocolParameters == nil {
+            self._protocolParameters = try await self.queryCurrentProtocolParams()
         }
-        return self._protocolParam!
+        
+        return self._protocolParameters!
     }
 
     // MARK: - Initialization
@@ -222,6 +138,125 @@ public class BlockFrostChainContext: ChainContext {
                 .blockfrostError(
                     "Failed to get epoch info: \(error.localizedDescription)"
                 )
+        }
+    }
+    
+    // MARK: - Public Methods
+    
+    /// Query the chain tip
+    ///
+    /// - Returns: The chain tip as a dictionary
+    /// - Throws: CardanoChainError if the query fails
+    public func queryChainTip() async throws -> ChainTip {
+        do {
+            let response = try await api.client.getBlocksLatest()
+            let json = try response.ok.body.json
+            
+            return ChainTip(
+                block: json.height,
+                epoch: json.epoch,
+                era: nil,
+                hash: json.hash,
+                slot: json.slot,
+                slotInEpoch: json.epochSlot,
+                slotsToEpochEnd: nil,
+                syncProgress: nil
+            )
+        } catch {
+            throw CardanoChainError.blockfrostError("Failed to get blocksLatest: \(error)")
+        }
+    }
+    
+    /// Query the current protocol parameters
+    ///
+    /// - Returns: The protocol parameters as a dictionary
+    /// - Throws: CardanoChainError if the query fails
+    public func queryCurrentProtocolParams() async throws -> ProtocolParameters {
+        do {
+            let response = try await api.client.getEpochsLatestParameters()
+            let protocolParams = try response.ok.body.json
+            
+            let costModels = protocolParams.costModels.unsafelyUnwrapped.additionalProperties.value
+            
+            return ProtocolParameters(
+                collateralPercentage: protocolParams.collateralPercent!,
+                committeeMaxTermLength: Int(protocolParams.committeeMaxTermLength!)!,
+                committeeMinSize: Int(protocolParams.committeeMinSize!)!,
+                costModels: ProtocolParametersCostModels(
+                    PlutusV1: (costModels["PlutusV1"] as! [String: Int]).map { key, value in
+                        return value
+                    },
+                    PlutusV2: (costModels["PlutusV2"] as! [String: Int]).map { key, value in
+                        return value
+                    },
+                    PlutusV3: (costModels["PlutusV3"] as! [String: Int]).map { key, value in
+                        return value
+                    }
+                ),
+                dRepActivity: Int(protocolParams.drepActivity!)!,
+                dRepDeposit: Int(protocolParams.drepDeposit!)!,
+                dRepVotingThresholds: DRepVotingThresholds(
+                    committeeNoConfidence: protocolParams.dvtCommitteeNoConfidence!,
+                    committeeNormal: protocolParams.dvtCommitteeNormal!,
+                    hardForkInitiation: protocolParams.dvtHardForkInitiation!,
+                    motionNoConfidence: protocolParams.dvtMotionNoConfidence!,
+                    ppEconomicGroup: protocolParams.dvtPPEconomicGroup!,
+                    ppGovGroup: protocolParams.dvtPPGovGroup!,
+                    ppNetworkGroup: protocolParams.dvtPPNetworkGroup!,
+                    ppTechnicalGroup: protocolParams.dvtPPTechnicalGroup!,
+                    treasuryWithdrawal: protocolParams.dvtTreasuryWithdrawal!,
+                    updateToConstitution: protocolParams.dvtUpdateToConstitution!
+                ),
+                executionUnitPrices: ExecutionUnitPrices(
+                    priceMemory: protocolParams.priceMem!,
+                    priceSteps: protocolParams.priceStep!
+                ),
+                govActionDeposit: Int(protocolParams.govActionDeposit!)!,
+                govActionLifetime: Int(protocolParams.govActionLifetime!)!,
+                maxBlockBodySize: Int(
+                    exactly: protocolParams.maxBlockSize
+                )!,
+                maxBlockExecutionUnits: ProtocolParametersExecutionUnits(
+                    memory: Int(protocolParams.maxBlockExMem!)!,
+                    steps: Int64(protocolParams.maxBlockExSteps!)!
+                ),
+                maxBlockHeaderSize: Int(protocolParams.maxBlockHeaderSize),
+                maxCollateralInputs: protocolParams.maxCollateralInputs!,
+                maxTxExecutionUnits: ProtocolParametersExecutionUnits(
+                    memory: Int(protocolParams.maxTxExMem!)!,
+                    steps: Int64(protocolParams.maxTxExSteps!)!
+                ),
+                maxTxSize: protocolParams.maxTxSize,
+                maxValueSize: Int(protocolParams.maxValSize!)!,
+                minFeeRefScriptCostPerByte: Int(
+                    protocolParams.minFeeRefScriptCostPerByte!
+                ),
+                minPoolCost: Int(protocolParams.minPoolCost)!,
+                monetaryExpansion: protocolParams.rho,
+                poolPledgeInfluence: protocolParams.a0,
+                poolRetireMaxEpoch: protocolParams.eMax,
+                poolVotingThresholds: ProtocolParametersPoolVotingThresholds(
+                    committeeNoConfidence: protocolParams.pvtMotionNoConfidence!,
+                    committeeNormal: protocolParams.pvtCommitteeNormal!,
+                    hardForkInitiation: protocolParams.pvtHardForkInitiation!,
+                    motionNoConfidence: protocolParams.pvtMotionNoConfidence!,
+                    ppSecurityGroup: protocolParams.pvtPPSecurityGroup!
+                ),
+                protocolVersion: ProtocolParametersProtocolVersion(
+                    major: protocolParams.protocolMajorVer,
+                    minor: protocolParams.protocolMinorVer
+                ),
+                stakeAddressDeposit: Int(protocolParams.keyDeposit)!,
+                stakePoolDeposit: Int(protocolParams.poolDeposit)!,
+                stakePoolTargetNum: protocolParams.nOpt,
+                treasuryCut: protocolParams.tau,
+                txFeeFixed: protocolParams.minFeeB,
+                txFeePerByte: protocolParams.minFeeA,
+                utxoCostPerByte: Int(protocolParams.coinsPerUtxoSize!)!
+            )
+            
+        } catch {
+            throw CardanoChainError.blockfrostError("Failed to get getEpochsLatestParameters: \(error)")
         }
     }
 
