@@ -1,5 +1,5 @@
 {
-  "originHash" : "2f99fc7573ddc010de5f396e2b8eb1d28da87e064ced6bd92c3ab0b93a9bbb6a",
+  "originHash" : "66d50280858967963746d81140c669a2f531a6aa6e0533903686bbeee18efbbb",
   "pins" : [
     {
       "identity" : "base32",
@@ -150,8 +150,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/Kingpin-Apps/swift-cardano-core.git",
       "state" : {
-        "revision" : "be50e9be351e040f34aa0bdd1e5c714171890eae",
-        "version" : "0.2.19"
+        "revision" : "327d3a1f88b5100f48734c376cc17af1a6e115b3",
+        "version" : "0.2.22"
       }
     },
     {
@@ -159,8 +159,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/Kingpin-Apps/swift-cardano-utils.git",
       "state" : {
-        "revision" : "8216909eac78887f816d39587b5ffb5d22056f7f",
-        "version" : "0.1.20"
+        "revision" : "dc13a1694061722d30e9ca0115e419d5802f5784",
+        "version" : "0.1.22"
       }
     },
     {
@@ -177,8 +177,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/apple/swift-configuration",
       "state" : {
-        "revision" : "7e5bc11e2c455da4aa8b73f4be356d7f0c3dc763",
-        "version" : "0.1.1"
+        "revision" : "9d5e40727efd060fb9b41b69932738f478abaa43",
+        "version" : "0.2.0"
       }
     },
     {
