@@ -26,6 +26,9 @@ public protocol ChainContext: CustomStringConvertible, CustomDebugStringConverti
     /// Current epoch number
     var epoch: () async throws -> Int { get }
     
+    /// Current era
+    var era: () async throws -> Era? { get }
+    
     /// Slot number of last block
     var lastBlockSlot: () async throws -> Int { get }
     

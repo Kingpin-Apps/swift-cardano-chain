@@ -26,6 +26,14 @@ public class BlockFrostChainContext: ChainContext {
         self._network.networkId
     }
     
+    public lazy var era: () async throws -> Era? = { [weak self] in
+        guard var self = self else {
+            throw CardanoChainError.valueError("Self is nil")
+        }
+        
+        return Era.fromEpoch(epoch: EpochNumber(try await self.epoch()))
+    }
+    
     public lazy var epoch: () async throws -> Int = { [weak self] in
         guard let self = self else {
             throw CardanoChainError.blockfrostError("Self is nil")
