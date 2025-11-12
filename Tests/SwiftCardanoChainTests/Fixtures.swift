@@ -111,6 +111,8 @@ struct CLICommands {
     static let utxos = ["conway", "query", "utxo", "--address", "addr_test1qp4kux2v7xcg9urqssdffff5p0axz9e3hcc43zz7pcuyle0e20hkwsu2ndpd9dh9anm4jn76ljdz0evj22stzrw9egxqmza5y3", "--out-file",  "/dev/stdout", "--testnet-magic", "2"]
     
     static let stakeAddressInfo = ["conway", "query", "stake-address-info", "--address", "stake_test1upyz3gk6mw5he20apnwfn96cn9rscgvmmsxc9r86dh0k66gswf59n",  "--out-file", "/dev/stdout", "--testnet-magic", "2"]
+    
+    static let stakePools = ["conway", "query", "stake-pools", "--testnet-magic", "2"]
 }
 
 struct CLIResponse {
@@ -216,6 +218,14 @@ struct CLIResponse {
                 "voteDelegation": "keyHash-b02f7b335aebf284bbdc20bdc3b59e4e183ae2cfc47ad2d8bc19a241"
             }
         ]
+        """
+    
+    static let stakePools = """
+        pool1qqa8tkycj4zck4sy7n8mqr22x5g7tvm8hnp9st95wmuvvtw28th
+        pool1qzq896ke4meh0tn9fl0dcnvtn2rzdz75lk3h8nmsuew8z5uln7r
+        pool1qzhrd5sd0v0r6q2kqmaz07tvgry72whcjw0xsmnttgyuxtzpkkx
+        pool1qzamfq0qzpggch2rk9daqq8skky7rhvs5g38lchnhw67sve4d36
+        pool1qrjk9dqdaydy207lw4hf3zlxxg2qlxvxp9kvxx9fscccgwmgfv9
         """
 }
 

@@ -344,6 +344,13 @@ public class CardanoCliChainContext: ChainContext {
     public func stakeAddressInfo(address: Address) async throws -> [StakeAddressInfo] {
         return try await cli.stakeAddressInfo(address: address)
     }
+    
+    /// Get the list of stake pools
+    ///
+    /// - Returns: List of stake pool IDs
+    public func stakePools() async throws -> [String] {
+        return try await cli.query.stakePools(arguments: [])
+    }
 
     /// Get the cardano-cli version
     ///

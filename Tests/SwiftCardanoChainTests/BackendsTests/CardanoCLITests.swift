@@ -366,4 +366,39 @@ struct CardanoCLIContextTests {
                 .id((.hex, .cip105)) == "b02f7b335aebf284bbdc20bdc3b59e4e183ae2cfc47ad2d8bc19a241"
         )
     }
+    
+    @Test("Test stakePools")
+    func testStakePools() async throws {
+        let config = createMockConfig()
+        let runner = createCardaonCLIMockCommandRunner(config: config)
+        
+        given(runner)
+            .run(
+                arguments: .value([config.cardano.cli!.string] + CLICommands.stakePools),
+                environment: .any,
+                workingDirectory: .any
+            )
+            .willReturn(
+                AsyncThrowingStream<CommandEvent, any Error> { continuation in
+                    continuation.yield(
+                        .standardOutput([UInt8](CLIResponse.stakePools.utf8))
+                    )
+                    continuation.finish()
+                }
+            )
+        
+        let cli = try await CardanoCLI(configuration: config, commandRunner: runner)
+        
+        let chainContext = try await CardanoCliChainContext(
+            nodeConfig: FilePath(configFilePath!),
+            network: .preview,
+            cli: cli
+        )
+        
+        let stakePools = try await chainContext.stakePools()
+        
+        #expect(
+            stakePools[0] == "pool1qqa8tkycj4zck4sy7n8mqr22x5g7tvm8hnp9st95wmuvvtw28th"
+        )
+    }
 }

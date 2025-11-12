@@ -583,4 +583,41 @@ public class BlockFrostChainContext: ChainContext {
             throw CardanoChainError.blockfrostError("Failed to get getAccountsStakeAddressRewards: \(rewardsState)")
         }
     }
+    
+    /// Get the list of stake pools
+    ///
+    /// - Returns: List of stake pool IDs
+    public func stakePools() async throws -> [String] {
+        // Fetch all stake pools (paginated)
+        var allStakePools: [String] = []
+        var page = 1
+        var hasMorePages = true
+        
+        while hasMorePages {
+            let response = try await api.client.getPools(
+                Operations.GetPools.Input(
+                    query: Operations.GetPools.Input.Query(
+                        count: 100,
+                        page: page,
+                        order: .asc
+                    )
+                )
+            )
+            
+            do {
+                let stakePools = try response.ok.body.json
+                
+                allStakePools.append(contentsOf: stakePools.map { $0 })
+                
+                if stakePools.isEmpty || stakePools.count < 100 {
+                    hasMorePages = false
+                } else {
+                    page += 1
+                }
+            } catch {
+                throw CardanoChainError.blockfrostError("Failed to get stake pools: \(response)")
+            }
+        }
+        return allStakePools
+    }
 }

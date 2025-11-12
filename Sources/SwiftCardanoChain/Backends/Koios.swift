@@ -517,6 +517,31 @@ public class KoiosChainContext: ChainContext {
         }
     }
     
+    /// Get the list of stake pools
+    ///
+    /// - Returns: List of stake pool IDs
+    public func stakePools() async throws -> [String] {
+        let response = try await api.client.poolList(
+            Operations.PoolList.Input(
+                query: .init(
+                    select: [
+                        "pool_bech32_id"
+                    ]
+                )
+            )
+        )
+        
+        do {
+            let poolList = try response.ok.body.json
+            let poolIds = poolList.compactMap {
+                $0.poolIdBech32?.value as? String
+            }
+            return poolIds
+        } catch {
+            throw CardanoChainError.koiosError("Failed to get stake pools: \(error)")
+        }
+    }
+    
     /// Get all addresses holding a specific asset.
     /// - Parameters:
     ///   - assetPolicy: The asset policy ID.

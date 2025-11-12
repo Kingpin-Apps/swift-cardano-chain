@@ -61,6 +61,10 @@ public protocol ChainContext: CustomStringConvertible, CustomDebugStringConverti
     /// - Parameter address: The stake address.
     /// - Returns: List of `StakeAddressInfo` object.
     func stakeAddressInfo(address: Address) async throws -> [StakeAddressInfo]
+    
+    /// Get the list of stake pools on the chain.
+    /// - Returns: List of stake pool IDs as Bech32 strings.
+    func stakePools() async throws -> [String]
 }
 
 // MARK: - Default Implementation
