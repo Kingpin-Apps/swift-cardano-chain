@@ -1,3 +1,9 @@
+## 0.1.42 (2025-11-12)
+
+### Fix
+
+- add stakePools to Chain Context
+
 ## 0.1.41 (2025-11-10)
 
 ### Fix
