@@ -18,11 +18,12 @@ let package = Package(
             targets: ["SwiftCardanoChain"]),
     ],
     dependencies: [
-        .package(url: "https://github.com/Kingpin-Apps/swift-cardano-core.git", .upToNextMinor(from: "0.2.23")),
+        .package(url: "https://github.com/Kingpin-Apps/swift-cardano-core.git", .upToNextMinor(from: "0.2.24")),
         .package(url: "https://github.com/Kingpin-Apps/swift-cardano-utils.git", .upToNextMinor(from: "0.1.22")),
         .package(url: "https://github.com/Kingpin-Apps/swift-blockfrost-api.git", from: "0.1.5"),
         .package(url: "https://github.com/Kingpin-Apps/swift-handles-api.git", from: "0.1.0"),
         .package(url: "https://github.com/Kingpin-Apps/swift-koios.git", from: "0.1.5"),
+        .package(url: "https://github.com/Kingpin-Apps/swift-ogmios.git", from: "0.1.3"),
         .package(url: "https://github.com/KINGH242/PotentCodables.git", .upToNextMinor(from: "3.6.0")),
     ],
     targets: [
@@ -37,6 +38,7 @@ let package = Package(
                 .product(name: "SwiftBlockfrostAPI", package: "swift-blockfrost-api"),
                 .product(name: "SwiftHandlesAPI", package: "swift-handles-api"),
                 .product(name: "SwiftKoios", package: "swift-koios"),
+                .product(name: "SwiftOgmios", package: "swift-ogmios")
             ]
         ),
         .testTarget(

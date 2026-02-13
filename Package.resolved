@@ -1,5 +1,5 @@
 {
-  "originHash" : "a12314db8005ee01e20dad8cd020c85b37189e76735b617cc916de17a5e07f09",
+  "originHash" : "6c4dcb5181b092f5f6a2bec136026d1cf81b1ebcd9c84c002fb886056bbd41ee",
   "pins" : [
     {
       "identity" : "base32",
@@ -150,8 +150,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/Kingpin-Apps/swift-cardano-core.git",
       "state" : {
-        "revision" : "becbd32df2d1edf7a3d5f2533ce5ebc23ec8fe58",
-        "version" : "0.2.23"
+        "revision" : "3b82264a798ae7cc32129ec3c3175649e8643ad9",
+        "version" : "0.2.24"
       }
     },
     {
@@ -260,6 +260,15 @@
       "state" : {
         "revision" : "e0ec0f5f3af6f3e4d5e7a19d2af26b481acb6ba8",
         "version" : "1.0.3"
+      }
+    },
+    {
+      "identity" : "swift-ogmios",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/Kingpin-Apps/swift-ogmios.git",
+      "state" : {
+        "revision" : "52525b431f4ccba5a708d3856d78987509e95177",
+        "version" : "0.1.3"
       }
     },
     {
