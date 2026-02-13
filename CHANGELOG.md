@@ -1,3 +1,9 @@
+## 0.2.0 (2026-02-12)
+
+### Feat
+
+- add Ogmios chain context
+
 ## 0.1.42 (2025-11-12)
 
 ### Fix
