@@ -370,7 +370,9 @@ public class KoiosChainContext: ChainContext {
                 
                 if let inlineDatum = result.inlineDatum?.value as? String,
                    let datumData = Data(hexString: inlineDatum) {
-                    datumOption = try DatumOption.fromCBOR(data: datumData)
+                    // Parse as PlutusData first, then wrap in DatumOption
+                    let plutusData = try PlutusData.fromCBOR(data: datumData)
+                    datumOption = DatumOption(datum: plutusData)
                 }
                 
                 if let referenceScriptValue = result.referenceScript?.value {

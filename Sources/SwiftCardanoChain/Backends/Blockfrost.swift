@@ -465,8 +465,10 @@ public class BlockFrostChainContext: ChainContext {
                 }
                 
                 if let inlineDatum = result.inlineDatum,
-                    let datumData = Data(hexString: inlineDatum) {
-                    datumOption = try DatumOption.fromCBOR(data: datumData)
+                   let datumData = Data(hexString: inlineDatum) {
+                    // Parse as PlutusData first, then wrap in DatumOption
+                    let plutusData = try PlutusData.fromCBOR(data: datumData)
+                    datumOption = DatumOption(datum: plutusData)
                 }
 //                else if let inlineDatum = result.inlineDatum as? [AnyHashable: Any] {
 //                    let plutusData = try PlutusData.fromDict(inlineDatum)
@@ -492,7 +494,7 @@ public class BlockFrostChainContext: ChainContext {
 
             return utxos
         } catch {
-            throw CardanoChainError.transactionFailed("Failed to get UTxOs: \(addressUtxos)")
+            throw CardanoChainError.blockfrostError("Failed to get UTxOs: \(error)")
         }
     }
     
