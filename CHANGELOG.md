@@ -1,3 +1,9 @@
+## 0.2.1 (2026-02-13)
+
+### Fix
+
+- handle utxo data properly and fix errors
+
 ## 0.2.0 (2026-02-12)
 
 ### Feat
