@@ -8,11 +8,20 @@ public enum TransactionData{
     case string(String)
 }
 
+/// Enum representing the type of chain context, either online or offline.
+public enum ContextType {
+    case online
+    case offline
+}
+
 /// Interfaces through which the library interacts with the Cardano blockchain.
 public protocol ChainContext: CustomStringConvertible, CustomDebugStringConvertible {
     
     /// The name of the chain context
     var name: String { get }
+    
+    /// The type of the chain context
+    var type: ContextType { get }
     
     /// Get current protocol parameters
     var protocolParameters: () async throws -> ProtocolParameters { get }
@@ -65,6 +74,13 @@ public protocol ChainContext: CustomStringConvertible, CustomDebugStringConverti
     /// Get the list of stake pools on the chain.
     /// - Returns: List of stake pool IDs as Bech32 strings.
     func stakePools() async throws -> [String]
+    
+    /// Get the KES period information of a stake pool from a given operational certificate and/or pool id.
+    /// - Parameters:
+    ///   - pool: The pool operator's ID as a Bech32 string. Optional if `opCert` is provided.
+    ///   - opCert: The operational certificate as a CBOR-encoded byte array. Optional if `pool` is provided.
+    /// - Returns: The KES period information, including the current KES period and the remaining KES periods before the certificate expires.
+    func kesPeriodInfo(pool: PoolOperator?, opCert: OperationalCertificate?) async throws -> KESPeriodInfo
 }
 
 // MARK: - Default Implementation

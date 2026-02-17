@@ -58,6 +58,8 @@ public class OgmiosChainContext: ChainContext {
     /// The name identifier for this chain context.
     public var name: String { "Ogmios" }
     
+    public var type: ContextType { .online }
+    
     /// The underlying Ogmios client used for all API calls.
     public var client: OgmiosClient
     
@@ -466,6 +468,65 @@ public class OgmiosChainContext: ChainContext {
     public func stakePools() async throws -> [String] {
         let response = try await client.ledgerStateQuery.stakePools.result()
         return response.keys.map { $0.value }
+    }
+    
+    /// Get the KES period information for a stake pool via Ogmios.
+    ///
+    /// Queries the Ogmios server's ledger state for operational certificate counters.
+    /// This uses the `ledgerStateQuery.operationalCertificates` endpoint to retrieve
+    /// the on-chain certificate counter for the specified pool.
+    ///
+    /// - Parameters:
+    ///   - pool: The pool operator identifier. **Required** for Ogmios backend.
+    ///   - opCert: The local operational certificate file. If provided, includes on-disk certificate details.
+    /// - Returns: A `KESPeriodInfo` containing certificate counter information.
+    /// - Throws: `CardanoChainError.invalidArgument` if pool is not provided or not found.
+    ///
+    /// ## Example
+    /// ```swift
+    /// let pool = try PoolOperator(from: "pool1pu5jlj4q9w9jlxeu370a3c9myx47md5j5m2str0naunn2q3lkdy")
+    /// let kesInfo = try await chainContext.kesPeriodInfo(pool: pool, opCert: myOpCert)
+    /// if let onDisk = kesInfo.onDiskOpCertCount,
+    ///    let nextChain = kesInfo.nextChainOpCertCount {
+    ///     print("Certificate is \(onDisk >= nextChain ? "ready" : "not ready") for rotation")
+    /// }
+    /// ```
+    public func kesPeriodInfo(pool: PoolOperator?, opCert: SwiftCardanoCore.OperationalCertificate?) async throws -> KESPeriodInfo {
+        guard let pool = pool else {
+            throw CardanoChainError.invalidArgument("Pool operator must be provided")
+        }
+        
+        let poolId = try pool.id(.bech32)
+        
+        let opCerts = try await client.ledgerStateQuery.operationalCertificates.result()
+        
+        guard let matchingPool = opCerts.value.first(where: { (key, value) in
+            key.value == poolId
+        }) else {
+            throw CardanoChainError.invalidArgument("Operational certificate not found for pool \(poolId)")
+        }
+        
+        let opCertCounter: Int = matchingPool.value
+        
+        let onChainOpCertCount = opCertCounter
+        let nextChainOpCertCount = onChainOpCertCount + 1
+        
+        if let opCert = opCert {
+            let onDiskOpCertCount = Int(opCert.sequenceNumber)
+            let onDiskKESStart = Int(opCert.kesPeriod)
+            
+            return KESPeriodInfo(
+                onChainOpCertCount: onChainOpCertCount,
+                onDiskOpCertCount: onDiskOpCertCount,
+                nextChainOpCertCount: nextChainOpCertCount,
+                onDiskKESStart: onDiskKESStart
+            )
+        }
+        
+        return KESPeriodInfo(
+            onChainOpCertCount: onChainOpCertCount,
+            nextChainOpCertCount: nextChainOpCertCount,
+        )
     }
     
     // MARK: - Private Helper Methods

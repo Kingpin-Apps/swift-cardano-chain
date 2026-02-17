@@ -11,6 +11,8 @@ public class CardanoCliChainContext: ChainContext {
     // MARK: - Properties
     
     public var name: String {  "Cardano-CLI" }
+    public var type: ContextType { .online }
+    
     public let cli: CardanoCLI
     private var lastKnownBlockSlot: Int = 0
     private var lastChainTipFetch: TimeInterval = 0
@@ -367,6 +369,68 @@ public class CardanoCliChainContext: ChainContext {
     /// - Throws: CardanoChainError if the evaluation fails
     public func evaluateTxCBOR(cbor: Data) async throws -> [String: ExecutionUnits] {
         // TODO: Implement transaction evaluation
-        throw CardanoChainError.valueError("Transaction evaluation not implemented yet")
+        throw CardanoChainError.notImplemented("Transaction evaluation not implemented yet")
+    }
+    
+    /// Get the KES period information for a stake pool using cardano-cli.
+    ///
+    /// Queries the local node for KES period information using `cardano-cli query kes-period-info`.
+    /// This provides detailed information about the operational certificate including the current
+    /// KES period and remaining periods before expiration.
+    ///
+    /// - Parameters:
+    ///   - pool: The pool operator identifier. Not used for CardanoCLI backend.
+    ///   - opCert: The local operational certificate file. **Required** for CardanoCLI backend.
+    /// - Returns: A `KESPeriodInfo` containing detailed certificate information from the node.
+    /// - Throws: `CardanoChainError.valueError` if opCert is not provided or query fails.
+    ///
+    /// ## Example
+    /// ```swift
+    /// let opCert = try OperationalCertificate.load(from: "/path/to/node.opcert")
+    /// let kesInfo = try await chainContext.kesPeriodInfo(pool: nil, opCert: opCert)
+    /// print("KES start period: \(kesInfo.onDiskKESStart ?? 0)")
+    /// ```
+    public func kesPeriodInfo(pool: PoolOperator?, opCert: OperationalCertificate?) async throws -> KESPeriodInfo {
+        guard let opCert = opCert else {
+            throw CardanoChainError.valueError("Operational certificate is required for KES period info")
+        }
+        
+        // Create a temporary file for the opCert
+        let tempDir = FileManager.default.temporaryDirectory
+        let tempOpCertFile = tempDir.appendingPathComponent(UUID().uuidString)
+        let tempQueryFile = tempDir.appendingPathComponent(UUID().uuidString)
+        
+        try opCert.save(to: tempOpCertFile.path)
+        
+        defer {
+            try? FileManager.default.removeItem(at: tempOpCertFile)
+            try? FileManager.default.removeItem(at: tempQueryFile)
+        }
+        
+        let _ = try await cli.query.kesPeriodInfo(
+            arguments: [
+                "--op-cert-file",
+                tempOpCertFile.path,
+                "--out-file",
+                tempQueryFile.path,
+            ]
+        )
+        
+        let data = try Data(contentsOf: URL(fileURLWithPath: tempQueryFile.path))
+        let obj = try JSONSerialization.jsonObject(with: data, options: [])
+        guard let dict = obj as? [String: Any] else {
+            throw CardanoChainError.valueError("Top-level JSON is not a dictionary")
+        }
+        
+        let onChainOpCertCount = dict["qKesNodeStateOperationalCertificateNumber"] as? Int ?? -1
+        let onDiskOpCertCount = dict["qKesOnDiskOperationalCertificateNumber"] as? Int ?? 0
+        let onDiskKESStart = dict["qKesStartKesInterval"] as? Int ?? 0
+        
+        return KESPeriodInfo(
+            onChainOpCertCount: onChainOpCertCount,
+            onDiskOpCertCount: onDiskOpCertCount,
+            nextChainOpCertCount: onChainOpCertCount + 1,
+            onDiskKESStart: onDiskKESStart
+        )
     }
 }

@@ -180,4 +180,41 @@ struct BlockfrostChainContextTests {
                 .id() == "drep15cfxz9exyn5rx0807zvxfrvslrjqfchrd4d47kv9e0f46uedqtc"
         )
     }
+    
+    @Test("Test kesPeriodInfo")
+    func testKESPeriodInfo() async throws {
+        let chainContext = try await BlockFrostChainContext(
+            projectId: "fake-project-id",
+            network: .preview,
+            client: Client(
+                serverURL: URL(string: "https://cardano-preview.blockfrost.io/api/v0")!,
+                transport: MockTransport()
+            )
+        )
+        
+        let pool = try PoolOperator(from: "pool1pu5jlj4q9w9jlxeu370a3c9myx47md5j5m2str0naunn2q3lkdy")
+        
+        let kesInfo = try await chainContext.kesPeriodInfo(pool: pool, opCert: nil)
+        
+        #expect(kesInfo.onChainOpCertCount == 42)
+        #expect(kesInfo.nextChainOpCertCount == 43)
+        #expect(kesInfo.onDiskOpCertCount == nil)
+        #expect(kesInfo.onDiskKESStart == nil)
+    }
+    
+    @Test("Test kesPeriodInfo throws without pool")
+    func testKESPeriodInfoThrowsWithoutPool() async throws {
+        let chainContext = try await BlockFrostChainContext(
+            projectId: "fake-project-id",
+            network: .preview,
+            client: Client(
+                serverURL: URL(string: "https://cardano-preview.blockfrost.io/api/v0")!,
+                transport: MockTransport()
+            )
+        )
+        
+        await #expect(throws: CardanoChainError.self) {
+            _ = try await chainContext.kesPeriodInfo(pool: nil, opCert: nil)
+        }
+    }
 }

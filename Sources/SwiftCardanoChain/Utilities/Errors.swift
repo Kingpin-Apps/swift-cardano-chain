@@ -10,6 +10,7 @@ enum CardanoChainError: Error, CustomStringConvertible, Equatable {
     case operationError(String?)
     case unsupportedNetwork(String?)
     case valueError(String?)
+    case notImplemented(String?)
     
     var description: String {
         switch self {
@@ -31,6 +32,8 @@ enum CardanoChainError: Error, CustomStringConvertible, Equatable {
                 return message ?? "The network is not supported."
             case .valueError(let message):
                 return message ?? "The value is invalid."
+            case .notImplemented(let message):
+                return message ?? "Not implemented yet."
         }
     }
 }

@@ -164,4 +164,63 @@ struct OgmiosChainContextTests {
             #expect(!error.description.isEmpty)
         }
     }
+    
+    @Test("Test KESPeriodInfo structure")
+    func testKESPeriodInfoStructure() async throws {
+        // Test KESPeriodInfo with all fields
+        let kesInfoFull = KESPeriodInfo(
+            onChainOpCertCount: 42,
+            onDiskOpCertCount: 43,
+            nextChainOpCertCount: 43,
+            onDiskKESStart: 100
+        )
+        
+        #expect(kesInfoFull.onChainOpCertCount == 42)
+        #expect(kesInfoFull.onDiskOpCertCount == 43)
+        #expect(kesInfoFull.nextChainOpCertCount == 43)
+        #expect(kesInfoFull.onDiskKESStart == 100)
+        
+        // Test KESPeriodInfo with partial fields (API-only response)
+        let kesInfoPartial = KESPeriodInfo(
+            onChainOpCertCount: 42,
+            nextChainOpCertCount: 43
+        )
+        
+        #expect(kesInfoPartial.onChainOpCertCount == 42)
+        #expect(kesInfoPartial.onDiskOpCertCount == nil)
+        #expect(kesInfoPartial.nextChainOpCertCount == 43)
+        #expect(kesInfoPartial.onDiskKESStart == nil)
+        
+        // Test KESPeriodInfo indicating pool has never minted
+        let kesInfoNeverMinted = KESPeriodInfo(
+            onChainOpCertCount: -1,
+            nextChainOpCertCount: 0
+        )
+        
+        #expect(kesInfoNeverMinted.onChainOpCertCount == -1)
+        #expect(kesInfoNeverMinted.nextChainOpCertCount == 0)
+    }
+    
+    @Test("Test KESPeriodInfo Codable")
+    func testKESPeriodInfoCodable() async throws {
+        let kesInfo = KESPeriodInfo(
+            onChainOpCertCount: 42,
+            onDiskOpCertCount: 43,
+            nextChainOpCertCount: 43,
+            onDiskKESStart: 100
+        )
+        
+        // Encode
+        let encoder = JSONEncoder()
+        let data = try encoder.encode(kesInfo)
+        
+        // Decode
+        let decoder = JSONDecoder()
+        let decoded = try decoder.decode(KESPeriodInfo.self, from: data)
+        
+        #expect(decoded.onChainOpCertCount == kesInfo.onChainOpCertCount)
+        #expect(decoded.onDiskOpCertCount == kesInfo.onDiskOpCertCount)
+        #expect(decoded.nextChainOpCertCount == kesInfo.nextChainOpCertCount)
+        #expect(decoded.onDiskKESStart == kesInfo.onDiskKESStart)
+    }
 }

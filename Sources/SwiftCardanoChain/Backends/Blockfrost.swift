@@ -13,7 +13,8 @@ import OpenAPIRuntime
 public class BlockFrostChainContext: ChainContext {
 
     // MARK: - Properties
-    public var name: String {  "Blockfrost" }
+    public var name: String { "Blockfrost" }
+    public var type: ContextType { .online }
 
     public var api: Blockfrost
     private var epochInfo: Components.Schemas.EpochContent?
@@ -621,5 +622,75 @@ public class BlockFrostChainContext: ChainContext {
             }
         }
         return allStakePools
+    }
+    
+    /// Get the KES period information for a stake pool.
+    ///
+    /// Retrieves operational certificate counter information from the pool's most recently minted block.
+    /// This is useful for stake pool operators to determine when to rotate their operational certificates.
+    ///
+    /// - Parameters:
+    ///   - pool: The pool operator identifier. **Required** for Blockfrost backend.
+    ///   - opCert: The local operational certificate file. If provided, includes on-disk certificate details.
+    /// - Returns: A `KESPeriodInfo` containing certificate counter information.
+    /// - Throws: `CardanoChainError.invalidArgument` if pool is not provided.
+    /// - Throws: `CardanoChainError.blockfrostError` if the pool has never minted a block or API call fails.
+    ///
+    /// ## Example
+    /// ```swift
+    /// let pool = try PoolOperator(from: "pool1pu5jlj4q9w9jlxeu370a3c9myx47md5j5m2str0naunn2q3lkdy")
+    /// let kesInfo = try await chainContext.kesPeriodInfo(pool: pool, opCert: nil)
+    /// print("On-chain cert counter: \(kesInfo.onChainOpCertCount ?? -1)")
+    /// ```
+    public func kesPeriodInfo(pool: PoolOperator?, opCert: OperationalCertificate?) async throws -> KESPeriodInfo {
+        guard let pool = pool else {
+            throw CardanoChainError.invalidArgument("Pool operator must be provided")
+        }
+        
+        let latestMintedBlockResponse = try await api.client.getPoolsPoolIdBlocks(
+            Operations.GetPoolsPoolIdBlocks.Input(
+                path: Operations.GetPoolsPoolIdBlocks.Input.Path(poolId: pool.id(.bech32)),
+                query: Operations.GetPoolsPoolIdBlocks.Input.Query(
+                    count: 1,
+                    order: .desc
+                )
+            )
+        )
+        
+        let latestMintedBlock = try latestMintedBlockResponse.ok.body.json[0]
+        
+        let blockInfoResponse = try await api.client.getBlocksHashOrNumber(
+            Operations.GetBlocksHashOrNumber.Input(
+                path: Operations.GetBlocksHashOrNumber.Input.Path(
+                    hashOrNumber: latestMintedBlock
+                )
+            )
+        )
+        
+        let blockInfo = try blockInfoResponse.ok.body.json
+        
+        guard let opCertCounter = blockInfo.opCertCounter else {
+            throw CardanoChainError.blockfrostError("Failed to get opCertCounter from block info: \(blockInfo)")
+        }
+        
+        let onChainOpCertCount = Int(opCertCounter)!
+        let nextChainOpCertCount = onChainOpCertCount + 1
+        
+        if let opCert = opCert {
+            let onDiskOpCertCount = Int(opCert.sequenceNumber)
+            let onDiskKESStart = Int(opCert.kesPeriod)
+            
+            return KESPeriodInfo(
+                onChainOpCertCount: onChainOpCertCount,
+                onDiskOpCertCount: onDiskOpCertCount,
+                nextChainOpCertCount: nextChainOpCertCount,
+                onDiskKESStart: onDiskKESStart
+            )
+        }
+        
+        return KESPeriodInfo(
+            onChainOpCertCount: onChainOpCertCount,
+            nextChainOpCertCount: nextChainOpCertCount,
+        )
     }
 }

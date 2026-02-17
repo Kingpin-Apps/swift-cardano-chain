@@ -212,6 +212,41 @@ struct KoiosChainContextTests {
         #expect(tip.slot == 123456789)
         #expect(tip.hash == "abcd1234efgh5678ijkl9012mnop3456qrst7890uvwx1234yzab5678cdef9012")
     }
+    
+    @Test("Test kesPeriodInfo")
+    func testKESPeriodInfo() async throws {
+        let chainContext = try await KoiosChainContext(
+            network: .preview,
+            client: Client(
+                serverURL: try SwiftKoios.Network.preview.url(),
+                transport: KoiosMockTransport()
+            )
+        )
+        
+        let pool = try PoolOperator(from: "pool1pu5jlj4q9w9jlxeu370a3c9myx47md5j5m2str0naunn2q3lkdy")
+        
+        let kesInfo = try await chainContext.kesPeriodInfo(pool: pool, opCert: nil)
+        
+        #expect(kesInfo.onChainOpCertCount == 42)
+        #expect(kesInfo.nextChainOpCertCount == 43)
+        #expect(kesInfo.onDiskOpCertCount == nil)
+        #expect(kesInfo.onDiskKESStart == nil)
+    }
+    
+    @Test("Test kesPeriodInfo throws without pool")
+    func testKESPeriodInfoThrowsWithoutPool() async throws {
+        let chainContext = try await KoiosChainContext(
+            network: .preview,
+            client: Client(
+                serverURL: try SwiftKoios.Network.preview.url(),
+                transport: KoiosMockTransport()
+            )
+        )
+        
+        await #expect(throws: CardanoChainError.self) {
+            _ = try await chainContext.kesPeriodInfo(pool: nil, opCert: nil)
+        }
+    }
 }
 
 // MARK: - Koios Mock Transport
@@ -343,6 +378,36 @@ struct KoiosMockTransport: ClientTransport {
                 {"pool_id_bech32": "pool1qzq896ke4meh0tn9fl0dcnvtn2rzdz75lk3h8nmsuew8z5uln7r"},
                 {"pool_id_bech32": "pool1qzhrd5sd0v0r6q2kqmaz07tvgry72whcjw0xsmnttgyuxtzpkkx"}
             ]
+            """.data(using: .utf8)!
+            
+        case "pool_info":
+            responseBody = """
+            [{
+                "pool_id_bech32": "pool1pu5jlj4q9w9jlxeu370a3c9myx47md5j5m2str0naunn2q3lkdy",
+                "pool_id_hex": "0f292fcaa02b8b2f9b3c8f9fd8e0bb21abedb692a6d5058df3ef2735",
+                "active_epoch_no": 100,
+                "vrf_key_hash": "vrf_key_hash",
+                "margin": 0.05,
+                "fixed_cost": "340000000",
+                "pledge": "1000000000000",
+                "reward_addr": "stake_test1upyz3gk6mw5he20apnwfn96cn9rscgvmmsxc9r86dh0k66gswf59n",
+                "owners": ["stake_test1upyz3gk6mw5he20apnwfn96cn9rscgvmmsxc9r86dh0k66gswf59n"],
+                "relays": [],
+                "meta_url": null,
+                "meta_hash": null,
+                "meta_json": null,
+                "pool_status": "registered",
+                "retiring_epoch": null,
+                "op_cert": "opcert_hash",
+                "op_cert_counter": 42,
+                "active_stake": "1000000000000",
+                "sigma": 0.001,
+                "block_count": 1000,
+                "live_pledge": "1000000000000",
+                "live_stake": "1000000000000",
+                "live_delegators": 100,
+                "live_saturation": 0.5
+            }]
             """.data(using: .utf8)!
             
         default:

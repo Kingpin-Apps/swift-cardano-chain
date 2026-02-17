@@ -1031,6 +1031,31 @@ struct MockTransport: ClientTransport {
                             drepId: "drep15cfxz9exyn5rx0807zvxfrvslrjqfchrd4d47kv9e0f46uedqtc"
                         )
                 )
+            case "get/pools/{pool_id}/blocks":
+                body = try JSONEncoder().encode(
+                    ["abcd1234efgh5678ijkl9012mnop3456qrst7890uvwx1234yzab5678cdef9012"]
+                )
+            case "get/blocks/{hash_or_number}":
+                body = try JSONEncoder().encode(
+                    Components.Schemas.BlockContent(
+                        time: Int(Date().timeIntervalSince1970),
+                        height: 123456,
+                        hash: "abcd1234efgh5678ijkl9012mnop3456qrst7890uvwx1234yzab5678cdef9012",
+                        slot: 123456789,
+                        epoch: 500,
+                        epochSlot: 65579,
+                        slotLeader: "pool1pu5jlj4q9w9jlxeu370a3c9myx47md5j5m2str0naunn2q3lkdy",
+                        size: 1000,
+                        txCount: 10,
+                        output: "1000000000",
+                        fees: "200000",
+                        blockVrf: "vrf_vk1test",
+                        opCertCounter: "42",
+                        previousBlock: "prevblock",
+                        nextBlock: nil,
+                        confirmations: 100
+                    )
+                )
             default:
                 return (
                     HTTPResponse(status: .notFound),

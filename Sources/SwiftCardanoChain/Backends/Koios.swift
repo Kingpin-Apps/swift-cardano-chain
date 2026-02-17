@@ -14,7 +14,9 @@ public class KoiosChainContext: ChainContext {
     
     // MARK: - Properties
     
-    public var name: String {  "Koios" }
+    public var name: String { "Koios" }
+    public var type: ContextType { .online }
+    
     public var api: Koios
     private var epochInfo: Components.Schemas.EpochInfoPayload?
     private var _epoch: Int?
@@ -583,5 +585,65 @@ public class KoiosChainContext: ChainContext {
         } catch {
             throw CardanoChainError.koiosError("Failed to get pool info: \(error)")
         }
+    }
+    
+    /// Get the KES period information for a stake pool.
+    ///
+    /// Retrieves operational certificate counter information from Koios pool info endpoint.
+    /// This is useful for stake pool operators to determine when to rotate their operational certificates.
+    ///
+    /// - Parameters:
+    ///   - pool: The pool operator identifier. **Required** for Koios backend.
+    ///   - opCert: The local operational certificate file. If provided, includes on-disk certificate details.
+    /// - Returns: A `KESPeriodInfo` containing certificate counter information.
+    /// - Throws: `CardanoChainError.invalidArgument` if pool is not provided.
+    /// - Throws: `CardanoChainError.koiosError` if pool info cannot be retrieved.
+    ///
+    /// ## Example
+    /// ```swift
+    /// let pool = try PoolOperator(from: "pool1pu5jlj4q9w9jlxeu370a3c9myx47md5j5m2str0naunn2q3lkdy")
+    /// let kesInfo = try await chainContext.kesPeriodInfo(pool: pool, opCert: nil)
+    /// print("Next cert counter should be: \(kesInfo.nextChainOpCertCount ?? 0)")
+    /// ```
+    public func kesPeriodInfo(pool: PoolOperator?, opCert: OperationalCertificate?) async throws -> KESPeriodInfo {
+        guard let pool = pool else {
+            throw CardanoChainError.invalidArgument("Pool operator must be provided")
+        }
+        
+        let poolInfoResponse = try await api.client.poolInfo(
+            Operations.PoolInfo.Input(
+                body: .json(.init(
+                    _poolBech32Ids: [pool.id(.bech32)]
+                ))
+            )
+        )
+        
+        let poolInfo = try poolInfoResponse.ok.body.json.first
+        
+        guard let opCertCounter = poolInfo?.opCertCounter else {
+            throw CardanoChainError.koiosError(
+                "Failed to get opCertCounter from pool info: \(String(describing: poolInfo))"
+            )
+        }
+        
+        let onChainOpCertCount = Int(opCertCounter)
+        let nextChainOpCertCount = onChainOpCertCount + 1
+        
+        if let opCert = opCert {
+            let onDiskOpCertCount = Int(opCert.sequenceNumber)
+            let onDiskKESStart = Int(opCert.kesPeriod)
+            
+            return KESPeriodInfo(
+                onChainOpCertCount: onChainOpCertCount,
+                onDiskOpCertCount: onDiskOpCertCount,
+                nextChainOpCertCount: nextChainOpCertCount,
+                onDiskKESStart: onDiskKESStart
+            )
+        }
+        
+        return KESPeriodInfo(
+            onChainOpCertCount: onChainOpCertCount,
+            nextChainOpCertCount: nextChainOpCertCount,
+        )
     }
 }

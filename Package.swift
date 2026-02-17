@@ -18,8 +18,8 @@ let package = Package(
             targets: ["SwiftCardanoChain"]),
     ],
     dependencies: [
-        .package(url: "https://github.com/Kingpin-Apps/swift-cardano-core.git", .upToNextMinor(from: "0.2.24")),
-        .package(url: "https://github.com/Kingpin-Apps/swift-cardano-utils.git", .upToNextMinor(from: "0.1.22")),
+        .package(url: "https://github.com/Kingpin-Apps/swift-cardano-core.git", from: "0.2.30"),
+        .package(url: "https://github.com/Kingpin-Apps/swift-cardano-utils.git", from: "0.1.23"),
         .package(url: "https://github.com/Kingpin-Apps/swift-blockfrost-api.git", from: "0.1.5"),
         .package(url: "https://github.com/Kingpin-Apps/swift-handles-api.git", from: "0.1.0"),
         .package(url: "https://github.com/Kingpin-Apps/swift-koios.git", from: "0.1.5"),

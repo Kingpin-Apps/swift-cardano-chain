@@ -401,4 +401,22 @@ struct CardanoCLIContextTests {
             stakePools[0] == "pool1qqa8tkycj4zck4sy7n8mqr22x5g7tvm8hnp9st95wmuvvtw28th"
         )
     }
+    
+    @Test("Test kesPeriodInfo throws without opCert")
+    func testKESPeriodInfoThrowsWithoutOpCert() async throws {
+        let config = createMockConfig()
+        let runner = createCardaonCLIMockCommandRunner(config: config)
+        
+        let cli = try await CardanoCLI(configuration: config, commandRunner: runner)
+        
+        let chainContext = try await CardanoCliChainContext(
+            nodeConfig: FilePath(configFilePath!),
+            network: .preview,
+            cli: cli
+        )
+        
+        await #expect(throws: CardanoChainError.self) {
+            _ = try await chainContext.kesPeriodInfo(pool: nil, opCert: nil)
+        }
+    }
 }
