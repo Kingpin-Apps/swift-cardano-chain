@@ -642,7 +642,7 @@ public class BlockFrostChainContext: ChainContext {
     /// let kesInfo = try await chainContext.kesPeriodInfo(pool: pool, opCert: nil)
     /// print("On-chain cert counter: \(kesInfo.onChainOpCertCount ?? -1)")
     /// ```
-    public func kesPeriodInfo(pool: PoolOperator?, opCert: OperationalCertificate?) async throws -> KESPeriodInfo {
+    public func kesPeriodInfo(pool: PoolOperator?, opCert: OperationalCertificate? = nil) async throws -> KESPeriodInfo {
         guard let pool = pool else {
             throw CardanoChainError.invalidArgument("Pool operator must be provided")
         }

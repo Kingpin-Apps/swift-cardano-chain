@@ -390,7 +390,7 @@ public class CardanoCliChainContext: ChainContext {
     /// let kesInfo = try await chainContext.kesPeriodInfo(pool: nil, opCert: opCert)
     /// print("KES start period: \(kesInfo.onDiskKESStart ?? 0)")
     /// ```
-    public func kesPeriodInfo(pool: PoolOperator?, opCert: OperationalCertificate?) async throws -> KESPeriodInfo {
+    public func kesPeriodInfo(pool: PoolOperator? = nil, opCert: OperationalCertificate?) async throws -> KESPeriodInfo {
         guard let opCert = opCert else {
             throw CardanoChainError.valueError("Operational certificate is required for KES period info")
         }

@@ -491,7 +491,7 @@ public class OgmiosChainContext: ChainContext {
     ///     print("Certificate is \(onDisk >= nextChain ? "ready" : "not ready") for rotation")
     /// }
     /// ```
-    public func kesPeriodInfo(pool: PoolOperator?, opCert: SwiftCardanoCore.OperationalCertificate?) async throws -> KESPeriodInfo {
+    public func kesPeriodInfo(pool: PoolOperator?, opCert: SwiftCardanoCore.OperationalCertificate? = nil) async throws -> KESPeriodInfo {
         guard let pool = pool else {
             throw CardanoChainError.invalidArgument("Pool operator must be provided")
         }

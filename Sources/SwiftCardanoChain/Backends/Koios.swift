@@ -605,7 +605,7 @@ public class KoiosChainContext: ChainContext {
     /// let kesInfo = try await chainContext.kesPeriodInfo(pool: pool, opCert: nil)
     /// print("Next cert counter should be: \(kesInfo.nextChainOpCertCount ?? 0)")
     /// ```
-    public func kesPeriodInfo(pool: PoolOperator?, opCert: OperationalCertificate?) async throws -> KESPeriodInfo {
+    public func kesPeriodInfo(pool: PoolOperator?, opCert: OperationalCertificate? = nil) async throws -> KESPeriodInfo {
         guard let pool = pool else {
             throw CardanoChainError.invalidArgument("Pool operator must be provided")
         }
