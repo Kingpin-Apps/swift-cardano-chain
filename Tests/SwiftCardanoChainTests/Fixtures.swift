@@ -113,6 +113,8 @@ struct CLICommands {
     static let stakeAddressInfo = ["conway", "query", "stake-address-info", "--address", "stake_test1upyz3gk6mw5he20apnwfn96cn9rscgvmmsxc9r86dh0k66gswf59n",  "--out-file", "/dev/stdout", "--testnet-magic", "2"]
     
     static let stakePools = ["conway", "query", "stake-pools", "--testnet-magic", "2"]
+    
+    static let poolState = ["conway", "query", "pool-state", "--stake-pool-id", "pool1m5947rydk4n0ywe6ctlav0ztt632lcwjef7fsy93sflz7ctcx6z", "--testnet-magic", "2"]
 }
 
 struct CLIResponse {
@@ -226,6 +228,50 @@ struct CLIResponse {
         pool1qzhrd5sd0v0r6q2kqmaz07tvgry72whcjw0xsmnttgyuxtzpkkx
         pool1qzamfq0qzpggch2rk9daqq8skky7rhvs5g38lchnhw67sve4d36
         pool1qrjk9dqdaydy207lw4hf3zlxxg2qlxvxp9kvxx9fscccgwmgfv9
+        """
+    
+    static let poolState = """
+        {
+            "da2be8326fad9bdc9d9d617f58f12b5d14afe1d2ca5e4c109630a7e2": {
+                "futurePoolParams": null,
+                "poolParams": {
+                    "cost": 340000000,
+                    "margin": 0.05,
+                    "metadata": {
+                        "hash": "db7b7e2943b84fe628fd75eb3cc01fc5c136a0a1dbc2cfb5fdeee6afdd943af1",
+                        "url": "https://meta.wavepool.digital/midnight02.json"
+                    },
+                    "owners": [
+                        "89218aeaab042f371399f159a08168b43a23f7c3b3db5c3a4c77a18e"
+                    ],
+                    "pledge": 10000000000,
+                    "publicKey": "da2be8326fad9bdc9d9d617f58f12b5d14afe1d2ca5e4c109630a7e2",
+                    "relays": [
+                        {
+                            "single host address": {
+                                "IPv4": "34.141.108.51",
+                                "IPv6": null,
+                                "port": 3001
+                            }
+                        },
+                        {
+                            "single host name": {
+                                "dnsName": "relay1.example.com",
+                                "port": 3002
+                            }
+                        }
+                    ],
+                    "rewardAccount": {
+                        "credential": {
+                            "keyHash": "89218aeaab042f371399f159a08168b43a23f7c3b3db5c3a4c77a18e"
+                        },
+                        "network": "Testnet"
+                    },
+                    "vrf": "adbafc4eae2ee532f0f0dc47e502debbfd1436bd16abfafe24e2af6db4bd149d"
+                },
+                "retiring": null
+            }
+        }
         """
 }
 

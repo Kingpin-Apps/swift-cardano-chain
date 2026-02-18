@@ -247,6 +247,24 @@ struct KoiosChainContextTests {
             _ = try await chainContext.kesPeriodInfo(pool: nil, opCert: nil)
         }
     }
+
+    @Test("Test stakePoolInfo")
+    func testStakePoolInfo() async throws {
+        let chainContext = try await KoiosChainContext(
+            network: .preview,
+            client: Client(
+                serverURL: try SwiftKoios.Network.preview.url(),
+                transport: KoiosMockTransport()
+            )
+        )
+
+        let poolId = "pool1pu5jlj4q9w9jlxeu370a3c9myx47md5j5m2str0naunn2q3lkdy"
+        let poolParams = try await chainContext.stakePoolInfo(poolId: poolId)
+
+        #expect(poolParams.pledge == 1_000_000_000_000)
+        #expect(poolParams.cost == 340_000_000)
+        #expect(poolParams.relays?.count == 0)
+    }
 }
 
 // MARK: - Koios Mock Transport

@@ -419,4 +419,84 @@ struct CardanoCLIContextTests {
             _ = try await chainContext.kesPeriodInfo(pool: nil, opCert: nil)
         }
     }
+    
+    @Test("Test stakePoolInfo")
+    func testStakePoolInfo() async throws {
+        let config = createMockConfig()
+        let runner = createCardaonCLIMockCommandRunner(config: config)
+        
+        given(runner)
+            .run(
+                arguments: .value([config.cardano.cli!.string] + CLICommands.poolState),
+                environment: .any,
+                workingDirectory: .any
+            )
+            .willReturn(
+                AsyncThrowingStream<CommandEvent, any Error> { continuation in
+                    continuation.yield(
+                        .standardOutput([UInt8](CLIResponse.poolState.utf8))
+                    )
+                    continuation.finish()
+                }
+            )
+        
+        let cli = try await CardanoCLI(configuration: config, commandRunner: runner)
+        
+        let chainContext = try await CardanoCliChainContext(
+            nodeConfig: FilePath(configFilePath!),
+            network: .preview,
+            cli: cli
+        )
+        
+        let poolParams = try await chainContext.stakePoolInfo(
+            poolId: "pool1m5947rydk4n0ywe6ctlav0ztt632lcwjef7fsy93sflz7ctcx6z"
+        )
+        
+        // Verify pool operator
+        let poolOperator = PoolOperator(poolKeyHash: poolParams.poolOperator)
+        #expect(
+            try poolOperator.id(.hex) == "da2be8326fad9bdc9d9d617f58f12b5d14afe1d2ca5e4c109630a7e2"
+        )
+        
+        // Verify VRF key hash
+        #expect(
+            poolParams.vrfKeyHash.payload.toHex == "adbafc4eae2ee532f0f0dc47e502debbfd1436bd16abfafe24e2af6db4bd149d"
+        )
+        
+        // Verify pledge and cost
+        #expect(poolParams.pledge == 10000000000)
+        #expect(poolParams.cost == 340000000)
+        
+        // Verify margin (0.05 = 5%)
+        let expectedMargin = Double(poolParams.margin.numerator) / Double(poolParams.margin.denominator)
+        #expect(abs(expectedMargin - 0.05) < 0.0001)
+        
+        // Verify pool owners
+        #expect(poolParams.poolOwners.count == 1)
+        #expect(
+            poolParams.poolOwners.asArray[0].payload.toHex == "89218aeaab042f371399f159a08168b43a23f7c3b3db5c3a4c77a18e"
+        )
+        
+        // Verify relays
+        #expect(poolParams.relays?.count == 2)
+        if case .singleHostAddr(let addr) = poolParams.relays?[0] {
+            #expect(addr.port == 3001)
+            #expect(addr.ipv4?.address == "34.141.108.51")
+        } else {
+            Issue.record("Expected singleHostAddr relay")
+        }
+        if case .singleHostName(let name) = poolParams.relays?[1] {
+            #expect(name.port == 3002)
+            #expect(name.dnsName == "relay1.example.com")
+        } else {
+            Issue.record("Expected singleHostName relay")
+        }
+        
+        // Verify metadata
+        #expect(poolParams.poolMetadata != nil)
+        #expect(poolParams.poolMetadata?.url?.absoluteString == "https://meta.wavepool.digital/midnight02.json")
+        #expect(
+            poolParams.poolMetadata?.poolMetadataHash?.payload.toHex == "db7b7e2943b84fe628fd75eb3cc01fc5c136a0a1dbc2cfb5fdeee6afdd943af1"
+        )
+    }
 }

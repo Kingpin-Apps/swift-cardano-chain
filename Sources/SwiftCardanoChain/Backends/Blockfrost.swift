@@ -1,8 +1,8 @@
 import Foundation
-import SwiftCardanoCore
-import SwiftBlockfrostAPI
-import PotentCBOR
 import OpenAPIRuntime
+import PotentCBOR
+import SwiftBlockfrostAPI
+import SwiftCardanoCore
 
 /// A `BlockFrost <https://blockfrost.io/>`_ API wrapper for the client code to interact with.
 ///
@@ -22,24 +22,24 @@ public class BlockFrostChainContext: ChainContext {
     private var _genesisParameters: GenesisParameters?
     private var _protocolParameters: ProtocolParameters?
     private let _network: SwiftCardanoCore.Network
-    
+
     public var networkId: NetworkId {
         self._network.networkId
     }
-    
+
     public lazy var era: () async throws -> Era? = { [weak self] in
         guard var self = self else {
             throw CardanoChainError.valueError("Self is nil")
         }
-        
+
         return Era.fromEpoch(epoch: EpochNumber(try await self.epoch()))
     }
-    
+
     public lazy var epoch: () async throws -> Int = { [weak self] in
         guard let self = self else {
             throw CardanoChainError.blockfrostError("Self is nil")
         }
-        
+
         if try await self.checkEpochAndUpdate() || self._epoch == nil {
             let response = try await api.client.getEpochsLatest()
             do {
@@ -51,7 +51,7 @@ public class BlockFrostChainContext: ChainContext {
         }
         return self._epoch ?? 0
     }
-    
+
     public lazy var lastBlockSlot: () async throws -> Int = { [weak self] in
         guard let self = self else {
             throw CardanoChainError.blockfrostError("Self is nil")
@@ -63,12 +63,12 @@ public class BlockFrostChainContext: ChainContext {
             throw CardanoChainError.blockfrostError("Failed to get blocksLatest: \(response)")
         }
     }
-    
-    public lazy var genesisParameters: () async throws -> GenesisParameters  = { [weak self] in
+
+    public lazy var genesisParameters: () async throws -> GenesisParameters = { [weak self] in
         guard let self = self else {
             throw CardanoChainError.blockfrostError("Self is nil")
         }
-        
+
         if try await self.checkEpochAndUpdate() || self._genesisParameters == nil {
             let response = try await api.client.getGenesis()
             do {
@@ -93,15 +93,15 @@ public class BlockFrostChainContext: ChainContext {
         return self._genesisParameters!
     }
 
-    public lazy var protocolParameters: () async throws -> ProtocolParameters  = { [weak self] in
+    public lazy var protocolParameters: () async throws -> ProtocolParameters = { [weak self] in
         guard let self = self else {
             throw CardanoChainError.blockfrostError("Self is nil")
         }
-        
+
         if try await self.checkEpochAndUpdate() || self._protocolParameters == nil {
             self._protocolParameters = try await self.queryCurrentProtocolParams()
         }
-        
+
         return self._protocolParameters!
     }
 
@@ -115,21 +115,21 @@ public class BlockFrostChainContext: ChainContext {
         client: Client? = nil,
     ) async throws {
         self._network = network ?? .mainnet
-                
+
         let blockfrostNetwork: SwiftBlockfrostAPI.Network
         switch network {
-            case .mainnet:
-                blockfrostNetwork = .mainnet
-            case .preprod:
-                blockfrostNetwork = .preprod
-            case .preview:
-                blockfrostNetwork = .preview
-            default:
-                throw CardanoChainError.unsupportedNetwork(
-                    "Unsupported network: \(String(describing: network))"
-                )
+        case .mainnet:
+            blockfrostNetwork = .mainnet
+        case .preprod:
+            blockfrostNetwork = .preprod
+        case .preview:
+            blockfrostNetwork = .preview
+        default:
+            throw CardanoChainError.unsupportedNetwork(
+                "Unsupported network: \(String(describing: network))"
+            )
         }
-        
+
         self.api = try Blockfrost(
             network: blockfrostNetwork,
             projectId: projectId,
@@ -143,15 +143,16 @@ public class BlockFrostChainContext: ChainContext {
             let response = try await api.client.getEpochsLatest()
             self.epochInfo = try response.ok.body.json
         } catch {
-            throw CardanoChainError
+            throw
+                CardanoChainError
                 .blockfrostError(
                     "Failed to get epoch info: \(error.localizedDescription)"
                 )
         }
     }
-    
+
     // MARK: - Public Methods
-    
+
     /// Query the chain tip
     ///
     /// - Returns: The chain tip as a dictionary
@@ -160,7 +161,7 @@ public class BlockFrostChainContext: ChainContext {
         do {
             let response = try await api.client.getBlocksLatest()
             let json = try response.ok.body.json
-            
+
             return ChainTip(
                 block: json.height,
                 epoch: json.epoch,
@@ -175,7 +176,7 @@ public class BlockFrostChainContext: ChainContext {
             throw CardanoChainError.blockfrostError("Failed to get blocksLatest: \(error)")
         }
     }
-    
+
     /// Query the current protocol parameters
     ///
     /// - Returns: The protocol parameters as a dictionary
@@ -184,9 +185,9 @@ public class BlockFrostChainContext: ChainContext {
         do {
             let response = try await api.client.getEpochsLatestParameters()
             let protocolParams = try response.ok.body.json
-            
+
             let costModels = protocolParams.costModels.unsafelyUnwrapped.additionalProperties.value
-            
+
             return ProtocolParameters(
                 collateralPercentage: protocolParams.collateralPercent!,
                 committeeMaxTermLength: Int(protocolParams.committeeMaxTermLength!)!,
@@ -263,14 +264,15 @@ public class BlockFrostChainContext: ChainContext {
                 txFeePerByte: protocolParams.minFeeA,
                 utxoCostPerByte: Int(protocolParams.coinsPerUtxoSize!)!
             )
-            
+
         } catch {
-            throw CardanoChainError.blockfrostError("Failed to get getEpochsLatestParameters: \(error)")
+            throw CardanoChainError.blockfrostError(
+                "Failed to get getEpochsLatestParameters: \(error)")
         }
     }
 
     // MARK: - Private Methods
-    
+
     /// A helper function to try to fix script hash issues
     ///
     /// - Parameters:
@@ -282,30 +284,31 @@ public class BlockFrostChainContext: ChainContext {
         hash: String,
         script: PlutusScript
     ) throws -> PlutusScript {
-        
+
         let _scriptHash = try scriptHash(script: script.toScriptType)
         if _scriptHash.payload.toHex == hash {
             return script
         }
-        
+
         let newScript: PlutusScript
         switch script {
-            case .plutusV1Script(let script):
-                newScript =
-                    .plutusV1Script(script)
-            case .plutusV2Script(let script):
-                newScript =
-                    .plutusV2Script(script)
-            case .plutusV3Script(let script):
-                newScript =
-                    .plutusV3Script(script)
+        case .plutusV1Script(let script):
+            newScript =
+                .plutusV1Script(script)
+        case .plutusV2Script(let script):
+            newScript =
+                .plutusV2Script(script)
+        case .plutusV3Script(let script):
+            newScript =
+                .plutusV3Script(script)
         }
-        
+
         let newScriptHash = try scriptHash(script: newScript.toScriptType)
         if newScriptHash.payload.toHex == hash {
             return newScript
         } else {
-            throw CardanoChainError.valueError("Cannot recover script: \(script) from hash: \(hash).")
+            throw CardanoChainError.valueError(
+                "Cannot recover script: \(script) from hash: \(hash).")
         }
     }
 
@@ -313,7 +316,7 @@ public class BlockFrostChainContext: ChainContext {
         if let epochTime = self.epochInfo?.endTime, Int(Date().timeIntervalSince1970) < epochTime {
             return false
         }
-        
+
         let epochInfo = try await api.client.getEpochsLatest()
         do {
             self.epochInfo = try epochInfo.ok.body.json
@@ -332,73 +335,77 @@ public class BlockFrostChainContext: ChainContext {
                             .Path(scriptHash: scriptHash)
                     )
             )
-            
+
             let scriptType: Components.Schemas.Script._TypePayload
             do {
                 let script = try scriptInfo.ok.body.json
                 scriptType = script._type
             } catch {
-                throw CardanoChainError.blockfrostError("Failed to get scriptInfo info: \(scriptInfo)")
+                throw CardanoChainError.blockfrostError(
+                    "Failed to get scriptInfo info: \(scriptInfo)")
             }
 
             switch scriptType {
-                case .plutusV1:
-                    let scriptCBOR = try await api.client.getScriptsScriptHashCbor(
-                        Operations.GetScriptsScriptHashCbor
-                            .Input(
-                                path: Operations.GetScriptsScriptHashCbor.Input
-                                    .Path(scriptHash: scriptHash)
-                            )
-                    )
-                    do {
-                        let cbor = try scriptCBOR.ok.body.json.cbor!
-                        let v1script = PlutusV1Script(data: Data(hex: cbor))
-                        return try tryFixScript(
-                            hash: scriptHash,
-                            script: .plutusV1Script(v1script)
-                        ).toScriptType
-                    } catch {
-                        throw CardanoChainError.blockfrostError("Failed to get scriptCBOR: \(scriptCBOR)")
-                    }
-                case .plutusV2:
-                    let scriptCBOR = try await api.client.getScriptsScriptHashCbor(
-                        Operations.GetScriptsScriptHashCbor
-                            .Input(
-                                path: Operations.GetScriptsScriptHashCbor.Input
-                                    .Path(scriptHash: scriptHash)
-                            )
-                    )
-                    do {
-                        let cbor = try scriptCBOR.ok.body.json.cbor!
-                        let v1script = PlutusV2Script(data: Data(hex: cbor))
-                        return try tryFixScript(
-                            hash: scriptHash,
-                            script: .plutusV2Script(v1script)
-                        ).toScriptType
-                    } catch {
-                        throw CardanoChainError.blockfrostError("Failed to get scriptCBOR: \(scriptCBOR)")
-                    }
-                case .timelock:
-                    let scriptJSON = try await api.client.getScriptsScriptHashJson(
-                        Operations.GetScriptsScriptHashJson
-                            .Input(
-                                path: Operations.GetScriptsScriptHashJson.Input
-                                    .Path(scriptHash: scriptHash)
-                            )
-                    )
-                    do {
-                        let json = try scriptJSON.ok.body.json.json
-                        let jsonData = try JSONEncoder().encode(json)
-                        
-                        let nativeScript = try JSONDecoder()
-                            .decode(
-                                NativeScript.self,
-                                from: jsonData
-                            )
-                        return .nativeScript(nativeScript)
-                    } catch {
-                        throw CardanoChainError.blockfrostError("Failed to get scriptJSON: \(scriptJSON)")
-                    }
+            case .plutusV1:
+                let scriptCBOR = try await api.client.getScriptsScriptHashCbor(
+                    Operations.GetScriptsScriptHashCbor
+                        .Input(
+                            path: Operations.GetScriptsScriptHashCbor.Input
+                                .Path(scriptHash: scriptHash)
+                        )
+                )
+                do {
+                    let cbor = try scriptCBOR.ok.body.json.cbor!
+                    let v1script = PlutusV1Script(data: Data(hex: cbor))
+                    return try tryFixScript(
+                        hash: scriptHash,
+                        script: .plutusV1Script(v1script)
+                    ).toScriptType
+                } catch {
+                    throw CardanoChainError.blockfrostError(
+                        "Failed to get scriptCBOR: \(scriptCBOR)")
+                }
+            case .plutusV2:
+                let scriptCBOR = try await api.client.getScriptsScriptHashCbor(
+                    Operations.GetScriptsScriptHashCbor
+                        .Input(
+                            path: Operations.GetScriptsScriptHashCbor.Input
+                                .Path(scriptHash: scriptHash)
+                        )
+                )
+                do {
+                    let cbor = try scriptCBOR.ok.body.json.cbor!
+                    let v1script = PlutusV2Script(data: Data(hex: cbor))
+                    return try tryFixScript(
+                        hash: scriptHash,
+                        script: .plutusV2Script(v1script)
+                    ).toScriptType
+                } catch {
+                    throw CardanoChainError.blockfrostError(
+                        "Failed to get scriptCBOR: \(scriptCBOR)")
+                }
+            case .timelock:
+                let scriptJSON = try await api.client.getScriptsScriptHashJson(
+                    Operations.GetScriptsScriptHashJson
+                        .Input(
+                            path: Operations.GetScriptsScriptHashJson.Input
+                                .Path(scriptHash: scriptHash)
+                        )
+                )
+                do {
+                    let json = try scriptJSON.ok.body.json.json
+                    let jsonData = try JSONEncoder().encode(json)
+
+                    let nativeScript = try JSONDecoder()
+                        .decode(
+                            NativeScript.self,
+                            from: jsonData
+                        )
+                    return .nativeScript(nativeScript)
+                } catch {
+                    throw CardanoChainError.blockfrostError(
+                        "Failed to get scriptJSON: \(scriptJSON)")
+                }
             }
         } catch {
             throw CardanoChainError.invalidArgument(
@@ -407,7 +414,7 @@ public class BlockFrostChainContext: ChainContext {
     }
 
     // MARK: - Public Methods
-    
+
     /// Gets the UTxOs for a given address.
     /// - Parameter address: The address to get the `UTxO`s for.
     /// - Returns: A list of `UTxO`s.
@@ -418,7 +425,7 @@ public class BlockFrostChainContext: ChainContext {
                     .Path(address: address.toBech32())
             )
         )
-        
+
         do {
             let results = try addressUtxos.ok.body.json
             var utxos: [UTxO] = []
@@ -456,28 +463,30 @@ public class BlockFrostChainContext: ChainContext {
                     coin: Int(lovelaceAmount),
                     multiAsset: multiAssets
                 )
-                
+
                 var datumHash: DatumHash? = nil
                 var datumOption: DatumOption? = nil
                 var script: ScriptType? = nil
-                
+
                 if result.dataHash != nil && result.inlineDatum == nil {
                     datumHash = try DatumHash(from: .string(result.dataHash!))
                 }
-                
+
                 if let inlineDatum = result.inlineDatum,
-                   let datumData = Data(hexString: inlineDatum) {
+                    let datumData = Data(hexString: inlineDatum)
+                {
                     // Parse as PlutusData first, then wrap in DatumOption
                     let plutusData = try PlutusData.fromCBOR(data: datumData)
                     datumOption = DatumOption(datum: plutusData)
                 }
-//                else if let inlineDatum = result.inlineDatum as? [AnyHashable: Any] {
-//                    let plutusData = try PlutusData.fromDict(inlineDatum)
-//                    datumOption = DatumOption(datum: plutusData)
-//                }
+                //                else if let inlineDatum = result.inlineDatum as? [AnyHashable: Any] {
+                //                    let plutusData = try PlutusData.fromDict(inlineDatum)
+                //                    datumOption = DatumOption(datum: plutusData)
+                //                }
 
                 if let referenceScriptHash = result.referenceScriptHash {
-                    script = try? await self
+                    script =
+                        try? await self
                         .getScript(scriptHash: referenceScriptHash)
                 }
 
@@ -498,7 +507,7 @@ public class BlockFrostChainContext: ChainContext {
             throw CardanoChainError.blockfrostError("Failed to get UTxOs: \(error)")
         }
     }
-    
+
     /// Submit a transaction to the blockchain.
     /// - Parameter cbor: The serialized transaction to be submitted.
     /// - Returns: The transaction hash.
@@ -511,7 +520,7 @@ public class BlockFrostChainContext: ChainContext {
                         .applicationCbor(HTTPBody(cbor))
                 )
         )
-        
+
         do {
             let result = try response.ok.body.json
             return result
@@ -519,7 +528,7 @@ public class BlockFrostChainContext: ChainContext {
             throw CardanoChainError.transactionFailed("Failed to submit transaction: \(response)")
         }
     }
-    
+
     /// Evaluate execution units of a transaction.
     /// - Parameter cbor: The serialized transaction to be evaluated.
     /// - Returns: A dictionary mapping redeemer strings to execution units.
@@ -531,13 +540,14 @@ public class BlockFrostChainContext: ChainContext {
                     .applicationCbor(HTTPBody(cbor))
             )
         )
-        
+
         var returnVal: [String: ExecutionUnits] = [:]
-        
+
         do {
-            let evaluationResult  = try result.ok.body.json.additionalProperties.value
-            
-            if let evaluationResult = evaluationResult["EvaluationResult"] as? [String: [String: Int]]
+            let evaluationResult = try result.ok.body.json.additionalProperties.value
+
+            if let evaluationResult = evaluationResult["EvaluationResult"]
+                as? [String: [String: Int]]
             {
                 for (key, value) in evaluationResult {
                     returnVal[key] = ExecutionUnits(
@@ -551,7 +561,7 @@ public class BlockFrostChainContext: ChainContext {
         }
         return returnVal
     }
-    
+
     /// Get the stake address information.
     /// - Parameter address: The stake address.
     /// - Returns: A list of `StakeAddressInfo` object.
@@ -561,11 +571,11 @@ public class BlockFrostChainContext: ChainContext {
             Operations.GetAccountsStakeAddress.Input(
                 path: Operations.GetAccountsStakeAddress.Input
                     .Path(stakeAddress: address.toBech32())
-                )
             )
-        
+        )
+
         do {
-            let stakeInfo  = try rewardsState.ok.body.json
+            let stakeInfo = try rewardsState.ok.body.json
             return [
                 StakeAddressInfo(
                     active: stakeInfo.active,
@@ -574,19 +584,22 @@ public class BlockFrostChainContext: ChainContext {
                     rewardAccountBalance: Int(
                         stakeInfo.withdrawableAmount
                     )!,
-                    stakeDelegation: stakeInfo.poolId != nil ? try PoolOperator(
-                        from: stakeInfo.poolId!
-                    ) : nil,
-                    voteDelegation: stakeInfo.drepId != nil ? try DRep(
-                        from: stakeInfo.drepId!
-                    ) : nil,
+                    stakeDelegation: stakeInfo.poolId != nil
+                        ? try PoolOperator(
+                            from: stakeInfo.poolId!
+                        ) : nil,
+                    voteDelegation: stakeInfo.drepId != nil
+                        ? try DRep(
+                            from: stakeInfo.drepId!
+                        ) : nil,
                 )
             ]
         } catch {
-            throw CardanoChainError.blockfrostError("Failed to get getAccountsStakeAddressRewards: \(rewardsState)")
+            throw CardanoChainError.blockfrostError(
+                "Failed to get getAccountsStakeAddressRewards: \(rewardsState)")
         }
     }
-    
+
     /// Get the list of stake pools
     ///
     /// - Returns: List of stake pool IDs
@@ -595,7 +608,7 @@ public class BlockFrostChainContext: ChainContext {
         var allStakePools: [String] = []
         var page = 1
         var hasMorePages = true
-        
+
         while hasMorePages {
             let response = try await api.client.getPools(
                 Operations.GetPools.Input(
@@ -606,12 +619,12 @@ public class BlockFrostChainContext: ChainContext {
                     )
                 )
             )
-            
+
             do {
                 let stakePools = try response.ok.body.json
-                
+
                 allStakePools.append(contentsOf: stakePools.map { $0 })
-                
+
                 if stakePools.isEmpty || stakePools.count < 100 {
                     hasMorePages = false
                 } else {
@@ -623,7 +636,7 @@ public class BlockFrostChainContext: ChainContext {
         }
         return allStakePools
     }
-    
+
     /// Get the KES period information for a stake pool.
     ///
     /// Retrieves operational certificate counter information from the pool's most recently minted block.
@@ -642,11 +655,13 @@ public class BlockFrostChainContext: ChainContext {
     /// let kesInfo = try await chainContext.kesPeriodInfo(pool: pool, opCert: nil)
     /// print("On-chain cert counter: \(kesInfo.onChainOpCertCount ?? -1)")
     /// ```
-    public func kesPeriodInfo(pool: PoolOperator?, opCert: OperationalCertificate? = nil) async throws -> KESPeriodInfo {
+    public func kesPeriodInfo(pool: PoolOperator?, opCert: OperationalCertificate? = nil)
+        async throws -> KESPeriodInfo
+    {
         guard let pool = pool else {
             throw CardanoChainError.invalidArgument("Pool operator must be provided")
         }
-        
+
         let latestMintedBlockResponse = try await api.client.getPoolsPoolIdBlocks(
             Operations.GetPoolsPoolIdBlocks.Input(
                 path: Operations.GetPoolsPoolIdBlocks.Input.Path(poolId: pool.id(.bech32)),
@@ -656,9 +671,9 @@ public class BlockFrostChainContext: ChainContext {
                 )
             )
         )
-        
+
         let latestMintedBlock = try latestMintedBlockResponse.ok.body.json[0]
-        
+
         let blockInfoResponse = try await api.client.getBlocksHashOrNumber(
             Operations.GetBlocksHashOrNumber.Input(
                 path: Operations.GetBlocksHashOrNumber.Input.Path(
@@ -666,20 +681,21 @@ public class BlockFrostChainContext: ChainContext {
                 )
             )
         )
-        
+
         let blockInfo = try blockInfoResponse.ok.body.json
-        
+
         guard let opCertCounter = blockInfo.opCertCounter else {
-            throw CardanoChainError.blockfrostError("Failed to get opCertCounter from block info: \(blockInfo)")
+            throw CardanoChainError.blockfrostError(
+                "Failed to get opCertCounter from block info: \(blockInfo)")
         }
-        
+
         let onChainOpCertCount = Int(opCertCounter)!
         let nextChainOpCertCount = onChainOpCertCount + 1
-        
+
         if let opCert = opCert {
             let onDiskOpCertCount = Int(opCert.sequenceNumber)
             let onDiskKESStart = Int(opCert.kesPeriod)
-            
+
             return KESPeriodInfo(
                 onChainOpCertCount: onChainOpCertCount,
                 onDiskOpCertCount: onDiskOpCertCount,
@@ -687,10 +703,107 @@ public class BlockFrostChainContext: ChainContext {
                 onDiskKESStart: onDiskKESStart
             )
         }
-        
+
         return KESPeriodInfo(
             onChainOpCertCount: onChainOpCertCount,
             nextChainOpCertCount: nextChainOpCertCount,
+        )
+    }
+
+    /// Get the stake pool information.
+    /// - Parameter poolId: The pool ID (Bech32).
+    /// - Returns: `PoolParams` object.
+    /// - Throws: `CardanoChainError.blockfrostError` if the pool info cannot be fetched.
+    public func stakePoolInfo(poolId: String) async throws -> PoolParams {
+        // 1. Get basic pool info
+        let poolResponse = try await api.client.getPoolsPoolId(
+            Operations.GetPoolsPoolId.Input(
+                path: Operations.GetPoolsPoolId.Input.Path(poolId: poolId)
+            )
+        )
+        let pool = try poolResponse.ok.body.json
+
+        // 2. Get pool relays
+        let relaysResponse = try await api.client.getPoolsPoolIdRelays(
+            Operations.GetPoolsPoolIdRelays.Input(
+                path: Operations.GetPoolsPoolIdRelays.Input.Path(poolId: poolId)
+            )
+        )
+        let relaysData = try relaysResponse.ok.body.json
+
+        // 3. Get pool metadata
+        var poolMetadata: PoolMetadata? = nil
+
+        do {
+            let metadataResponse = try await api.client.getPoolsPoolIdMetadata(
+                Operations.GetPoolsPoolIdMetadata.Input(
+                    path: Operations.GetPoolsPoolIdMetadata.Input.Path(poolId: poolId)
+                )
+            )
+            let metadata = try metadataResponse.ok.body.json
+            if let urlString = metadata.value1?.url, let hashString = metadata.value1?.hash,
+               let hashData = Data(hexString: hashString)
+            {
+                poolMetadata = try PoolMetadata(
+                    url: try Url(urlString),
+                    poolMetadataHash: PoolMetadataHash(payload: hashData)
+                )
+            }
+        } catch {
+            // Metadata might not exist, ignore error
+        }
+
+        // Map relays
+        let relays: [SwiftCardanoCore.Relay] = relaysData.compactMap { relay in
+            if let ipv4String = relay.ipv4, let ipv4 = IPv4Address(ipv4String) {
+                return .singleHostAddr(SingleHostAddr(port: relay.port, ipv4: ipv4, ipv6: nil))
+            } else if let ipv6String = relay.ipv6, let ipv6 = IPv6Address(ipv6String) {
+                return .singleHostAddr(SingleHostAddr(port: relay.port, ipv4: nil, ipv6: ipv6))
+            } else if let dns = relay.dns {
+                return .singleHostName(SingleHostName(port: relay.port, dnsName: dns))
+            } else if let dnsSrv = relay.dnsSrv {
+                return .multiHostName(MultiHostName(dnsName: dnsSrv))
+            }
+            return nil
+        }
+
+        // Convert margin (Double) to UnitInterval using 10^8 denominator for precision
+        let marginDenom: UInt64 = 100_000_000
+        let marginNum = UInt64((pool.marginCost * Double(marginDenom)).rounded())
+        let margin = UnitInterval(numerator: marginNum, denominator: marginDenom)
+
+        let poolOperator = try PoolOperator(from: poolId)
+        let vrfKeyHash = VrfKeyHash(payload: Data(hex: pool.vrfKey))
+        let rewardAccount = try Address(from: .string(pool.rewardAccount))
+        let rewardAccountHash = RewardAccountHash(payload: rewardAccount.toBytes())
+        let poolOwnersList: [VerificationKeyHash] = try pool.owners.map { ownerBech32 in
+            let ownerAddr = try Address(from: .string(ownerBech32))
+            switch ownerAddr.stakingPart {
+            case .verificationKeyHash(let vkh):
+                return VerificationKeyHash(payload: vkh.payload)
+            default:
+                switch ownerAddr.paymentPart {
+                case .verificationKeyHash(let vkh):
+                    return VerificationKeyHash(payload: vkh.payload)
+                case .scriptHash(let sh):
+                    return VerificationKeyHash(payload: sh.payload)
+                case nil:
+                    return VerificationKeyHash(payload: Data())
+                }
+            }
+        }
+        let poolOwners = ListOrOrderedSet<VerificationKeyHash>.list(poolOwnersList)
+
+        return PoolParams(
+            poolOperator: poolOperator.poolKeyHash,
+            vrfKeyHash: vrfKeyHash,
+            pledge: Int(UInt64(pool.declaredPledge) ?? 0),
+            cost: Int(UInt64(pool.fixedCost) ?? 0),
+            margin: margin,
+            rewardAccount: rewardAccountHash,
+            poolOwners: poolOwners,
+            relays: relays,
+            poolMetadata: poolMetadata
         )
     }
 }
