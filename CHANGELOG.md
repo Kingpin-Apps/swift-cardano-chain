@@ -1,3 +1,9 @@
+## 0.2.5 (2026-02-19)
+
+### Fix
+
+- update to latest packages
+
 ## 0.2.4 (2026-02-18)
 
 ### Fix
