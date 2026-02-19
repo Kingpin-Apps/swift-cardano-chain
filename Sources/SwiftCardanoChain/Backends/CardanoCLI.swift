@@ -73,7 +73,7 @@ public class CardanoCliChainContext: ChainContext {
             throw CardanoChainError.valueError("Self is nil")
         }
         
-        guard let nodeConfig = self.cli.configuration.cardano.config else {
+        guard let nodeConfig = self.cli.cardanoConfig.config else {
             throw CardanoChainError.valueError("Cardano node config is nil")
         }
 

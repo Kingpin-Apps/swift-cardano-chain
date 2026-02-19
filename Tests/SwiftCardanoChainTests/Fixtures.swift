@@ -68,7 +68,7 @@ func createCardaonCLIMockCommandRunner(
     let commandRunner = MockCommandRunning()
     given(commandRunner)
         .run(
-            arguments: .value([config.cardano.cli!.string, "--version"]),
+            arguments: .value([config.cardano!.cli!.string, "--version"]),
             environment: .any,
             workingDirectory: .any
         )
@@ -81,7 +81,7 @@ func createCardaonCLIMockCommandRunner(
             }
         )
         .run(
-            arguments: .value([config.cardano.cli!.string] + CLICommands.queryTip),
+            arguments: .value([config.cardano!.cli!.string] + CLICommands.queryTip),
             environment: .any,
             workingDirectory: .any
         )

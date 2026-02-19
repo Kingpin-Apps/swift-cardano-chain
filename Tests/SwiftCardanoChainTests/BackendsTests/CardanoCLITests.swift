@@ -88,7 +88,7 @@ struct CardanoCLIContextTests {
         
         given(runner)
             .run(
-                arguments: .value([config.cardano.cli!.string] + CLICommands.protocolParams),
+                arguments: .value([config.cardano!.cli!.string] + CLICommands.protocolParams),
                 environment: .any,
                 workingDirectory: .any
             )
@@ -122,7 +122,7 @@ struct CardanoCLIContextTests {
         
         given(runner)
             .run(
-                arguments: .value([config.cardano.cli!.string] + CLICommands.utxos),
+                arguments: .value([config.cardano!.cli!.string] + CLICommands.utxos),
                 environment: .any,
                 workingDirectory: .any
             )
@@ -163,7 +163,7 @@ struct CardanoCLIContextTests {
         
         given(runner)
             .run(
-                arguments: .value([config.cardano.cli!.string] + CLICommands.queryTip),
+                arguments: .value([config.cardano!.cli!.string] + CLICommands.queryTip),
                 environment: .any,
                 workingDirectory: .any
             )
@@ -204,7 +204,7 @@ struct CardanoCLIContextTests {
                 }
             )
             .run(
-                arguments: .value([config.cardano.cli!.string] + CLICommands.queryTip),
+                arguments: .value([config.cardano!.cli!.string] + CLICommands.queryTip),
                 environment: .any,
                 workingDirectory: .any
             )
@@ -245,7 +245,7 @@ struct CardanoCLIContextTests {
                 }
             )
             .run(
-                arguments: .value([config.cardano.cli!.string] + CLICommands.queryTip),
+                arguments: .value([config.cardano!.cli!.string] + CLICommands.queryTip),
                 environment: .any,
                 workingDirectory: .any
             )
@@ -320,7 +320,7 @@ struct CardanoCLIContextTests {
         
         given(runner)
             .run(
-                arguments: .value([config.cardano.cli!.string] + CLICommands.stakeAddressInfo),
+                arguments: .value([config.cardano!.cli!.string] + CLICommands.stakeAddressInfo),
                 environment: .any,
                 workingDirectory: .any
             )
@@ -374,7 +374,7 @@ struct CardanoCLIContextTests {
         
         given(runner)
             .run(
-                arguments: .value([config.cardano.cli!.string] + CLICommands.stakePools),
+                arguments: .value([config.cardano!.cli!.string] + CLICommands.stakePools),
                 environment: .any,
                 workingDirectory: .any
             )
@@ -427,7 +427,7 @@ struct CardanoCLIContextTests {
         
         given(runner)
             .run(
-                arguments: .value([config.cardano.cli!.string] + CLICommands.poolState),
+                arguments: .value([config.cardano!.cli!.string] + CLICommands.poolState),
                 environment: .any,
                 workingDirectory: .any
             )
