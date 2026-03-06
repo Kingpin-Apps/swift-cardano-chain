@@ -470,9 +470,9 @@ public class OgmiosChainContext: ChainContext {
     ///     print("Pool: \(poolId)")
     /// }
     /// ```
-    public func stakePools() async throws -> [String] {
+    public func stakePools() async throws -> [PoolOperator] {
         let response = try await client.ledgerStateQuery.stakePools.result()
-        return response.keys.map { $0.value }
+        return try response.keys.map { try PoolOperator(from: $0.value) }
     }
 
     /// Get the KES period information for a stake pool via Ogmios.
@@ -784,12 +784,19 @@ public class OgmiosChainContext: ChainContext {
 
     /// Get the stake pool information.
     /// - Parameter poolId: The pool ID (Bech32).
-    /// - Returns: `PoolParams` object.
+    /// - Returns: `StakePoolInfo` object.
     /// - Throws: `CardanoChainError.operationError` if the pool info cannot be fetched.
-    public func stakePoolInfo(poolId: String) async throws -> PoolParams {
+    public func stakePoolInfo(poolId: String) async throws -> StakePoolInfo {
         // Fetch all stake pools and find the matching one
         // Note: Ideally we should use query filtering if SwiftOgmios supports it.
-        let response = try await client.ledgerStateQuery.stakePools.result()
+        let response = try await client.ledgerStateQuery.stakePools.result(
+            params: .init(
+                includeStake: false,
+                stakePools: [
+                    StakePoolId(poolId)
+                ]
+            )
+        )
 
         guard let entry = response.first(where: { $0.key.value == poolId }) else {
             throw CardanoChainError.operationError("Pool not found: \(poolId)")
@@ -841,7 +848,7 @@ public class OgmiosChainContext: ChainContext {
             )
         }
 
-        return PoolParams(
+        let params = PoolParams(
             poolOperator: poolOperator.poolKeyHash,
             vrfKeyHash: vrfKeyHash,
             pledge: Int(ogmiosParams.pledge.ada.lovelace),
@@ -851,6 +858,38 @@ public class OgmiosChainContext: ChainContext {
             poolOwners: poolOwners,
             relays: relays,
             poolMetadata: poolMetadata
+        )
+
+        // Get opcert counter from operationalCertificates query
+        var opcertCounter: UInt? = nil
+        if let opCerts = try? await client.ledgerStateQuery.operationalCertificates.result(),
+           let matchingPool = opCerts.value.first(where: { $0.key.value == poolId })
+        {
+            opcertCounter = UInt(matchingPool.value)
+        }
+
+        // Get active stake, active size, and owner stake from stakePoolsPerformances
+        var liveStake: UInt? = nil
+        var liveSize: Decimal? = nil
+        var ownerStake: UInt? = nil
+        if let performances = try? await client.ledgerStateQuery.stakePoolsPerformances.result(),
+           let poolSummary = performances.stakePools.first(where: { $0.key.value == poolId })?.value
+        {
+            let poolStakeLovelace = poolSummary.stake.ada.lovelace
+            let totalActiveStakeLovelace = performances.activeStakeInEpoch.ada.lovelace
+            liveStake = UInt(poolStakeLovelace)
+            if totalActiveStakeLovelace > 0 {
+                liveSize = Decimal(poolStakeLovelace) / Decimal(totalActiveStakeLovelace)
+            }
+            ownerStake = UInt(poolSummary.ownerStake.ada.lovelace)
+        }
+
+        return StakePoolInfo(
+            poolParams: params,
+            livePledge: ownerStake,
+            liveStake: liveStake,
+            liveSize: liveSize,
+            opcertCounter: opcertCounter
         )
     }
 }

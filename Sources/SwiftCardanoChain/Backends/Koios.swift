@@ -543,7 +543,7 @@ public class KoiosChainContext: ChainContext {
     /// Get the list of stake pools
     ///
     /// - Returns: List of stake pool IDs
-    public func stakePools() async throws -> [String] {
+    public func stakePools() async throws -> [PoolOperator] {
         let response = try await api.client.poolList(
             Operations.PoolList.Input(
                 query: .init(
@@ -556,8 +556,8 @@ public class KoiosChainContext: ChainContext {
 
         do {
             let poolList = try response.ok.body.json
-            let poolIds = poolList.compactMap {
-                $0.poolIdBech32?.value as? String
+            let poolIds = try poolList.compactMap {
+                try PoolOperator(from: ($0.poolIdBech32?.value as? String)!)
             }
             return poolIds
         } catch {
@@ -674,9 +674,9 @@ public class KoiosChainContext: ChainContext {
 
     /// Get the stake pool information.
     /// - Parameter poolId: The pool ID (Bech32).
-    /// - Returns: `PoolParams` object.
+    /// - Returns: `StakePoolInfo` object.
     /// - Throws: `CardanoChainError.koiosError` if the pool info cannot be fetched.
-    public func stakePoolInfo(poolId: String) async throws -> PoolParams {
+    public func stakePoolInfo(poolId: String) async throws -> StakePoolInfo {
         let poolInfoResponse = try await api.client.poolInfo(
             Operations.PoolInfo.Input(
                 body: .json(
@@ -744,7 +744,7 @@ public class KoiosChainContext: ChainContext {
             )
         }
 
-        return PoolParams(
+        let params = PoolParams(
             poolOperator: poolOperator.poolKeyHash,
             vrfKeyHash: vrfKeyHash,
             pledge: Int(UInt64(pool.pledge ?? "0") ?? 0),
@@ -754,6 +754,21 @@ public class KoiosChainContext: ChainContext {
             poolOwners: poolOwners,
             relays: relays,
             poolMetadata: poolMetadata
+        )
+        
+        let livePledge: UInt? = pool.livePledge.flatMap { UInt($0) }
+        let liveStake: UInt? = pool.liveStake.flatMap { UInt($0) }
+        let activeStake: UInt? = pool.activeStake.flatMap { UInt($0) }
+        let activeSize: Decimal? = pool.sigma.map { Decimal($0) }
+        let opcertCounter: UInt? = pool.opCertCounter.map { UInt($0) }
+
+        return StakePoolInfo(
+            poolParams: params,
+            livePledge: livePledge,
+            liveStake: liveStake,
+            activeStake: activeStake,
+            activeSize: activeSize,
+            opcertCounter: opcertCounter
         )
     }
 }

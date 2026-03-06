@@ -72,8 +72,8 @@ public protocol ChainContext: CustomStringConvertible, CustomDebugStringConverti
     func stakeAddressInfo(address: Address) async throws -> [StakeAddressInfo]
 
     /// Get the list of stake pools on the chain.
-    /// - Returns: List of stake pool IDs as Bech32 strings.
-    func stakePools() async throws -> [String]
+    /// - Returns: List of `PoolOperator` objects.
+    func stakePools() async throws -> [PoolOperator]
 
     /// Get the KES period information of a stake pool from a given operational certificate and/or pool id.
     /// - Parameters:
@@ -85,8 +85,8 @@ public protocol ChainContext: CustomStringConvertible, CustomDebugStringConverti
 
     /// Get the stake pool information.
     /// - Parameter poolId: The pool ID (Bech32).
-    /// - Returns: `PoolParams` object.
-    func stakePoolInfo(poolId: String) async throws -> PoolParams
+    /// - Returns: `StakePoolInfo` object.
+    func stakePoolInfo(poolId: String) async throws -> StakePoolInfo
 }
 
 // MARK: - Default Implementation

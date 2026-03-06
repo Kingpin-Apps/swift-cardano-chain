@@ -115,6 +115,10 @@ struct CLICommands {
     static let stakePools = ["conway", "query", "stake-pools", "--testnet-magic", "2"]
     
     static let poolState = ["conway", "query", "pool-state", "--stake-pool-id", "pool1m5947rydk4n0ywe6ctlav0ztt632lcwjef7fsy93sflz7ctcx6z", "--testnet-magic", "2"]
+
+    static let stakeSnapshot = ["conway", "query", "stake-snapshot", "--stake-pool-id", "pool1m5947rydk4n0ywe6ctlav0ztt632lcwjef7fsy93sflz7ctcx6z", "--testnet-magic", "2"]
+
+    static let protocolState = ["conway", "query", "protocol-state", "--testnet-magic", "2"]
 }
 
 struct CLIResponse {
@@ -230,23 +234,40 @@ struct CLIResponse {
         pool1qrjk9dqdaydy207lw4hf3zlxxg2qlxvxp9kvxx9fscccgwmgfv9
         """
     
+    static let stakeSnapshot = """
+        {
+            "pools": {
+                "dd0b5f0c8db566f23b3ac2ffd63c4b5ea2afe1d2ca7c9810b1827e2f": {
+                    "stakeMark": 5000000000000,
+                    "stakeSet": 4900000000000,
+                    "stakeGo": 4800000000000
+                }
+            },
+            "total": {
+                "stakeMark": 25000000000000000,
+                "stakeSet": 24900000000000000,
+                "stakeGo": 24800000000000000
+            }
+        }
+        """
+
     static let poolState = """
         {
-            "da2be8326fad9bdc9d9d617f58f12b5d14afe1d2ca5e4c109630a7e2": {
+            "dd0b5f0c8db566f23b3ac2ffd63c4b5ea2afe1d2ca7c9810b1827e2f": {
                 "futurePoolParams": null,
                 "poolParams": {
-                    "cost": 340000000,
-                    "margin": 0.05,
-                    "metadata": {
+                    "spsCost": 340000000,
+                    "spsDeposit": 500000000,
+                    "spsMargin": 0.05,
+                    "spsMetadata": {
                         "hash": "db7b7e2943b84fe628fd75eb3cc01fc5c136a0a1dbc2cfb5fdeee6afdd943af1",
                         "url": "https://meta.wavepool.digital/midnight02.json"
                     },
-                    "owners": [
+                    "spsOwners": [
                         "89218aeaab042f371399f159a08168b43a23f7c3b3db5c3a4c77a18e"
                     ],
-                    "pledge": 10000000000,
-                    "publicKey": "da2be8326fad9bdc9d9d617f58f12b5d14afe1d2ca5e4c109630a7e2",
-                    "relays": [
+                    "spsPledge": 10000000000,
+                    "spsRelays": [
                         {
                             "single host address": {
                                 "IPv4": "34.141.108.51",
@@ -261,15 +282,29 @@ struct CLIResponse {
                             }
                         }
                     ],
-                    "rewardAccount": {
+                    "spsRewardAccount": {
                         "credential": {
                             "keyHash": "89218aeaab042f371399f159a08168b43a23f7c3b3db5c3a4c77a18e"
                         },
                         "network": "Testnet"
                     },
-                    "vrf": "adbafc4eae2ee532f0f0dc47e502debbfd1436bd16abfafe24e2af6db4bd149d"
+                    "spsVrf": "adbafc4eae2ee532f0f0dc47e502debbfd1436bd16abfafe24e2af6db4bd149d"
                 },
                 "retiring": null
+            }
+        }
+        """
+
+    static let protocolState = """
+        {
+            "candidateNonce": "abc123def456abc123def456abc123def456abc123def456abc123def456abc1",
+            "epochNonce": "def456abc123def456abc123def456abc123def456abc123def456abc123def4",
+            "evolvingNonce": "abc123def456abc123def456abc123def456abc123def456abc123def456abc1",
+            "labNonce": "def456abc123def456abc123def456abc123def456abc123def456abc123def4",
+            "lastEpochBlockNonce": "abc123def456abc123def456abc123def456abc123def456abc123def456abc1",
+            "lastSlot": 123456789,
+            "oCertCounters": {
+                "dd0b5f0c8db566f23b3ac2ffd63c4b5ea2afe1d2ca7c9810b1827e2f": 7
             }
         }
         """

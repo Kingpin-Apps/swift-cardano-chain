@@ -603,9 +603,9 @@ public class BlockFrostChainContext: ChainContext {
     /// Get the list of stake pools
     ///
     /// - Returns: List of stake pool IDs
-    public func stakePools() async throws -> [String] {
+    public func stakePools() async throws -> [PoolOperator] {
         // Fetch all stake pools (paginated)
-        var allStakePools: [String] = []
+        var allStakePools: [PoolOperator] = []
         var page = 1
         var hasMorePages = true
 
@@ -623,7 +623,9 @@ public class BlockFrostChainContext: ChainContext {
             do {
                 let stakePools = try response.ok.body.json
 
-                allStakePools.append(contentsOf: stakePools.map { $0 })
+                allStakePools.append(contentsOf: try stakePools.map {
+                    try PoolOperator(from: $0)
+                })
 
                 if stakePools.isEmpty || stakePools.count < 100 {
                     hasMorePages = false
@@ -712,9 +714,9 @@ public class BlockFrostChainContext: ChainContext {
 
     /// Get the stake pool information.
     /// - Parameter poolId: The pool ID (Bech32).
-    /// - Returns: `PoolParams` object.
+    /// - Returns: `StakePoolInfo` object.
     /// - Throws: `CardanoChainError.blockfrostError` if the pool info cannot be fetched.
-    public func stakePoolInfo(poolId: String) async throws -> PoolParams {
+    public func stakePoolInfo(poolId: String) async throws -> StakePoolInfo {
         // 1. Get basic pool info
         let poolResponse = try await api.client.getPoolsPoolId(
             Operations.GetPoolsPoolId.Input(
@@ -751,6 +753,36 @@ public class BlockFrostChainContext: ChainContext {
             }
         } catch {
             // Metadata might not exist, ignore error
+        }
+
+        // 4. Get latest block minted by pool for opcert counter
+        var opcertCounter: UInt? = nil
+        do {
+            let latestBlockResponse = try await api.client.getPoolsPoolIdBlocks(
+                Operations.GetPoolsPoolIdBlocks.Input(
+                    path: Operations.GetPoolsPoolIdBlocks.Input.Path(poolId: poolId),
+                    query: Operations.GetPoolsPoolIdBlocks.Input.Query(
+                        count: 1,
+                        order: .desc
+                    )
+                )
+            )
+            let blocks = try latestBlockResponse.ok.body.json
+            if let latestBlock = blocks.first {
+                let blockInfoResponse = try await api.client.getBlocksHashOrNumber(
+                    Operations.GetBlocksHashOrNumber.Input(
+                        path: Operations.GetBlocksHashOrNumber.Input.Path(
+                            hashOrNumber: latestBlock
+                        )
+                    )
+                )
+                let blockInfo = try blockInfoResponse.ok.body.json
+                if let counterStr = blockInfo.opCertCounter, let counter = UInt(counterStr) {
+                    opcertCounter = counter
+                }
+            }
+        } catch {
+            // Pool may not have minted any blocks yet
         }
 
         // Map relays
@@ -794,7 +826,7 @@ public class BlockFrostChainContext: ChainContext {
         }
         let poolOwners = ListOrOrderedSet<VerificationKeyHash>.list(poolOwnersList)
 
-        return PoolParams(
+        let params = PoolParams(
             poolOperator: poolOperator.poolKeyHash,
             vrfKeyHash: vrfKeyHash,
             pledge: Int(UInt64(pool.declaredPledge) ?? 0),
@@ -804,6 +836,20 @@ public class BlockFrostChainContext: ChainContext {
             poolOwners: poolOwners,
             relays: relays,
             poolMetadata: poolMetadata
+        )
+
+        let livePledge: UInt? = UInt(pool.livePledge)
+        let liveStake: UInt? = UInt(pool.liveStake)
+        let activeStake: UInt? = UInt(pool.activeStake)
+        let activeSize: Decimal? = Decimal(pool.activeSize)
+
+        return StakePoolInfo(
+            poolParams: params,
+            livePledge: livePledge,
+            liveStake: liveStake,
+            activeStake: activeStake,
+            activeSize: activeSize,
+            opcertCounter: opcertCounter
         )
     }
 }

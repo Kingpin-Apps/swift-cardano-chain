@@ -192,7 +192,7 @@ struct KoiosChainContextTests {
         let pools = try await chainContext.stakePools()
         
         #expect(pools.count == 3)
-        #expect(pools.contains("pool1qqa8tkycj4zck4sy7n8mqr22x5g7tvm8hnp9st95wmuvvtw28th"))
+        #expect(pools.contains(where: { (try? $0.id()) == "pool1qqa8tkycj4zck4sy7n8mqr22x5g7tvm8hnp9st95wmuvvtw28th" }))
     }
     
     @Test("Test queryChainTip")
@@ -259,11 +259,19 @@ struct KoiosChainContextTests {
         )
 
         let poolId = "pool1pu5jlj4q9w9jlxeu370a3c9myx47md5j5m2str0naunn2q3lkdy"
-        let poolParams = try await chainContext.stakePoolInfo(poolId: poolId)
+        let poolInfo = try await chainContext.stakePoolInfo(poolId: poolId)
+        let poolParams = poolInfo.poolParams
 
         #expect(poolParams.pledge == 1_000_000_000_000)
         #expect(poolParams.cost == 340_000_000)
         #expect(poolParams.relays?.count == 0)
+
+        // Verify StakePoolInfo fields
+        #expect(poolInfo.opcertCounter == 42)
+        #expect(poolInfo.activeStake == 1_000_000_000_000)
+        #expect(poolInfo.activeSize == Decimal(0.001))
+        #expect(poolInfo.livePledge == 1_000_000_000_000)
+        #expect(poolInfo.liveStake == 1_000_000_000_000)
     }
 }
 

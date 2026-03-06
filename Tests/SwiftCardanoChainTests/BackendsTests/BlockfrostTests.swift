@@ -232,7 +232,8 @@ struct BlockfrostChainContextTests {
         )
 
         let poolId = "pool1pu5jlj4q9w9jlxeu370a3c9myx47md5j5m2str0naunn2q3lkdy"
-        let poolParams = try await chainContext.stakePoolInfo(poolId: poolId)
+        let poolInfo = try await chainContext.stakePoolInfo(poolId: poolId)
+        let poolParams = poolInfo.poolParams
 
         #expect(poolParams.pledge == 100_000_000_000)
         #expect(poolParams.cost == 340_000_000)
@@ -244,6 +245,13 @@ struct BlockfrostChainContextTests {
             #expect(Bool(false), "Expected singleHostName relay")
         }
         #expect(poolParams.poolMetadata?.url?.absoluteString == "https://example.com/metadata.json")
+
+        // Verify StakePoolInfo fields
+        #expect(poolInfo.opcertCounter == 42)
+        #expect(poolInfo.activeStake != nil)
+        #expect(poolInfo.activeSize != nil)
+        #expect(poolInfo.livePledge == 100_000_000_000)
+        #expect(poolInfo.liveStake != nil)
     }
 }
 
@@ -261,7 +269,9 @@ struct BlockfrostPoolMockTransport: ClientTransport {
     ) async throws -> (HTTPTypes.HTTPResponse, OpenAPIRuntime.HTTPBody?) {
         let responseBody: Data
 
-        if operationID.contains("get/pools/") && operationID.contains("/relays") {
+        if operationID == "get/pools/{pool_id}/blocks" || operationID == "get/blocks/{hash_or_number}" {
+            return try await fallback.send(request, body: body, baseURL: baseURL, operationID: operationID)
+        } else if operationID.contains("get/pools/") && operationID.contains("/relays") {
             responseBody = """
                 [
                     {

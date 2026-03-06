@@ -350,8 +350,8 @@ public class CardanoCliChainContext: ChainContext {
     /// Get the list of stake pools
     ///
     /// - Returns: List of stake pool IDs
-    public func stakePools() async throws -> [String] {
-        return try await cli.query.stakePools(arguments: [])
+    public func stakePools() async throws -> [PoolOperator] {
+        return try await cli.query.stakePools()
     }
 
     /// Get the cardano-cli version
@@ -436,130 +436,51 @@ public class CardanoCliChainContext: ChainContext {
 
     /// Get the stake pool information.
     /// - Parameter poolId: The pool ID (Bech32).
-    /// - Returns: `PoolParams` object.
+    /// - Returns: `StakePoolInfo` object.
     /// - Throws: `CardanoChainError.cardanoCLIError` if the query fails or parsing fails.
-    public func stakePoolInfo(poolId: String) async throws -> PoolParams {
-        let response = try await cli.query.poolState(
-            arguments: [
-                "--stake-pool-id",
-                poolId
-            ]
+    public func stakePoolInfo(poolId: String) async throws -> StakePoolInfo {
+        let poolOperator = try PoolOperator(from: poolId)
+        
+        let poolState = try await cli.query.poolState(
+            pool: poolOperator
         )
         
-        // Parse the JSON response
-        guard let data = response.data(using: .utf8) else {
-            throw CardanoChainError.cardanoCLIError("Failed to convert response to data")
-        }
-        
-        let json = try JSONSerialization.jsonObject(with: data, options: [])
-        guard let rootDict = json as? [String: Any] else {
-            throw CardanoChainError.cardanoCLIError("Invalid JSON response: expected dictionary")
-        }
-        
-        // The response is keyed by pool ID (hex), get the first entry
-        guard let poolEntry = rootDict.values.first as? [String: Any],
-              let poolParams = poolEntry["poolParams"] as? [String: Any] else {
+        guard let poolEntry = poolState.pools.first(where: { $0.key == poolOperator }) else {
             throw CardanoChainError.cardanoCLIError("Pool not found or has no poolParams")
         }
         
-        // Extract publicKey (poolOperator)
-        guard let publicKeyHex = poolParams["publicKey"] as? String else {
-            throw CardanoChainError.cardanoCLIError("Missing publicKey in poolParams")
-        }
-        let poolOperator = try PoolOperator(from: Data(hex: publicKeyHex))
+        let poolParams = try poolEntry.value.poolParams.toPoolParams(
+            poolOperator: poolOperator
+        )
         
-        // Extract VRF key hash
-        guard let vrfHex = poolParams["vrf"] as? String else {
-            throw CardanoChainError.cardanoCLIError("Missing vrf in poolParams")
-        }
-        let vrfKeyHash = VrfKeyHash(payload: Data(hex: vrfHex))
+        let stakeSnapshot = try await cli.query.stakeSnapshot(
+            pool: poolOperator
+        )
         
-        // Extract pledge and cost
-        guard let pledge = poolParams["pledge"] as? Int else {
-            throw CardanoChainError.cardanoCLIError("Missing pledge in poolParams")
-        }
-        guard let cost = poolParams["cost"] as? Int else {
-            throw CardanoChainError.cardanoCLIError("Missing cost in poolParams")
-        }
+        let protocolState = try await cli.query.protocolState()
         
-        // Extract margin (Double) and convert to UnitInterval
-        guard let marginDouble = poolParams["margin"] as? Double else {
-            throw CardanoChainError.cardanoCLIError("Missing margin in poolParams")
-        }
-        let marginDenom: UInt64 = 100_000_000
-        let marginNum = UInt64((marginDouble * Double(marginDenom)).rounded())
-        let margin = UnitInterval(numerator: marginNum, denominator: marginDenom)
+        let opCertInfo = protocolState.oCertCounters.first(where: { $0.key == poolOperator })
         
-        // Extract reward account
-        guard let rewardAccountDict = poolParams["rewardAccount"] as? [String: Any],
-              let credentialDict = rewardAccountDict["credential"] as? [String: Any],
-              let keyHashHex = credentialDict["keyHash"] as? String else {
-            throw CardanoChainError.cardanoCLIError("Missing or invalid rewardAccount in poolParams")
-        }
-        let networkStr = rewardAccountDict["network"] as? String ?? "Mainnet"
-        let networkHeader: UInt8 = (networkStr == "Mainnet") ? 0xe1 : 0xe0
-        var rewardAccountBytes = Data([networkHeader])
-        rewardAccountBytes.append(Data(hex: keyHashHex))
-        let rewardAccount = RewardAccountHash(payload: rewardAccountBytes)
+        var activeStake: UInt64? = nil
+        var activeSize: Decimal? = nil
         
-        // Extract pool owners
-        guard let ownersArray = poolParams["owners"] as? [String] else {
-            throw CardanoChainError.cardanoCLIError("Missing owners in poolParams")
-        }
-        let poolOwnersList: [VerificationKeyHash] = ownersArray.map { ownerHex in
-            VerificationKeyHash(payload: Data(hex: ownerHex))
-        }
-        let poolOwners = ListOrOrderedSet<VerificationKeyHash>.list(poolOwnersList)
-        
-        // Extract relays
-        var relays: [Relay] = []
-        if let relaysArray = poolParams["relays"] as? [[String: Any]] {
-            for relayDict in relaysArray {
-                if let singleHostAddr = relayDict["single host address"] as? [String: Any] {
-                    let port = singleHostAddr["port"] as? Int
-                    var ipv4: IPv4Address? = nil
-                    var ipv6: IPv6Address? = nil
-                    
-                    if let ipv4String = singleHostAddr["IPv4"] as? String {
-                        ipv4 = IPv4Address(ipv4String)
-                    }
-                    if let ipv6String = singleHostAddr["IPv6"] as? String {
-                        ipv6 = IPv6Address(ipv6String)
-                    }
-                    relays.append(.singleHostAddr(SingleHostAddr(port: port, ipv4: ipv4, ipv6: ipv6)))
-                } else if let singleHostName = relayDict["single host name"] as? [String: Any] {
-                    let port = singleHostName["port"] as? Int
-                    let dnsName = singleHostName["dnsName"] as? String
-                    relays.append(.singleHostName(SingleHostName(port: port, dnsName: dnsName)))
-                } else if let multiHostName = relayDict["multi host name"] as? [String: Any] {
-                    let dnsName = multiHostName["dnsName"] as? String
-                    relays.append(.multiHostName(MultiHostName(dnsName: dnsName)))
-                }
+        if let poolStakeInfo = stakeSnapshot.pools.first(
+            where: { $0.key == poolOperator }
+        ) {
+            activeStake = poolStakeInfo.value.stakeSet
+            let totalStakeSet = stakeSnapshot.total.stakeSet
+            if totalStakeSet > 0 {
+                activeSize = Decimal(poolStakeInfo.value.stakeSet) / Decimal(totalStakeSet)
             }
         }
-        
-        // Extract metadata
-        var poolMetadata: PoolMetadata? = nil
-        if let metadataDict = poolParams["metadata"] as? [String: Any],
-           let urlString = metadataDict["url"] as? String,
-           let hashHex = metadataDict["hash"] as? String,
-           let hashData = Data(hexString: hashHex) {
-            poolMetadata = try PoolMetadata(
-                url: try Url(urlString),
-                poolMetadataHash: PoolMetadataHash(payload: hashData)
-            )
-        }
-        
-        return PoolParams(
-            poolOperator: poolOperator.poolKeyHash,
-            vrfKeyHash: vrfKeyHash,
-            pledge: pledge,
-            cost: cost,
-            margin: margin,
-            rewardAccount: rewardAccount,
-            poolOwners: poolOwners,
-            relays: relays.isEmpty ? nil : relays,
-            poolMetadata: poolMetadata
+
+        return StakePoolInfo(
+            poolParams: poolParams,
+            livePledge: nil,
+            liveStake: nil,
+            activeStake: activeStake != nil ? UInt(activeStake!) : nil,
+            activeSize: activeSize,
+            opcertCounter: opCertInfo != nil ? UInt(opCertInfo!.value) : nil
         )
     }
 }
