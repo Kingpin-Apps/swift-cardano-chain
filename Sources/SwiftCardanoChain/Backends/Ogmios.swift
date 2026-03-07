@@ -842,10 +842,19 @@ public class OgmiosChainContext: ChainContext {
            let metadataHash = ogmiosParams.metadata?.hash
         {
             let hashData = Data(hex: metadataHash.description)
-            poolMetadata = try PoolMetadata(
-                url: try Url(metadataUrl.absoluteString),
-                poolMetadataHash: PoolMetadataHash(payload: hashData)
-            )
+            let url = try Url(metadataUrl.absoluteString)
+            let hash = PoolMetadataHash(payload: hashData)
+            do {
+                poolMetadata = try await PoolMetadata.fetch(
+                    url: url,
+                    poolMetadataHash: hash
+                )
+            } catch {
+                poolMetadata = try PoolMetadata(
+                    url: url,
+                    poolMetadataHash: hash
+                )
+            }
         }
 
         let params = PoolParams(

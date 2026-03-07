@@ -746,10 +746,19 @@ public class BlockFrostChainContext: ChainContext {
             if let urlString = metadata.value1?.url, let hashString = metadata.value1?.hash,
                let hashData = Data(hexString: hashString)
             {
-                poolMetadata = try PoolMetadata(
-                    url: try Url(urlString),
-                    poolMetadataHash: PoolMetadataHash(payload: hashData)
-                )
+                let url = try Url(urlString)
+                let hash = PoolMetadataHash(payload: hashData)
+                do {
+                    poolMetadata = try await PoolMetadata.fetch(
+                        url: url,
+                        poolMetadataHash: hash
+                    )
+                } catch {
+                    poolMetadata = try PoolMetadata(
+                        url: url,
+                        poolMetadataHash: hash
+                    )
+                }
             }
         } catch {
             // Metadata might not exist, ignore error

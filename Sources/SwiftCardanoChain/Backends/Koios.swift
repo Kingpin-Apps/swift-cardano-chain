@@ -738,7 +738,7 @@ public class KoiosChainContext: ChainContext {
         if let urlString = pool.metaUrl, let hashString = pool.metaHash,
            let hashData = Data(hexString: hashString)
         {
-            poolMetadata = try PoolMetadata(
+            poolMetadata = try await PoolMetadata.fetch(
                 url: try Url(urlString),
                 poolMetadataHash: PoolMetadataHash(payload: hashData)
             )

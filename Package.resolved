@@ -1,5 +1,5 @@
 {
-  "originHash" : "ed31fb9c81111934236518b5225e8278c88d5f1945702dee479bb9eee3463783",
+  "originHash" : "f368a54421566f6c119c4adfe496eaf3ae1a3fdd9cabe9eb5aacc102c1bc8fa0",
   "pins" : [
     {
       "identity" : "base32",
@@ -24,8 +24,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/tuist/Command.git",
       "state" : {
-        "revision" : "079a7803b581d3022469b3a331bccd51d48d2fc0",
-        "version" : "0.13.0"
+        "revision" : "2b9c835b8e373faf0e9a196508a34e20db73769a",
+        "version" : "0.14.0"
       }
     },
     {
@@ -150,8 +150,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/Kingpin-Apps/swift-cardano-core.git",
       "state" : {
-        "revision" : "3813dd135f84e02afeb2cf066daf9fe8bfb874b7",
-        "version" : "0.2.30"
+        "revision" : "6a1d38ad54595a8f506dcd195fb036f1fd71f751",
+        "version" : "0.2.31"
       }
     },
     {
@@ -159,8 +159,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/Kingpin-Apps/swift-cardano-utils.git",
       "state" : {
-        "revision" : "718a453a2f998974413fd9d6dfbc032d466e69e4",
-        "version" : "0.3.2"
+        "revision" : "30e78c0c4f43456f43d73a4a5fc3240ae70ee773",
+        "version" : "0.3.4"
       }
     },
     {

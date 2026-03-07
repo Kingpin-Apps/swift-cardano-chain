@@ -449,8 +449,9 @@ public class CardanoCliChainContext: ChainContext {
             throw CardanoChainError.cardanoCLIError("Pool not found or has no poolParams")
         }
         
-        let poolParams = try poolEntry.value.poolParams.toPoolParams(
-            poolOperator: poolOperator
+        let poolParams = try await poolEntry.value.poolParams.toPoolParams(
+            poolOperator: poolOperator,
+            strict: true
         )
         
         let stakeSnapshot = try await cli.query.stakeSnapshot(
