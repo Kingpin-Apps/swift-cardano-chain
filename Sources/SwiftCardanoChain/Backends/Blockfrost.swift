@@ -843,13 +843,42 @@ public class BlockFrostChainContext: ChainContext {
         let activeStake: UInt? = UInt(pool.activeStake)
         let activeSize: Decimal? = Decimal(pool.activeSize)
 
+        // 5. Determine pool status from retirement field
+        var status: PoolStatus? = nil
+        if pool.retirement.isEmpty {
+            status = .registered
+        } else if let lastRetirementTxHash = pool.retirement.last {
+            // Fetch the retirement certificate to get the retiring epoch
+            do {
+                let retireResponse = try await api.client.getTxsHashPoolRetires(
+                    Operations.GetTxsHashPoolRetires.Input(
+                        path: .init(hash: lastRetirementTxHash)
+                    )
+                )
+                let retireInfo = try retireResponse.ok.body.json
+                if let retire = retireInfo.first(where: { $0.poolId == poolId }) {
+                    let retiringEpoch = retire.retiringEpoch
+                    let currentEpoch = try await self.epoch()
+                    if currentEpoch >= retiringEpoch {
+                        status = .retired
+                    } else {
+                        status = .retiring(epoch: UInt(retiringEpoch))
+                    }
+                }
+            } catch {
+                // If we can't determine the exact epoch, fall back to retiring
+                status = .retiring(epoch: 0)
+            }
+        }
+
         return StakePoolInfo(
             poolParams: params,
             livePledge: livePledge,
             liveStake: liveStake,
             activeStake: activeStake,
             activeSize: activeSize,
-            opcertCounter: opcertCounter
+            opcertCounter: opcertCounter,
+            status: status
         )
     }
 }

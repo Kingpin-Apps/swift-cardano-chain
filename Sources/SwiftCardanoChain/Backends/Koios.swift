@@ -762,13 +762,31 @@ public class KoiosChainContext: ChainContext {
         let activeSize: Decimal? = pool.sigma.map { Decimal($0) }
         let opcertCounter: UInt? = pool.opCertCounter.map { UInt($0) }
 
+        // Map pool status from Koios pool_status field
+        let status: PoolStatus?
+        switch pool.poolStatus {
+        case .registered:
+            status = .registered
+        case .retiring:
+            if let epoch = pool.retiringEpoch {
+                status = .retiring(epoch: UInt(epoch))
+            } else {
+                status = .registered
+            }
+        case .retired:
+            status = .retired
+        case nil:
+            status = nil
+        }
+
         return StakePoolInfo(
             poolParams: params,
             livePledge: livePledge,
             liveStake: liveStake,
             activeStake: activeStake,
             activeSize: activeSize,
-            opcertCounter: opcertCounter
+            opcertCounter: opcertCounter,
+            status: status
         )
     }
 }

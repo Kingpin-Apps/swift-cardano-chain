@@ -884,12 +884,17 @@ public class OgmiosChainContext: ChainContext {
             ownerStake = UInt(poolSummary.ownerStake.ada.lovelace)
         }
 
+        // Ogmios StakePool type does not expose retirement/retiring-epoch information.
+        // If the pool was found in the stakePools query above it is currently registered.
+        // Retired pools would not be returned by the query and the guard above would have
+        // thrown an error, so we can safely mark any found pool as registered.
         return StakePoolInfo(
             poolParams: params,
             livePledge: ownerStake,
             liveStake: liveStake,
             liveSize: liveSize,
-            opcertCounter: opcertCounter
+            opcertCounter: opcertCounter,
+            status: .registered
         )
     }
 }

@@ -474,13 +474,22 @@ public class CardanoCliChainContext: ChainContext {
             }
         }
 
+        // Determine pool status from the retiring field in pool state
+        let status: PoolStatus
+        if let retiringEpoch = poolEntry.value.retiring {
+            status = .retiring(epoch: UInt(retiringEpoch))
+        } else {
+            status = .registered
+        }
+
         return StakePoolInfo(
             poolParams: poolParams,
             livePledge: nil,
             liveStake: nil,
             activeStake: activeStake != nil ? UInt(activeStake!) : nil,
             activeSize: activeSize,
-            opcertCounter: opCertInfo != nil ? UInt(opCertInfo!.value) : nil
+            opcertCounter: opCertInfo != nil ? UInt(opCertInfo!.value) : nil,
+            status: status
         )
     }
 }

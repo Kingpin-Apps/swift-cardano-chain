@@ -1,6 +1,12 @@
 import Foundation
 import SwiftCardanoCore
 
+public enum PoolStatus: Codable {
+    case registered
+    case retired
+    case retiring(epoch: UInt)
+}
+
 public struct StakePoolInfo: Codable {
     public var poolParams: PoolParams
     public var livePledge: UInt?
@@ -9,6 +15,7 @@ public struct StakePoolInfo: Codable {
     public var activeStake: UInt?
     public var activeSize: Decimal?
     public var opcertCounter: UInt?
+    public var status: PoolStatus?
 
     public init(
         poolParams: PoolParams,
@@ -17,7 +24,8 @@ public struct StakePoolInfo: Codable {
         liveSize: Decimal? = nil,
         activeStake: UInt? = nil,
         activeSize: Decimal? = nil,
-        opcertCounter: UInt? = nil
+        opcertCounter: UInt? = nil,
+        status: PoolStatus? = nil
     ) {
         self.poolParams = poolParams
         self.livePledge = livePledge
@@ -26,5 +34,6 @@ public struct StakePoolInfo: Codable {
         self.activeStake = activeStake
         self.activeSize = activeSize
         self.opcertCounter = opcertCounter
+        self.status = status
     }
 }
