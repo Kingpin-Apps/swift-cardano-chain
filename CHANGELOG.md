@@ -1,3 +1,9 @@
+## 0.2.8 (2026-03-06)
+
+### Fix
+
+- add PoolStatus to Stakepool info
+
 ## 0.2.7 (2026-03-06)
 
 ### Fix
