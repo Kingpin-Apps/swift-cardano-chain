@@ -1,3 +1,9 @@
+## 0.2.7 (2026-03-06)
+
+### Fix
+
+- use StakePoolInfo and PoolOperator
+
 ## 0.2.6 (2026-03-03)
 
 ### Fix
