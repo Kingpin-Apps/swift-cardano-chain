@@ -72,6 +72,42 @@ struct CardanoChainErrorTests {
         #expect(defaultError.description == "The value is invalid.")
     }
 
+    @Test func testInvalidAdaHandleError() {
+        let customMessage = "$invalid-handle!"
+        let error = CardanoChainError.invalidAdaHandle(customMessage)
+        #expect(error.description == customMessage)
+
+        let defaultError = CardanoChainError.invalidAdaHandle(nil)
+        #expect(defaultError.description == "Invalid ADA Handle.")
+    }
+
+    @Test func testKoiosError() {
+        let customMessage = "Rate limit exceeded"
+        let error = CardanoChainError.koiosError(customMessage)
+        #expect(error.description == customMessage)
+
+        let defaultError = CardanoChainError.koiosError(nil)
+        #expect(defaultError.description == "Failed to retrieve data from Koios.")
+    }
+
+    @Test func testOperationError() {
+        let customMessage = "Pool not found"
+        let error = CardanoChainError.operationError(customMessage)
+        #expect(error.description == customMessage)
+
+        let defaultError = CardanoChainError.operationError(nil)
+        #expect(defaultError.description == "Operation failed error occurred.")
+    }
+
+    @Test func testNotImplementedError() {
+        let customMessage = "Feature not yet available"
+        let error = CardanoChainError.notImplemented(customMessage)
+        #expect(error.description == customMessage)
+
+        let defaultError = CardanoChainError.notImplemented(nil)
+        #expect(defaultError.description == "Not implemented yet.")
+    }
+
     @Test func testErrorEquality() {
         // Test equality for the same error types with same messages
         let error1 = CardanoChainError.blockfrostError("API error")

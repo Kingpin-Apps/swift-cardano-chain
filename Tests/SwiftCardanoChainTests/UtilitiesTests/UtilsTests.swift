@@ -364,8 +364,65 @@ struct UtilsTests {
         }
     }
     
+    // MARK: - withRetry Tests
+
+    @Suite("withRetry Tests")
+    struct WithRetryTests {
+
+        private struct TestError: Error, Equatable {}
+
+        @Test("withRetry returns result on first try")
+        func testWithRetrySucceedsFirstTry() async throws {
+            var callCount = 0
+            let result = try await withRetry(maxRetryAttempts: 3, baseRetryDelay: 2) {
+                callCount += 1
+                return 42
+            }
+            #expect(result == 42)
+            #expect(callCount == 1)
+        }
+
+        @Test("withRetry retries on failure and eventually succeeds")
+        func testWithRetryRetriesUntilSuccess() async throws {
+            var callCount = 0
+            let result = try await withRetry(maxRetryAttempts: 3, baseRetryDelay: 2) {
+                callCount += 1
+                if callCount < 3 {
+                    throw TestError()
+                }
+                return "success"
+            }
+            #expect(result == "success")
+            #expect(callCount == 3)
+        }
+
+        @Test("withRetry throws last error when all attempts fail")
+        func testWithRetryExhaustsAttempts() async throws {
+            var callCount = 0
+            await #expect(throws: TestError.self) {
+                try await withRetry(maxRetryAttempts: 3, baseRetryDelay: 2) {
+                    callCount += 1
+                    throw TestError()
+                }
+            }
+            #expect(callCount == 3)
+        }
+
+        @Test("withRetry with maxRetryAttempts of 1 does not retry")
+        func testWithRetryNoRetryOnSingleAttempt() async throws {
+            var callCount = 0
+            await #expect(throws: TestError.self) {
+                try await withRetry(maxRetryAttempts: 1, baseRetryDelay: 2) {
+                    callCount += 1
+                    throw TestError()
+                }
+            }
+            #expect(callCount == 1)
+        }
+    }
+
     // MARK: - Performance Tests
-    
+
     @Suite("Performance Tests")
     struct PerformanceTests {
         
