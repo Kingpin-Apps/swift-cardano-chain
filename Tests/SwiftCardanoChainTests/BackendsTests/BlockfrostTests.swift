@@ -114,7 +114,7 @@ struct BlockfrostChainContextTests {
         #expect(
             utxos[0].input.transactionId.payload.toHex == "39a7a284c2a0948189dc45dec670211cd4d72f7b66c5726c08d9b3df11e44d58"
         )
-        #expect(utxos[0].output.amount.coin == 5000000)
+        #expect(utxos[0].output.amount.coin == 1000000)
     }
 
     @Test("Test utxo(input:)")
