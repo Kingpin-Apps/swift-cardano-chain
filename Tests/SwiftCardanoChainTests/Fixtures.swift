@@ -93,6 +93,19 @@ func createCardaonCLIMockCommandRunner(
                 continuation.finish()
             }
         )
+        .run(
+            arguments: .value([config.cardano!.cli!.string] + CLICommands.utxoInput),
+            environment: .any,
+            workingDirectory: .any
+        )
+        .willReturn(
+            AsyncThrowingStream<CommandEvent, any Error> { continuation in
+                continuation.yield(
+                    .standardOutput([UInt8](CLIResponse.utxos.utf8))
+                )
+                continuation.finish()
+            }
+        )
     
     return commandRunner
 }
@@ -109,6 +122,8 @@ struct CLICommands {
     static let governanceDRepId = ["conway", "governance", "drep", "id", "--drep-verification-key-file", "drep.vkey"]
     
     static let utxos = ["conway", "query", "utxo", "--address", "addr_test1qp4kux2v7xcg9urqssdffff5p0axz9e3hcc43zz7pcuyle0e20hkwsu2ndpd9dh9anm4jn76ljdz0evj22stzrw9egxqmza5y3", "--out-file",  "/dev/stdout", "--testnet-magic", "2"]
+    
+    static let utxoInput = ["conway", "query", "utxo", "--tx-in", "39a7a284c2a0948189dc45dec670211cd4d72f7b66c5726c08d9b3df11e44d58#0", "--output-json", "--out-file", "/dev/stdout", "--testnet-magic", "2"]
     
     static let stakeAddressInfo = ["conway", "query", "stake-address-info", "--address", "stake_test1upyz3gk6mw5he20apnwfn96cn9rscgvmmsxc9r86dh0k66gswf59n",  "--out-file", "/dev/stdout", "--testnet-magic", "2"]
     
@@ -317,6 +332,51 @@ struct MockTransport: ClientTransport {
     ) {
         var body: Data = Data()
         switch operationID {
+            case "get/txs/{hash}/utxos":
+                body = try JSONEncoder().encode(
+                    Components.Schemas.TxContentUtxo(
+                        hash: "39a7a284c2a0948189dc45dec670211cd4d72f7b66c5726c08d9b3df11e44d58",
+                        inputs: [
+                            .init(
+                                address: "addr_test1qp4kux2v7xcg9urqssdffff5p0axz9e3hcc43zz7pcuyle0e20hkwsu2ndpd9dh9anm4jn76ljdz0evj22stzrw9egxqmza5y3",
+                                amount: [
+                                    .init(
+                                        unit: "lovelace",
+                                        quantity: "1000000"
+                                    )
+                                ],
+                                txHash: "abcd1234efgh5678ijkl9012mnop3456qrst7890uvwx1234yzab5678cdef9012",
+                                outputIndex: 0,
+                                dataHash: nil,
+                                inlineDatum: nil,
+                                referenceScriptHash: nil,
+                                collateral: false,
+                                reference: false
+                            )
+                        ],
+                        outputs: [
+                            .init(
+                                address: "addr_test1qp4kux2v7xcg9urqssdffff5p0axz9e3hcc43zz7pcuyle0e20hkwsu2ndpd9dh9anm4jn76ljdz0evj22stzrw9egxqmza5y3",
+                                amount: [
+                                    .init(
+                                        unit: "lovelace",
+                                        quantity: "5000000"
+                                    ),
+                                    .init(
+                                        unit: "b0d07d45fe9514f80213f4020e5a61241458be626841cde717cb38a76e7574636f696e",
+                                        quantity: "50"
+                                    )
+                                ],
+                                outputIndex: 0,
+                                dataHash: nil,
+                                inlineDatum: nil,
+                                collateral: false,
+                                referenceScriptHash: nil,
+                                consumedByTx: nil
+                            )
+                        ]
+                    )
+                )
             case "get/blocks/latest":
                 body = try JSONEncoder().encode(
                     Components.Schemas.BlockContent(

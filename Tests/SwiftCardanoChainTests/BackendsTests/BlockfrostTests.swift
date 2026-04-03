@@ -102,20 +102,46 @@ struct BlockfrostChainContextTests {
                 transport: MockTransport()
             )
         )
-        
+
         let address = try Address(
             from: .string(
                 "addr_test1qp4kux2v7xcg9urqssdffff5p0axz9e3hcc43zz7pcuyle0e20hkwsu2ndpd9dh9anm4jn76ljdz0evj22stzrw9egxqmza5y3"
             )
         )
-        
+
         let utxos = try await chainContext.utxos(address: address)
-        
+
         #expect(
             utxos[0].input.transactionId.payload.toHex == "39a7a284c2a0948189dc45dec670211cd4d72f7b66c5726c08d9b3df11e44d58"
         )
+        #expect(utxos[0].output.amount.coin == 5000000)
     }
-    
+
+    @Test("Test utxo(input:)")
+    func testUtxoInput() async throws {
+        let chainContext = try await BlockFrostChainContext(
+            projectId: "fake-project-id",
+            network: .preview,
+            client: Client(
+                serverURL: URL(string: "https://cardano-preview.blockfrost.io/api/v0")!,
+                transport: MockTransport()
+            )
+        )
+
+        let txId = try TransactionId(from: .string("39a7a284c2a0948189dc45dec670211cd4d72f7b66c5726c08d9b3df11e44d58"))
+        let input = TransactionInput(transactionId: txId, index: 0)
+
+        guard let (utxo, isSpent) = try await chainContext.utxo(input: input) else {
+            #expect(Bool(false), "Expected UTxO to be found")
+            return
+        }
+
+        #expect(utxo.input.transactionId.payload.toHex == "39a7a284c2a0948189dc45dec670211cd4d72f7b66c5726c08d9b3df11e44d58")
+        #expect(utxo.input.index == 0)
+        #expect(utxo.output.amount.coin == 5000000)
+        #expect(isSpent == false)
+    }
+
     @Test("Test submitTxCBOR")
     func testSubmitTxCBOR() async throws {
         let chainContext = try await BlockFrostChainContext(

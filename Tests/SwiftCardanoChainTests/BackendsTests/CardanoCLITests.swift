@@ -155,6 +155,33 @@ struct CardanoCLIContextTests {
             utxos[0].input.transactionId.payload.toHex == "39a7a284c2a0948189dc45dec670211cd4d72f7b66c5726c08d9b3df11e44d58"
         )
     }
+
+    @Test("Test utxo(input:)")
+    func testUtxoInput() async throws {
+        let config = createMockConfig()
+        let runner = createCardaonCLIMockCommandRunner(config: config)
+        
+        let cli = try await CardanoCLI(configuration: config, commandRunner: runner)
+        
+        let chainContext = try await CardanoCliChainContext(
+            nodeConfig: FilePath(configFilePath!),
+            network: .preview,
+            cli: cli
+        )
+        
+        let txId = try TransactionId(from: .string("39a7a284c2a0948189dc45dec670211cd4d72f7b66c5726c08d9b3df11e44d58"))
+        let input = TransactionInput(transactionId: txId, index: 0)
+        
+        guard let (utxo, isSpent) = try await chainContext.utxo(input: input) else {
+            #expect(Bool(false), "Expected UTxO to be found")
+            return
+        }
+        
+        #expect(utxo.input.transactionId.payload.toHex == "39a7a284c2a0948189dc45dec670211cd4d72f7b66c5726c08d9b3df11e44d58")
+        #expect(utxo.input.index == 0)
+        #expect(utxo.output.amount.coin == 708864940)
+        #expect(isSpent == false)
+    }
     
     @Test("Test submitTxCBOR")
     func testSubmitTxCBOR() async throws {

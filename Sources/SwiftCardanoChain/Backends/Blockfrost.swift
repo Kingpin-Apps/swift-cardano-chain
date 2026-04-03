@@ -508,6 +508,92 @@ public class BlockFrostChainContext: ChainContext {
         }
     }
 
+    /// Get the UTxO for a specific transaction input.
+    ///
+    /// - Parameter input: A transaction input identifying the UTxO by transaction hash and output index.
+    /// - Returns: A tuple of the UTxO and a boolean indicating whether it has been spent,
+    ///   or `nil` if the output index does not exist in that transaction.
+    ///   Blockfrost returns all outputs regardless of spent status, so `isSpent` is accurate.
+    /// - Throws: `CardanoChainError.blockfrostError` if the query fails.
+    public func utxo(input: TransactionInput) async throws -> (UTxO, isSpent: Bool)? {
+        let txHash = input.transactionId.description
+        let outputIndex = Int(input.index)
+
+        let response = try await api.client.getTxsHashUtxos(
+            Operations.GetTxsHashUtxos.Input(
+                path: Operations.GetTxsHashUtxos.Input.Path(hash: txHash)
+            )
+        )
+
+        do {
+            let txUtxos = try response.ok.body.json
+
+            guard let result = txUtxos.outputs.first(where: { $0.outputIndex == outputIndex }) else {
+                return nil
+            }
+
+            let isSpent = result.consumedByTx != nil
+
+            let txIn = TransactionInput(
+                transactionId: try TransactionId(from: .string(txHash)),
+                index: UInt16(outputIndex)
+            )
+
+            var lovelaceAmount: UInt64 = 0
+            var multiAssets = MultiAsset([:])
+
+            for item in result.amount {
+                if item.unit == "lovelace" {
+                    lovelaceAmount = UInt64(item.quantity) ?? 0
+                } else {
+                    let data = Data(hex: item.unit)
+                    let policyId = ScriptHash(payload: data.prefix(SCRIPT_HASH_SIZE))
+                    let assetName = try AssetName(payload: data.suffix(from: SCRIPT_HASH_SIZE))
+                    if multiAssets[policyId] == nil {
+                        multiAssets[policyId] = Asset([:])
+                    }
+                    multiAssets[policyId]?[assetName] = Int(item.quantity)
+                }
+            }
+
+            let amount = Value(coin: Int(lovelaceAmount), multiAsset: multiAssets)
+
+            var datumHash: DatumHash? = nil
+            var datumOption: DatumOption? = nil
+            var script: ScriptType? = nil
+
+            if result.dataHash != nil && result.inlineDatum == nil {
+                datumHash = try DatumHash(from: .string(result.dataHash!))
+            }
+
+            if let inlineDatum = result.inlineDatum,
+               let datumData = Data(hexString: inlineDatum)
+            {
+                let plutusData = try PlutusData.fromCBOR(data: datumData)
+                datumOption = DatumOption(datum: plutusData)
+            }
+
+            if let referenceScriptHash = result.referenceScriptHash {
+                script = try? await self.getScript(scriptHash: referenceScriptHash)
+            }
+
+            let address = try Address(from: .string(result.address))
+            let txOut = TransactionOutput(
+                address: address,
+                amount: amount,
+                datumHash: datumHash,
+                datumOption: datumOption,
+                script: script
+            )
+
+            return (UTxO(input: txIn, output: txOut), isSpent)
+        } catch let error as CardanoChainError {
+            throw error
+        } catch {
+            throw CardanoChainError.blockfrostError("Failed to get UTxO: \(error)")
+        }
+    }
+
     /// Submit a transaction to the blockchain.
     /// - Parameter cbor: The serialized transaction to be submitted.
     /// - Returns: The transaction hash.

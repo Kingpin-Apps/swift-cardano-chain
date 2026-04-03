@@ -120,6 +120,30 @@ struct KoiosChainContextTests {
         )
         #expect(utxos[0].output.amount.coin == 1000000)
     }
+
+    @Test("Test utxo(input:)")
+    func testUtxoInput() async throws {
+        let chainContext = try await KoiosChainContext(
+            network: .preview,
+            client: Client(
+                serverURL: try SwiftKoios.Network.preview.url(),
+                transport: KoiosMockTransport()
+            )
+        )
+        
+        let txId = try TransactionId(from: .string("39a7a284c2a0948189dc45dec670211cd4d72f7b66c5726c08d9b3df11e44d58"))
+        let input = TransactionInput(transactionId: txId, index: 0)
+        
+        guard let (utxo, isSpent) = try await chainContext.utxo(input: input) else {
+            #expect(Bool(false), "Expected UTxO to be found")
+            return
+        }
+        
+        #expect(utxo.input.transactionId.payload.toHex == "39a7a284c2a0948189dc45dec670211cd4d72f7b66c5726c08d9b3df11e44d58")
+        #expect(utxo.input.index == 0)
+        #expect(utxo.output.amount.coin == 1000000)
+        #expect(isSpent == false)
+    }
     
     @Test("Test submitTxCBOR")
     func testSubmitTxCBOR() async throws {
@@ -358,6 +382,28 @@ struct KoiosMockTransport: ClientTransport {
                 "inline_datum": null,
                 "reference_script": null,
                 "asset_list": null,
+                "is_spent": false
+            }]
+            """.data(using: .utf8)!
+            
+        case "utxo_info":
+            responseBody = """
+            [{
+                "tx_hash": "39a7a284c2a0948189dc45dec670211cd4d72f7b66c5726c08d9b3df11e44d58",
+                "tx_index": 0,
+                "address": "addr_test1qp4kux2v7xcg9urqssdffff5p0axz9e3hcc43zz7pcuyle0e20hkwsu2ndpd9dh9anm4jn76ljdz0evj22stzrw9egxqmza5y3",
+                "value": "1000000",
+                "stake_address": null,
+                "payment_cred": null,
+                "epoch_no": 500,
+                "block_height": 123456,
+                "block_time": \(Int(Date().timeIntervalSince1970)),
+                "datum_hash": null,
+                "inline_datum": null,
+                "reference_script": null,
+                "asset_list": [
+                    {"policy_id": "b0d07d45fe9514f80213f4020e5a61241458be626841cde717cb38a76e7574636f696e", "asset_name": "6574636f696e", "quantity": "50"}
+                ],
                 "is_spent": false
             }]
             """.data(using: .utf8)!

@@ -420,6 +420,115 @@ public class KoiosChainContext: ChainContext {
         }
     }
 
+    /// Get the UTxO for a specific transaction input.
+    ///
+    /// - Parameter input: A transaction input identifying the UTxO by transaction hash and output index.
+    /// - Returns: A tuple of the UTxO and a boolean indicating whether it has been spent,
+    ///   or `nil` if the UTxO cannot be found. Koios returns UTxOs regardless of spent status,
+    ///   so `isSpent` is accurate when a result is returned.
+    /// - Throws: `CardanoChainError.koiosError` if the query fails.
+    public func utxo(input: TransactionInput) async throws -> (UTxO, isSpent: Bool)? {
+        let txRef = input.description  // "<txhash>#<index>"
+
+        let response = try await api.client.utxoInfo(
+            Operations.UtxoInfo.Input(
+                body: Components.RequestBodies.UtxoRefsWithExtended.json(
+                    .init(_utxoRefs: [txRef])
+                )
+            )
+        )
+
+        do {
+            let results = try response.ok.body.json
+
+            guard let result = results.first else {
+                return nil
+            }
+
+            let isSpent = result.isSpent ?? false
+
+            guard let txHashStr = result.txHash,
+                  let txIndexDouble = result.txIndex,
+                  let addressStr = result.address
+            else {
+                return nil
+            }
+
+            let txIn = TransactionInput(
+                transactionId: try TransactionId(from: .string(txHashStr)),
+                index: UInt16(txIndexDouble)
+            )
+
+            var lovelaceAmount: UInt64 = 0
+            var multiAssets = MultiAsset([:])
+
+            // Parse lovelace from value field
+            if let valueContainer = result.value,
+               let valueStr = valueContainer.value as? String
+            {
+                lovelaceAmount = UInt64(valueStr) ?? 0
+            }
+
+            // Parse multi-assets from asset_list
+            if let assetList = result.assetList {
+                for asset in assetList {
+                    guard let policyIdStr = asset.policyId?.value as? String,
+                          let assetNameStr = asset.assetName?.value as? String,
+                          let quantityStr = asset.quantity
+                    else { continue }
+
+                    let policyId = try ScriptHash(from: .string(policyIdStr))
+                    let assetName = try AssetName(payload: Data(hex: assetNameStr))
+
+                    if multiAssets[policyId] == nil {
+                        multiAssets[policyId] = Asset([:])
+                    }
+                    multiAssets[policyId]?[assetName] = Int(quantityStr) ?? 0
+                }
+            }
+
+            let amount = Value(coin: Int(lovelaceAmount), multiAsset: multiAssets)
+
+            var datumHash: DatumHash? = nil
+            var datumOption: DatumOption? = nil
+            var script: ScriptType? = nil
+
+            if let datumHashValue = result.datumHash?.value as? String,
+               result.inlineDatum == nil
+            {
+                datumHash = try DatumHash(from: .string(datumHashValue))
+            }
+
+            if let inlineDatum = result.inlineDatum?.value as? String,
+               let datumData = Data(hexString: inlineDatum)
+            {
+                let plutusData = try PlutusData.fromCBOR(data: datumData)
+                datumOption = DatumOption(datum: plutusData)
+            }
+
+            if let referenceScriptValue = result.referenceScript?.value {
+                if let scriptDict = referenceScriptValue as? [String: Any] {
+                    script = try? getScript(from: scriptDict)
+                }
+            }
+
+            let address = try Address(from: .string(addressStr))
+            let txOut = TransactionOutput(
+                address: address,
+                amount: amount,
+                datumHash: datumHash,
+                datumOption: datumOption,
+                script: script
+            )
+
+            return (UTxO(input: txIn, output: txOut), isSpent)
+        } catch let error as CardanoChainError {
+            throw error
+        } catch {
+            throw CardanoChainError.koiosError("Failed to get UTxO: \(error)")
+        }
+    }
+
     /// Submit a transaction to the blockchain.
     /// - Parameter cbor: The serialized transaction to be submitted.
     /// - Returns: The transaction hash.

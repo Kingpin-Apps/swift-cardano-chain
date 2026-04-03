@@ -325,6 +325,29 @@ public class OgmiosChainContext: ChainContext {
         }
     }
 
+    /// Get the UTxO for a specific transaction input.
+    ///
+    /// - Parameter input: A transaction input identifying the UTxO by transaction hash and output index.
+    /// - Returns: The UTxO if it exists and is unspent, or `nil` if it has been spent or does not exist.
+    ///   Ogmios only queries the live UTxO set, so spent UTxOs are indistinguishable from non-existent ones.
+    /// - Throws: `CardanoChainError` if the query fails.
+    public func utxo(input: TransactionInput) async throws -> (UTxO, isSpent: Bool)? {
+        let outputRef = SwiftOgmios.TransactionOutputReference(
+            transaction: .init(id: input.transactionId.description),
+            index: UInt64(input.index)
+        )
+
+        let entries = try await client.ledgerStateQuery.utxo.result(
+            outputReferences: [outputRef]
+        )
+
+        guard let entry = entries.first else {
+            return nil
+        }
+
+        return (try convertUtxoEntry(entry), false)
+    }
+
     /// Submits a serialized transaction to the blockchain.
     ///
     /// - Parameter cbor: The CBOR-encoded transaction data.

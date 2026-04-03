@@ -287,6 +287,91 @@ public class CardanoCliChainContext: ChainContext {
         return utxos
     }
 
+    /// Get the UTxO for a specific transaction input.
+    ///
+    /// - Parameter input: A transaction input identifying the UTxO by transaction hash and output index.
+    /// - Returns: A tuple of the UTxO and a boolean indicating whether it has been spent,
+    ///   or `nil` if the UTxO cannot be found. CardanoCLI only queries the live UTxO set,
+    ///   so `isSpent` is always `false` when a result is returned.
+    /// - Throws: CardanoChainError if the query fails.
+    public func utxo(input: TransactionInput) async throws -> (UTxO, isSpent: Bool)? {
+        let txInStr = input.description  // "<txhash>#<index>"
+        let result = try await cli.query.utxo(arguments: [
+            "--tx-in", txInStr, "--output-json", "--out-file",  "/dev/stdout"
+        ])
+
+        guard let data = result.data(using: .utf8),
+              let rawUtxos = try? JSONSerialization.jsonObject(with: data, options: [])
+                as? [String: [String: Any]]
+        else {
+            throw CardanoChainError.valueError("Failed to parse UTxO JSON")
+        }
+
+        guard let utxoEntry = rawUtxos[txInStr] else {
+            return nil  // Not in UTXO set: either spent or never existed
+        }
+
+        guard let utxoValue = utxoEntry["value"] as? [String: Any] else {
+            return nil
+        }
+
+        var value = Value(coin: 0)
+        var multiAsset = MultiAsset([:])
+
+        for (asset, amount) in utxoValue {
+            if asset == "lovelace" {
+                if let lovelace = amount as? Int {
+                    value.coin = Int(lovelace)
+                }
+            } else {
+                let policyId = asset
+                guard let assets = amount as? [String: Int] else { continue }
+                for (assetHexName, assetAmount) in assets {
+                    let policy = try ScriptHash(from: .string(policyId))
+                    let assetName = AssetName(from: assetHexName)
+                    if multiAsset[policy] == nil {
+                        multiAsset[policy] = Asset([:])
+                    }
+                    multiAsset[policy]?[assetName] = assetAmount
+                }
+            }
+        }
+
+        value.multiAsset = multiAsset
+
+        var datumHash: DatumHash? = nil
+        if let datumHashStr = utxoEntry["datumhash"] as? String {
+            datumHash = try DatumHash(from: .string(datumHashStr))
+        }
+
+        var datumOption: DatumOption? = nil
+        if let datumStr = utxoEntry["datum"] as? String,
+           let datumData = Data(hexString: datumStr)
+        {
+            datumOption = try DatumOption.fromCBOR(data: datumData)
+        } else if let inlineDatum = utxoEntry["inlineDatum"] as? [AnyHashable: Any] {
+            let primitiveDict = try Primitive.fromAny(inlineDatum)
+            let plutusData = try PlutusData(from: primitiveDict)
+            datumOption = DatumOption(datum: plutusData)
+        }
+
+        var script: ScriptType? = nil
+        if let referenceScript = utxoEntry["referenceScript"] as? [String: Any] {
+            script = try await getScript(from: referenceScript)
+        }
+
+        let address = try Address(from: .string(utxoEntry["address"] as! String))
+        let txOut = TransactionOutput(
+            address: address,
+            amount: value,
+            datumHash: datumHash,
+            datumOption: datumOption,
+            script: script
+        )
+
+        return (UTxO(input: input, output: txOut), false)
+    }
+
     /// Submit a transaction to the blockchain
     ///
     /// - Parameter cbor: The transaction to be submitted

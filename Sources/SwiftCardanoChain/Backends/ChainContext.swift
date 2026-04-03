@@ -47,6 +47,15 @@ public protocol ChainContext: CustomStringConvertible, CustomDebugStringConverti
     /// - Returns: A list of UTxOs.
     func utxos(address: Address) async throws -> [UTxO]
 
+    /// Get the UTxO for a specific transaction input.
+    ///
+    /// - Parameter input: A transaction input identifying the UTxO by transaction hash and output index.
+    /// - Returns: A tuple of the UTxO and a boolean indicating whether it has been spent,
+    ///   or `nil` if the UTxO does not exist or cannot be found.
+    ///   Note: backends that only query the live UTxO set (CardanoCLI, Ogmios) will always
+    ///   return `isSpent: false` when a result is returned, and `nil` for spent UTxOs.
+    func utxo(input: TransactionInput) async throws -> (UTxO, isSpent: Bool)?
+
     /// Submit a serialized transaction to the blockchain.
     ///
     /// - Parameter cbor: The serialized transaction to be submitted.

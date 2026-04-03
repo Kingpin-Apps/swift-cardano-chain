@@ -353,7 +353,7 @@ struct OgmiosChainContextTests {
         let txData1 = TransactionData.transaction(tx)
         if case .transaction(_) = txData1 {
             // Transaction was parsed and stored successfully
-            #expect(true)
+            #expect(Bool(true))
         } else {
             #expect(Bool(false), "Expected .transaction case")
         }
@@ -632,6 +632,23 @@ struct OgmiosChainContextTests {
         #expect(utxos.count == 2)
         #expect(utxos[0].output.amount.coin == 5_000_000)
         #expect(utxos[1].output.amount.coin == 2_000_000)
+    }
+
+    @Test("Test utxo(input:) via mock client")
+    func testUtxoInputViaMockClient() async throws {
+        let context = try await createMockOgmiosChainContext()
+        let txId = try TransactionId(from: .string("39a7a284c2a0948189dc45dec670211cd4d72f7b66c5726c08d9b3df11e44d58"))
+        let input = TransactionInput(transactionId: txId, index: 0)
+        
+        guard let (utxo, isSpent) = try await context.utxo(input: input) else {
+            #expect(Bool(false), "Expected UTxO to be found")
+            return
+        }
+        
+        #expect(utxo.input.transactionId.payload.toHex == "39a7a284c2a0948189dc45dec670211cd4d72f7b66c5726c08d9b3df11e44d58")
+        #expect(utxo.input.index == 0)
+        #expect(utxo.output.amount.coin == 5_000_000)
+        #expect(isSpent == false)
     }
 
     @Test("Test stakeAddressInfo via mock client")
