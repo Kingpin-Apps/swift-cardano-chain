@@ -591,4 +591,90 @@ public class CardanoCliChainContext: ChainContext {
         
         return Coin(treasuryInt)
     }
+    
+    /// Get the DRep information.
+    /// - Parameter drep: The `DRep` object.
+    /// - Returns: The `DRepInfo` object containing information about the DRep.
+    public func drepInfo(drep: DRep) async throws -> DRepInfo {
+        
+        func parseDRepStateResult(_ result: String, drep: DRep) throws -> DRepInfo {
+            guard let data = result.data(using: .utf8),
+                  let entries = try? JSONSerialization.jsonObject(with: data) as? [[Any]],
+                  let firstEntry = entries.first,
+                  firstEntry.count == 2,
+                  let stateDict = firstEntry[1] as? [String: Any] else {
+                return DRepInfo(
+                    active: false,
+                    drep: drep,
+                    anchor: nil,
+                    deposit: nil,
+                    stake: Coin(0),
+                    expiry: nil,
+                    status: .notRegistered
+                )
+            }
+            
+            let deposit = (stateDict["deposit"] as? Int).map { Coin(UInt64($0)) }
+            let expiry = (stateDict["expiry"] as? Int).map { UInt64($0) }
+            let stakeRaw = stateDict["stake"] as? Int ?? 0
+            
+            var anchor: Anchor? = nil
+            if let anchorDict = stateDict["anchor"] as? [String: Any],
+               let urlStr = anchorDict["url"] as? String,
+               let hashStr = anchorDict["dataHash"] as? String,
+               let hashData = Data(hexString: hashStr) {
+                anchor = try? Anchor(
+                    anchorUrl: Url(urlStr),
+                    anchorDataHash: AnchorDataHash(payload: hashData)
+                )
+            }
+            
+            return DRepInfo(
+                active: true,
+                drep: drep,
+                anchor: anchor,
+                deposit: deposit,
+                stake: Coin(UInt64(stakeRaw)),
+                expiry: expiry,
+                status: .registered
+            )
+        }
+        
+        switch drep.credential {
+            case .alwaysAbstain, .alwaysNoConfidence:
+                let distKey = drep.credential == .alwaysAbstain
+                    ? "drep-alwaysAbstain"
+                    : "drep-alwaysNoConfidence"
+                let distResult = try await cli.query.drepStakeDistribution(arguments: ["--all-dreps"])
+                var stake = Coin(0)
+                if let distData = distResult.data(using: .utf8),
+                   let distDict = try? JSONSerialization.jsonObject(with: distData) as? [String: Any],
+                   let stakeRaw = distDict[distKey] as? Int64 {
+                    stake = Coin(UInt64(stakeRaw))
+                }
+                return DRepInfo(
+                    active: true,
+                    drep: drep,
+                    anchor: nil,
+                    deposit: nil,
+                    stake: stake,
+                    expiry: nil,
+                    status: .registered
+                )
+
+            case .verificationKeyHash(let hash):
+                let result = try await cli.query.drepState(arguments: [
+                    "--drep-key-hash", hash.payload.toHex,
+                    "--include-stake"
+                ])
+                return try parseDRepStateResult(result, drep: drep)
+
+            case .scriptHash(let hash):
+                let result = try await cli.query.drepState(arguments: [
+                    "--drep-script-hash", hash.payload.toHex,
+                    "--include-stake"
+                ])
+                return try parseDRepStateResult(result, drep: drep)
+        }
+    }
 }

@@ -938,7 +938,129 @@ public class OgmiosChainContext: ChainContext {
             .ledgerStateQuery
             .treasuryAndReserves
             .result()
-        
+
         return Coin(response.treasury.ada.lovelace)
+    }
+
+    /// Get the DRep information.
+    /// - Parameter drep: The `DRep` object.
+    /// - Returns: The `DRepInfo` object containing information about the DRep.
+    public func drepInfo(drep: DRep) async throws -> DRepInfo {
+        
+        func ogmosisDRepInfoFromRegistered(
+            drep: DRep,
+            reg: DelegateRepresentativeSummary.Registered
+        ) throws -> DRepInfo {
+            let stake = Coin(reg.stake.ada.lovelace)
+            let deposit = reg.deposit.map { Coin($0.ada.lovelace) }
+            let expiry = reg.mandate.map { $0.epoch }
+            
+            var anchor: SwiftCardanoCore.Anchor? = nil
+            if let ogmiosAnchor = reg.metadata,
+               let hashData = Data(hexString: ogmiosAnchor.hash),
+               let anchorUrl = try? Url(ogmiosAnchor.url.absoluteString) {
+                anchor = SwiftCardanoCore.Anchor(
+                    anchorUrl: anchorUrl,
+                    anchorDataHash: AnchorDataHash(payload: hashData)
+                )
+            }
+            
+            return DRepInfo(
+                active: true,
+                drep: drep,
+                anchor: anchor,
+                deposit: deposit,
+                stake: stake,
+                expiry: expiry,
+                status: .registered
+            )
+        }
+        
+        switch drep.credential {
+            case .alwaysAbstain, .alwaysNoConfidence:
+                
+                let delegates = try await client
+                    .ledgerStateQuery
+                    .delegateRepresentatives
+                    .result()
+                
+                let stake: Coin
+                
+                switch drep.credential {
+                    case .alwaysAbstain:
+                        let found = delegates.first { if case .abstain = $0 { return true }; return false }
+                        if case .abstain(let a)? = found {
+                            stake = Coin(a.stake.ada.lovelace)
+                        } else {
+                            stake = Coin(0)
+                        }
+                    case .alwaysNoConfidence:
+                        let found = delegates.first { if case .noConfidence = $0 { return true }; return false }
+                        if case .noConfidence(let nc)? = found {
+                            stake = Coin(nc.stake.ada.lovelace)
+                        } else {
+                            stake = Coin(0)
+                        }
+                    default:
+                        stake = Coin(0)
+                }
+                return DRepInfo(
+                    active: true,
+                    drep: drep,
+                    anchor: nil,
+                    deposit: nil,
+                    stake: stake,
+                    expiry: nil,
+                    status: .registered
+                )
+
+            case .verificationKeyHash(let hash):
+                let hexHash = hash.payload.toHex
+                let credential = try EncodingBase16(hexHash)
+                let params = QueryLedgerStateDelegateRepresentatives.Params(
+                    keys: [.base16(credential)]
+                )
+                let delegates = try await client
+                    .ledgerStateQuery
+                    .delegateRepresentatives
+                    .result(params: params)
+                
+                guard let delegate = delegates.first, case .registered(let reg) = delegate else {
+                    return DRepInfo(
+                        active: false,
+                        drep: drep,
+                        anchor: nil,
+                        deposit: nil,
+                        stake: Coin(0),
+                        expiry: nil,
+                        status: .notRegistered
+                    )
+                }
+                return try ogmosisDRepInfoFromRegistered(drep: drep, reg: reg)
+
+            case .scriptHash(let hash):
+                let hexHash = hash.payload.toHex
+                let credential = try EncodingBase16(hexHash)
+                let params = QueryLedgerStateDelegateRepresentatives.Params(
+                    scripts: [.base16(credential)],
+                )
+                let delegates = try await client
+                    .ledgerStateQuery
+                    .delegateRepresentatives
+                    .result(params: params)
+                
+                guard let delegate = delegates.first, case .registered(let reg) = delegate else {
+                    return DRepInfo(
+                        active: false,
+                        drep: drep,
+                        anchor: nil,
+                        deposit: nil,
+                        stake: Coin(0),
+                        expiry: nil,
+                        status: .notRegistered
+                    )
+                }
+                return try ogmosisDRepInfoFromRegistered(drep: drep, reg: reg)
+        }
     }
 }

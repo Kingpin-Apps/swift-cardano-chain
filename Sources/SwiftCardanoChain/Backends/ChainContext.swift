@@ -101,6 +101,11 @@ public protocol ChainContext: CustomStringConvertible, CustomDebugStringConverti
     /// - Returns: The current balance of the treasury as a `Coin` object.
     /// - Throws: An error if the treasury balance cannot be retrieved.
     func treasury() async throws -> Coin
+    
+    /// Get the DRep information.
+    /// - Parameter drep: The `DRep` object.
+    /// - Returns: The `DRepInfo` object containing information about the DRep.
+    func drepInfo(drep: DRep) async throws -> DRepInfo
 }
 
 // MARK: - Default Implementation
