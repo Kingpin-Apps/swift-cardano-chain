@@ -578,4 +578,17 @@ public class CardanoCliChainContext: ChainContext {
             status: status
         )
     }
+    
+    /// Get the treasury balance.
+    /// - Returns: The current balance of the treasury as a `Coin` object.
+    /// - Throws: An error if the treasury balance cannot be retrieved.
+    public func treasury() async throws -> Coin {
+        let currentTreasuryValue = try await cli.query.treasury(arguments: [])
+        
+        guard let treasuryInt = UInt64(currentTreasuryValue) else {
+            throw CardanoChainError.valueError("Failed to parse treasury balance")
+        }
+        
+        return Coin(treasuryInt)
+    }
 }

@@ -96,6 +96,11 @@ public protocol ChainContext: CustomStringConvertible, CustomDebugStringConverti
     /// - Parameter poolId: The pool ID (Bech32).
     /// - Returns: `StakePoolInfo` object.
     func stakePoolInfo(poolId: String) async throws -> StakePoolInfo
+    
+    /// Get the treasury balance.
+    /// - Returns: The current balance of the treasury as a `Coin` object.
+    /// - Throws: An error if the treasury balance cannot be retrieved.
+    func treasury() async throws -> Coin
 }
 
 // MARK: - Default Implementation

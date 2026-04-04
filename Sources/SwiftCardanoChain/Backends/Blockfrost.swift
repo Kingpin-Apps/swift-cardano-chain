@@ -976,4 +976,20 @@ public class BlockFrostChainContext: ChainContext {
             status: status
         )
     }
+    
+    /// Get the treasury balance.
+    /// - Returns: The current balance of the treasury as a `Coin` object.
+    /// - Throws: An error if the treasury balance cannot be retrieved.
+    public func treasury() async throws -> Coin {
+        let networkResponse = try await api.client.getNetwork(
+            Operations.GetNetwork.Input()
+        )
+        let networkData = try networkResponse.ok.body.json
+        
+        guard let treasuryInt = UInt64(networkData.supply.treasury) else {
+            throw CardanoChainError.valueError("Failed to parse treasury balance")
+        }
+        
+        return Coin(treasuryInt)
+    }
 }

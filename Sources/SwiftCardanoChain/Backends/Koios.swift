@@ -898,4 +898,33 @@ public class KoiosChainContext: ChainContext {
             status: status
         )
     }
+    
+    /// Get the treasury balance.
+    /// - Returns: The current balance of the treasury as a `Coin` object.
+    /// - Throws: An error if the treasury balance cannot be retrieved.
+    public func treasury() async throws -> Coin {
+        let totalsResponse = try await api.client.totals(
+            .init(
+                query: .init(
+                    _epochNo: String(self.epoch())
+                )
+            )
+        )
+        
+        let totalsPayload = try totalsResponse.ok.body.json
+        
+        guard totalsPayload.count == 1 else {
+            throw CardanoChainError.koiosError("Unexpected response format for totals endpoint: expected 1 item, got \(totalsPayload.count)")
+        }
+        
+        guard let treasuryStr = totalsPayload[0].treasury else {
+            throw CardanoChainError.koiosError("Treasury balance is missing in totals response")
+        }
+        
+        guard let treasuryInt = UInt64(treasuryStr) else {
+            throw CardanoChainError.valueError("Failed to parse treasury balance")
+        }
+        
+        return Coin(treasuryInt)
+    }
 }

@@ -539,7 +539,7 @@ struct CardanoCLIContextTests {
         #expect(poolParams.relays?.count == 2)
         if case .singleHostAddr(let addr) = poolParams.relays?[0] {
             #expect(addr.port == 3001)
-            #expect(addr.ipv4?.address == "34.141.108.51")
+            #expect(addr.ipv4?.address == "1.2.3.4")
         } else {
             Issue.record("Expected singleHostAddr relay")
         }
@@ -552,7 +552,7 @@ struct CardanoCLIContextTests {
 
         // Verify metadata
         #expect(poolParams.poolMetadata != nil)
-        #expect(poolParams.poolMetadata?.url?.absoluteString == "https://meta.wavepool.digital/midnight02.json")
+        #expect(poolParams.poolMetadata?.url?.absoluteString == "https://meta.example.com/pool.json")
         #expect(
             poolParams.poolMetadata?.poolMetadataHash?.payload.toHex == "db7b7e2943b84fe628fd75eb3cc01fc5c136a0a1dbc2cfb5fdeee6afdd943af1"
         )
@@ -566,5 +566,23 @@ struct CardanoCLIContextTests {
         // activeSize = stakeSet / total.stakeSet
         let expectedActiveSize = Decimal(4_900_000_000_000) / Decimal(24_900_000_000_000_000)
         #expect(poolInfo.activeSize == expectedActiveSize)
+    }
+    
+    @Test("Test treasury")
+    func testTreasury() async throws {
+        let config = createMockConfig()
+        let runner = createCardaonCLIMockCommandRunner(config: config)
+        
+        let cli = try await CardanoCLI(configuration: config, commandRunner: runner)
+        
+        let chainContext = try await CardanoCliChainContext(
+            nodeConfig: FilePath(configFilePath!),
+            network: .preview,
+            cli: cli
+        )
+        
+        let treasury = try await chainContext.treasury()
+        
+        #expect(treasury == Coin(1000000000000000))
     }
 }

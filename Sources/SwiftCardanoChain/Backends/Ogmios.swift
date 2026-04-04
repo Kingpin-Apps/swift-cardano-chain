@@ -929,4 +929,16 @@ public class OgmiosChainContext: ChainContext {
             status: .registered
         )
     }
+    
+    /// Get the treasury balance.
+    /// - Returns: The current balance of the treasury as a `Coin` object.
+    /// - Throws: An error if the treasury balance cannot be retrieved.
+    public func treasury() async throws -> Coin {
+        let response = try await client
+            .ledgerStateQuery
+            .treasuryAndReserves
+            .result()
+        
+        return Coin(response.treasury.ada.lovelace)
+    }
 }

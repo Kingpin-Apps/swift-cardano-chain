@@ -279,83 +279,20 @@ struct BlockfrostChainContextTests {
         #expect(poolInfo.livePledge == 100_000_000_000)
         #expect(poolInfo.liveStake != nil)
     }
-}
-
-
-// MARK: - Blockfrost Pool Mock Transport
-
-struct BlockfrostPoolMockTransport: ClientTransport {
-    private let fallback = MockTransport()
-
-    func send(
-        _ request: HTTPTypes.HTTPRequest,
-        body: OpenAPIRuntime.HTTPBody?,
-        baseURL: URL,
-        operationID: String
-    ) async throws -> (HTTPTypes.HTTPResponse, OpenAPIRuntime.HTTPBody?) {
-        let responseBody: Data
-
-        if operationID == "get/pools/{pool_id}/blocks" || operationID == "get/blocks/{hash_or_number}" {
-            return try await fallback.send(request, body: body, baseURL: baseURL, operationID: operationID)
-        } else if operationID.contains("get/pools/") && operationID.contains("/relays") {
-            responseBody = """
-                [
-                    {
-                        "dns": "relay.example.com",
-                        "srv": null,
-                        "ipv4": null,
-                        "ipv6": null,
-                        "port": 3001
-                    }
-                ]
-                """.data(using: .utf8)!
-        } else if operationID.contains("get/pools/") && operationID.contains("/metadata") {
-            responseBody = """
-                {
-                    "pool_id": "pool1pu5jlj4q9w9jlxeu370a3c9myx47md5j5m2str0naunn2q3lkdy",
-                    "hex": "0f292fcaa02b8b2f9b3c8f9fd8e0bb21abedb692a6d5058df3ef2735",
-                    "url": "https://example.com/metadata.json",
-                    "hash": "9a1c27f8a16e560a3b6d574e0fe6e573c15e3b6f65cf8e0f7c2c31f5e9fc2b4a",
-                    "ticker": "TEST",
-                    "name": "Test Pool",
-                    "description": "A test pool",
-                    "homepage": "https://example.com"
-                }
-                """.data(using: .utf8)!
-        } else if operationID.contains("get/pools/") {
-            responseBody = """
-                {
-                    "pool_id": "pool1pu5jlj4q9w9jlxeu370a3c9myx47md5j5m2str0naunn2q3lkdy",
-                    "hex": "0f292fcaa02b8b2f9b3c8f9fd8e0bb21abedb692a6d5058df3ef2735",
-                    "vrf_key": "vrf_key_hash_placeholder_32_bytes_00",
-                    "blocks_minted": 100,
-                    "blocks_epoch": 10,
-                    "live_stake": "1000000000000",
-                    "live_size": 0.001,
-                    "live_saturation": 0.5,
-                    "live_delegators": 100,
-                    "active_stake": "1000000000000",
-                    "active_size": 0.001,
-                    "declared_pledge": "100000000000",
-                    "live_pledge": "100000000000",
-                    "margin_cost": 0.05,
-                    "fixed_cost": "340000000",
-                    "reward_account": "stake_test1upyz3gk6mw5he20apnwfn96cn9rscgvmmsxc9r86dh0k66gswf59n",
-                    "owners": ["stake_test1upyz3gk6mw5he20apnwfn96cn9rscgvmmsxc9r86dh0k66gswf59n"],
-                    "registration": [],
-                    "retirement": []
-                }
-                """.data(using: .utf8)!
-        } else {
-            return try await fallback.send(request, body: body, baseURL: baseURL, operationID: operationID)
-        }
-
-        return (
-            HTTPResponse(
-                status: .ok,
-                headerFields: [.contentType: "application/json"]
-            ),
-            .init(responseBody)
+    
+    @Test("Test treasury")
+    func testTreasury() async throws {
+        let chainContext = try await BlockFrostChainContext(
+            projectId: "fake-project-id",
+            network: .preview,
+            client: Client(
+                serverURL: URL(string: "https://cardano-preview.blockfrost.io/api/v0")!,
+                transport: MockTransport()
+            )
         )
+        
+        let treasury = try await chainContext.treasury()
+        
+        #expect(treasury == Coin(1000000000000000))
     }
 }
