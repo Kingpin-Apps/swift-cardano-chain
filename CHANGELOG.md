@@ -1,7 +1,8 @@
-## 0.2.10 (2026-04-03)
+## 0.2.11 (2026-04-04)
 
 ### Fix
 
+- add drepInfo function
 - add query utxo by tx input
 
 ## 0.2.9 (2026-03-07)
