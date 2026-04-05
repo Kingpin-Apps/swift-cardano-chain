@@ -37,6 +37,8 @@ final class MockOgmiosHTTPConnection: HTTPConnectable, @unchecked Sendable {
                 return OgmiosMockData.stakePoolsPerformances
             case "queryLedgerState/treasuryAndReserves":
                 return OgmiosMockData.treasury
+            case "queryLedgerState/delegateRepresentatives":
+                return OgmiosMockData.drepInfo
             case "submitTransaction":
                 return OgmiosMockData.submitTransaction
             case "evaluateTransaction":
@@ -323,6 +325,60 @@ enum OgmiosMockData {
                 }
             }
         },
+        "id": null
+    }
+    """.data(using: .utf8)!
+    
+    static let drepInfo = """
+    {
+        "jsonrpc": "2.0",
+        "method": "queryLedgerState/delegateRepresentatives",
+        "result": [
+            {  
+                "type": "registered",
+                "from": "verificationKey",
+                "id": "b02f7b335aebf284bbdc20bdc3b59e4e183ae2cfc47ad2d8bc19a241",
+                "mandate": {
+                    "epoch": 639
+                },
+                "deposit": {
+                    "ada": {
+                        "lovelace": 500000000
+                    }
+                },
+                "stake": {
+                    "ada": {
+                        "lovelace": 500000000
+                    }
+                },
+                "metadata": {
+                    "url": "https://anchor.test",
+                    "hash": "35aeb21ba4be07cf9fda041b635f107ef978238b3fccae9be1b571518ce9d1b7"
+                },
+                "delegators": [
+                    {
+                        "from": "verificationKey",
+                        "credential": "00013300b25f80b87a1fea5d4636c0c9d7664b7730738a3d9f633501"
+                    }
+                ]
+            },
+            {
+                "type": "abstain",
+                "stake": {
+                    "ada": {
+                        "lovelace": 8803265544870414
+                    }
+                }
+            },
+            {
+                "type": "noConfidence",
+                "stake": {
+                    "ada": {
+                        "lovelace": 194527627240783
+                    }
+                }
+            }
+        ],
         "id": null
     }
     """.data(using: .utf8)!

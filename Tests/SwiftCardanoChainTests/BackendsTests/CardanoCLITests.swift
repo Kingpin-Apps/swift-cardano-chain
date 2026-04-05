@@ -585,4 +585,89 @@ struct CardanoCLIContextTests {
         
         #expect(treasury == Coin(1000000000000000))
     }
+    
+    @Test("Test drepInfo",
+          arguments: [
+            (
+                DRep(credential: .alwaysAbstain),
+                DRepInfo(
+                    active: true,
+                    drep: DRep(credential: .alwaysAbstain),
+                    stake: Coin(8784205971620742),
+                    status: .registered
+                )
+            ),
+            (
+                DRep(credential: .alwaysNoConfidence),
+                DRepInfo(
+                    active: true,
+                    drep: DRep(credential: .alwaysNoConfidence),
+                    stake: Coin(194879536262091),
+                    status: .registered
+                )
+            ),
+            (
+                try DRep.fromBech32("drep1kqhhkv66a0egfw7uyz7u8dv7fcvr4ck0c3ad9k9urx3yzhefup0"),
+                DRepInfo(
+                    active: true,
+                    drep: try DRep.fromBech32("drep1kqhhkv66a0egfw7uyz7u8dv7fcvr4ck0c3ad9k9urx3yzhefup0"),
+                    anchor: Anchor(
+                        anchorUrl: try Url("https://anchor.test"),
+                        anchorDataHash: AnchorDataHash(
+                            payload: Data(hex: "35aeb21ba4be07cf9fda041b635f107ef978238b3fccae9be1b571518ce9d1b7")
+                        )
+                    ),
+                    deposit: Coin(500000000),
+                    stake: Coin(305554989074),
+                    expiry: 639,
+                    status: .registered
+                )
+            ),
+            (
+                DRep(credential: .scriptHash(
+                    ScriptHash(
+                        payload: Data(
+                            hex: "5a5ba42f130741d62384c390cfc84d9ceecc8a4bef38059ff18ba74b"
+                        )
+                    )
+                )),
+                DRepInfo(
+                    active: true,
+                    drep: DRep(credential: .scriptHash(
+                        ScriptHash(
+                            payload: Data(
+                                hex: "5a5ba42f130741d62384c390cfc84d9ceecc8a4bef38059ff18ba74b"
+                            )
+                        )
+                    )),
+                    anchor: Anchor(
+                        anchorUrl: try Url("https://anchor.test"),
+                        anchorDataHash: AnchorDataHash(
+                            payload: Data(hex: "35aeb21ba4be07cf9fda041b635f107ef978238b3fccae9be1b571518ce9d1b7")
+                        )
+                    ),
+                    deposit: Coin(500000000),
+                    stake: Coin(305554989074),
+                    expiry: 639,
+                    status: .registered
+                )
+            ),
+        ]
+    )
+    func testDRepInfo(of drep: DRep, drepInfo: DRepInfo) async throws {
+        let config = createMockConfig()
+        let runner = createCardaonCLIMockCommandRunner(config: config)
+        
+        let cli = try await CardanoCLI(configuration: config, commandRunner: runner)
+        
+        let chainContext = try await CardanoCliChainContext(
+            nodeConfig: FilePath(configFilePath!),
+            network: .preview,
+            cli: cli
+        )
+        
+        let result = try await chainContext.drepInfo(drep: drep)
+        
+        #expect(drepInfo == result)
+    }
 }

@@ -898,69 +898,6 @@ public class KoiosChainContext: ChainContext {
             status: status
         )
     }
-    
-    /// Get the DRep information.
-    /// - Parameter drep: The `DRep` object.
-    /// - Returns: The `DRepInfo` object containing information about the DRep.
-    public func drepInfo(drep: DRep) async throws -> DRepInfo {
-        let drepId = try drep.id((.bech32, .cip129))
-        let response = try await api.client.drepInfo(
-            body: .json(.init(_drepIds: [drepId]))
-        )
-        let payload = try response.ok.body.json
-
-        guard let info = payload.first else {
-            return DRepInfo(
-                active: false,
-                drep: drep,
-                anchor: nil,
-                deposit: nil,
-                stake: Coin(0),
-                expiry: nil,
-                status: .notRegistered
-            )
-        }
-
-        let active = info.active ?? false
-        let registered = info.registered ?? false
-        let status: DRepStatus = registered ? .registered : .retired
-
-        let stake: Coin
-        if let amountStr = info.amount, let amountInt = UInt64(amountStr) {
-            stake = Coin(amountInt)
-        } else {
-            stake = Coin(0)
-        }
-
-        let deposit: Coin?
-        if let depositStr = info.deposit, let depositInt = UInt64(depositStr) {
-            deposit = Coin(depositInt)
-        } else {
-            deposit = nil
-        }
-
-        let expiry: UInt64? = info.expiresEpochNo.map { UInt64($0) }
-
-        var anchor: Anchor? = nil
-        if let urlStr = info.metaUrl, let hashStr = info.metaHash,
-           !urlStr.isEmpty, !hashStr.isEmpty,
-           let hashData = Data(hexString: hashStr) {
-            anchor = try? Anchor(
-                anchorUrl: Url(urlStr),
-                anchorDataHash: AnchorDataHash(payload: hashData)
-            )
-        }
-
-        return DRepInfo(
-            active: active,
-            drep: drep,
-            anchor: anchor,
-            deposit: deposit,
-            stake: stake,
-            expiry: expiry,
-            status: status
-        )
-    }
 
     /// Get the treasury balance.
     /// - Returns: The current balance of the treasury as a `Coin` object.
@@ -989,5 +926,78 @@ public class KoiosChainContext: ChainContext {
         }
         
         return Coin(treasuryInt)
+    }
+    
+    /// Get the DRep information.
+    /// - Parameter drep: The `DRep` object.
+    /// - Returns: The `DRepInfo` object containing information about the DRep.
+    public func drepInfo(drep: DRep) async throws -> DRepInfo {
+        let drepId = try drep.id((.bech32, .cip129))
+        let response = try await api.client.drepInfo(
+            body: .json(.init(_drepIds: [drepId]))
+        )
+        let payload = try response.ok.body.json
+        
+        guard let info = payload.first else {
+            return DRepInfo(
+                active: false,
+                drep: drep,
+                anchor: nil,
+                deposit: nil,
+                stake: Coin(0),
+                expiry: nil,
+                status: .notRegistered
+            )
+        }
+        
+        let active = info.active ?? false
+        let status: DRepStatus?
+        
+        switch info.drepStatus {
+            case .registered:
+                status = .registered
+            case .deregistered:
+                status = .retired
+            case .notRegistered:
+                status = .notRegistered
+            default:
+                status = nil
+        }
+        
+        let stake: Coin
+        if let amountStr = info.amount, let amountInt = UInt64(amountStr) {
+            stake = Coin(amountInt)
+        } else {
+            stake = Coin(0)
+        }
+        
+        let deposit: Coin?
+        if let depositStr = info.deposit, let depositInt = UInt64(depositStr) {
+            deposit = Coin(depositInt)
+        } else {
+            deposit = nil
+        }
+        
+        let expiry: UInt64? = info.expiresEpochNo.map { UInt64($0) }
+        
+        var anchor: Anchor? = nil
+        if let urlStr = info.metaUrl, let hashStr = info.metaHash,
+           !urlStr.isEmpty, !hashStr.isEmpty,
+           let hashData = Data(hexString: hashStr) {
+            anchor = try? Anchor(
+                anchorUrl: Url(urlStr),
+                anchorDataHash: AnchorDataHash(payload: hashData)
+            )
+        }
+        
+        return DRepInfo(
+            active: active,
+            drep: drep,
+            anchor: anchor,
+            deposit: deposit,
+            stake: stake,
+            expiry: expiry,
+            status: status
+        )
     }
 }

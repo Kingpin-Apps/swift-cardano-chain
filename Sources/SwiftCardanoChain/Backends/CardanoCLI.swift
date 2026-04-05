@@ -645,34 +645,42 @@ public class CardanoCliChainContext: ChainContext {
                 let distKey = drep.credential == .alwaysAbstain
                     ? "drep-alwaysAbstain"
                     : "drep-alwaysNoConfidence"
-                let distResult = try await cli.query.drepStakeDistribution(arguments: ["--all-dreps"])
+                
+                let distResult = try await cli
+                    .query
+                    .drepStakeDistribution(arguments: [
+                        "--all-dreps",
+                        "--output-json"
+                    ])
+                
                 var stake = Coin(0)
+                
                 if let distData = distResult.data(using: .utf8),
                    let distDict = try? JSONSerialization.jsonObject(with: distData) as? [String: Any],
                    let stakeRaw = distDict[distKey] as? Int64 {
                     stake = Coin(UInt64(stakeRaw))
                 }
+                
                 return DRepInfo(
                     active: true,
                     drep: drep,
-                    anchor: nil,
-                    deposit: nil,
                     stake: stake,
-                    expiry: nil,
                     status: .registered
                 )
 
             case .verificationKeyHash(let hash):
                 let result = try await cli.query.drepState(arguments: [
                     "--drep-key-hash", hash.payload.toHex,
-                    "--include-stake"
+                    "--include-stake",
+                    "--output-json"
                 ])
                 return try parseDRepStateResult(result, drep: drep)
 
             case .scriptHash(let hash):
                 let result = try await cli.query.drepState(arguments: [
                     "--drep-script-hash", hash.payload.toHex,
-                    "--include-stake"
+                    "--include-stake",
+                    "--output-json"
                 ])
                 return try parseDRepStateResult(result, drep: drep)
         }

@@ -892,6 +892,32 @@ struct MockTransport: ClientTransport {
                         )
                     )
                 )
+            case "get/governance/dreps/{drep_id}":
+                body = try JSONEncoder().encode(
+                    Components.Schemas.Drep(
+                        drepId: "drep1kqhhkv66a0egfw7uyz7u8dv7fcvr4ck0c3ad9k9urx3yzhefup0",
+                        hex: "b02f7b335aebf284bbdc20bdc3b59e4e183ae2cfc47ad2d8bc19a241",
+                        amount: "500000000",
+                        active: true,
+                        activeEpoch: 639,
+                        hasScript: false,
+                        retired: false,
+                        expired: false,
+                        lastActiveEpoch: 619
+                    )
+                )
+
+            case "get/governance/dreps/{drep_id}/metadata":
+                body = try JSONEncoder().encode(
+                    Components.Schemas.DrepMetadata(
+                        drepId: "drep1kqhhkv66a0egfw7uyz7u8dv7fcvr4ck0c3ad9k9urx3yzhefup0",
+                        hex: "b02f7b335aebf284bbdc20bdc3b59e4e183ae2cfc47ad2d8bc19a241",
+                        url: "https://anchor.test",
+                        hash: "35aeb21ba4be07cf9fda041b635f107ef978238b3fccae9be1b571518ce9d1b7",
+                        jsonMetadata: Components.Schemas.DrepMetadata.JsonMetadataPayload(),
+                        bytes: "",
+                    )
+                )
             default:
                 return (
                     HTTPResponse(status: .notFound),

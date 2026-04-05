@@ -52,6 +52,24 @@ struct KoiosMockTransport: ClientTransport {
                     )
                 ])
                 
+            case "drep_info":
+                responseBody = """
+            [
+                {
+                    "drep_id": "drep1kqhhkv66a0egfw7uyz7u8dv7fcvr4ck0c3ad9k9urx3yzhefup0",
+                    "hex": "b02f7b335aebf284bbdc20bdc3b59e4e183ae2cfc47ad2d8bc19a241",
+                    "has_script": false,
+                    "drep_status": "registered",
+                    "deposit": "500000000",
+                    "active": true,
+                    "expires_epoch_no": 639,
+                    "amount": "500000000",
+                    "meta_url": "https://anchor.test",
+                    "meta_hash": "35aeb21ba4be07cf9fda041b635f107ef978238b3fccae9be1b571518ce9d1b7"
+                },
+            ]
+            """.data(using: .utf8)!
+                
             case "tip":
                 responseBody = """
             [{

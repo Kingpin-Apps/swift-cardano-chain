@@ -1048,7 +1048,6 @@ public class OgmiosChainContext: ChainContext {
                     .ledgerStateQuery
                     .delegateRepresentatives
                     .result(params: params)
-                
                 guard let delegate = delegates.first, case .registered(let reg) = delegate else {
                     return DRepInfo(
                         active: false,

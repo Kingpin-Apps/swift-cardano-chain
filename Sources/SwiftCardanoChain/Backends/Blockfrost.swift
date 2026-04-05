@@ -997,52 +997,37 @@ public class BlockFrostChainContext: ChainContext {
     /// - Parameter drep: The `DRep` object.
     /// - Returns: The `DRepInfo` object containing information about the DRep.
     public func drepInfo(drep: DRep) async throws -> DRepInfo {
-        switch drep.credential {
-        case .alwaysAbstain, .alwaysNoConfidence:
-            return DRepInfo(
-                active: true,
-                drep: drep,
-                anchor: nil,
-                deposit: nil,
-                stake: Coin(0),
-                expiry: nil,
-                status: .registered
-            )
-        case .verificationKeyHash, .scriptHash:
-            let drepId = try drep.id((.bech32, .cip129))
-            let response = try await api.client.getGovernanceDrepsDrepId(
-                .init(path: .init(drepId: drepId))
-            )
-            let drepData = try response.ok.body.json
-
-            guard let stakeInt = UInt64(drepData.amount) else {
-                throw CardanoChainError.valueError("Failed to parse DRep stake amount")
-            }
-
-            var anchor: Anchor? = nil
-            if let metadataResponse = try? await api.client.getGovernanceDrepsDrepIdMetadata(
-                .init(path: .init(drepId: drepId))
-            ), let metaData = try? metadataResponse.ok.body.json,
-               !metaData.url.isEmpty, !metaData.hash.isEmpty,
-               let hashData = Data(hexString: metaData.hash) {
-                anchor = try? Anchor(
-                    anchorUrl: Url(metaData.url),
-                    anchorDataHash: AnchorDataHash(payload: hashData)
-                )
-            }
-
-            let status: DRepStatus = drepData.retired ? .retired : .registered
-            let active = !drepData.retired && !drepData.expired
-
-            return DRepInfo(
-                active: active,
-                drep: drep,
-                anchor: anchor,
-                deposit: nil,
-                stake: Coin(stakeInt),
-                expiry: drepData.lastActiveEpoch.map { UInt64($0) },
-                status: status
+        let drepId = try drep.id((.bech32, .cip129))
+        let response = try await api.client.getGovernanceDrepsDrepId(
+            .init(path: .init(drepId: drepId))
+        )
+        let drepData = try response.ok.body.json
+        
+        guard let stakeInt = UInt64(drepData.amount) else {
+            throw CardanoChainError.valueError("Failed to parse DRep stake amount")
+        }
+        
+        var anchor: Anchor? = nil
+        if let metadataResponse = try? await api.client.getGovernanceDrepsDrepIdMetadata(
+            .init(path: .init(drepId: drepId))
+        ), let metaData = try? metadataResponse.ok.body.json,
+           !metaData.url.isEmpty, !metaData.hash.isEmpty,
+           let hashData = Data(hexString: metaData.hash) {
+            anchor = try? Anchor(
+                anchorUrl: Url(metaData.url),
+                anchorDataHash: AnchorDataHash(payload: hashData)
             )
         }
+        
+        let status: DRepStatus = drepData.retired ? .retired : .registered
+        let active = !drepData.retired && !drepData.expired
+        
+        return DRepInfo(
+            active: active,
+            drep: drep,
+            anchor: anchor,
+            stake: Coin(stakeInt),
+            status: status
+        )
     }
 }

@@ -77,6 +77,7 @@ func createCardaonCLIMockCommandRunner(
                 continuation.finish()
             }
         )
+    
         .run(
             arguments: .value([config.cardano!.cli!.string] + CLICommands.queryTip),
             environment: .any,
@@ -90,6 +91,7 @@ func createCardaonCLIMockCommandRunner(
                 continuation.finish()
             }
         )
+    
         .run(
             arguments: .value([config.cardano!.cli!.string] + CLICommands.utxoInput),
             environment: .any,
@@ -103,6 +105,7 @@ func createCardaonCLIMockCommandRunner(
                 continuation.finish()
             }
         )
+    
         .run(
             arguments: .value([config.cardano!.cli!.string] + CLICommands.treasury),
             environment: .any,
@@ -112,6 +115,48 @@ func createCardaonCLIMockCommandRunner(
             AsyncThrowingStream<CommandEvent, any Error> { continuation in
                 continuation.yield(
                     .standardOutput([UInt8](CLIResponse.treasury.utf8))
+                )
+                continuation.finish()
+            }
+        )
+    
+        .run(
+            arguments: .value([config.cardano!.cli!.string] + CLICommands.drepStakeDistribution),
+            environment: .any,
+            workingDirectory: .any
+        )
+        .willReturn(
+            AsyncThrowingStream<CommandEvent, any Error> { continuation in
+                continuation.yield(
+                    .standardOutput([UInt8](CLIResponse.drepStakeDistribution.utf8))
+                )
+                continuation.finish()
+            }
+        )
+    
+        .run(
+            arguments: .value([config.cardano!.cli!.string] + CLICommands.drepKeyHash),
+            environment: .any,
+            workingDirectory: .any
+        )
+        .willReturn(
+            AsyncThrowingStream<CommandEvent, any Error> { continuation in
+                continuation.yield(
+                    .standardOutput([UInt8](CLIResponse.drepKeyHash.utf8))
+                )
+                continuation.finish()
+            }
+        )
+    
+        .run(
+            arguments: .value([config.cardano!.cli!.string] + CLICommands.drepScriptHash),
+            environment: .any,
+            workingDirectory: .any
+        )
+        .willReturn(
+            AsyncThrowingStream<CommandEvent, any Error> { continuation in
+                continuation.yield(
+                    .standardOutput([UInt8](CLIResponse.drepScriptHash.utf8))
                 )
                 continuation.finish()
             }
@@ -146,6 +191,12 @@ struct CLICommands {
     static let protocolState = ["conway", "query", "protocol-state", "--testnet-magic", "2"]
     
     static let treasury = ["conway", "query", "treasury", "--testnet-magic", "2"]
+    
+    static let drepStakeDistribution = ["conway", "query", "drep-stake-distribution", "--all-dreps", "--output-json", "--testnet-magic", "2"]
+    
+    static let drepKeyHash = ["conway", "query", "drep-state", "--drep-key-hash", "b02f7b335aebf284bbdc20bdc3b59e4e183ae2cfc47ad2d8bc19a241", "--include-stake", "--output-json", "--testnet-magic", "2"]
+    
+    static let drepScriptHash = ["conway", "query", "drep-state", "--drep-script-hash", "5a5ba42f130741d62384c390cfc84d9ceecc8a4bef38059ff18ba74b", "--include-stake", "--output-json", "--testnet-magic", "2"]
 }
 
 struct CLIResponse {
@@ -337,6 +388,54 @@ struct CLIResponse {
         """
     
     static let treasury = "1000000000000000"
+    
+    static let drepStakeDistribution = """
+        {
+            "drep-alwaysAbstain": 8784205971620742,
+            "drep-alwaysNoConfidence": 194879536262091,
+            "drep-keyHash-002e87e32c1735bef2af2825943a9c06714857d1fc19385b86e429a3": 12121160278,
+            "drep-keyHash-00663f00c4c1ca6bb6405c68b5c30023a8d8c7f6acbeb06b7d0a4d2c": 194458026737,
+            "drep-keyHash-008e918639050ec8b708e5d8ff5224595098a28f0fc6671c66e292ab": 98561167372699
+        }
+    """
+    
+    static let drepKeyHash = """
+        [
+            [
+                {
+                    "keyHash": "b02f7b335aebf284bbdc20bdc3b59e4e183ae2cfc47ad2d8bc19a241"
+                },
+                {
+                    "anchor": {
+                        "dataHash": "35aeb21ba4be07cf9fda041b635f107ef978238b3fccae9be1b571518ce9d1b7",
+                        "url": "https://anchor.test"
+                    },
+                    "deposit": 500000000,
+                    "expiry": 639,
+                    "stake": 305554989074
+                }
+            ]
+        ]
+    """
+    
+    static let drepScriptHash = """
+        [
+            [
+                {
+                    "scriptHash": "5a5ba42f130741d62384c390cfc84d9ceecc8a4bef38059ff18ba74b"
+                },
+                {
+                    "anchor": {
+                        "dataHash": "35aeb21ba4be07cf9fda041b635f107ef978238b3fccae9be1b571518ce9d1b7",
+                        "url": "https://anchor.test"
+                    },
+                    "deposit": 500000000,
+                    "expiry": 639,
+                    "stake": 305554989074
+                }
+            ]
+        ]
+    """
 }
 
 public struct MockCardanoCLIClient {

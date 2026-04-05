@@ -1,5 +1,5 @@
 {
-  "originHash" : "36aecea3cbeea129da4d05351a3e0949f7411f696f30f6b777596a46d85c612b",
+  "originHash" : "2ad3898cc00e0cbd35fac7c2c78857a982869dc0f5d9d0138f0384784e5a945f",
   "pins" : [
     {
       "identity" : "base32",
@@ -60,8 +60,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/mattpolzin/OpenAPIKit",
       "state" : {
-        "revision" : "90c137c3dfde4e31204ffccc51a0a17a959efde7",
-        "version" : "3.4.1"
+        "revision" : "343b2c1793058fcc53c1bd7e2907f8e3a4d640fb",
+        "version" : "3.9.0"
       }
     },
     {
@@ -231,8 +231,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/Kingpin-Apps/swift-koios.git",
       "state" : {
-        "revision" : "f736bc504db09c1f3d558aa5747b997e37cdaf70",
-        "version" : "0.1.5"
+        "revision" : "e0af84f37fe689368696048aa4e7c00c4fe106fb",
+        "version" : "0.1.7"
       }
     },
     {
@@ -285,8 +285,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/apple/swift-openapi-generator",
       "state" : {
-        "revision" : "d74223cc5595a8165181c4d9579243c932e5cd07",
-        "version" : "1.10.3"
+        "revision" : "73997cc62c2193d5046e431c9d546119dda14502",
+        "version" : "1.11.1"
       }
     },
     {
@@ -294,8 +294,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/apple/swift-openapi-runtime",
       "state" : {
-        "revision" : "7722cf8eac05c1f1b5b05895b04cfcc29576d9be",
-        "version" : "1.8.3"
+        "revision" : "f039fa6d6338aab5164f3d1be16281524c9a8f89",
+        "version" : "1.11.0"
       }
     },
     {

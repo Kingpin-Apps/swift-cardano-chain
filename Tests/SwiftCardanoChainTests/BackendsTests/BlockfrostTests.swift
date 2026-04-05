@@ -295,4 +295,35 @@ struct BlockfrostChainContextTests {
         
         #expect(treasury == Coin(1000000000000000))
     }
+    
+    @Test("Test drepInfo")
+    func testDRepInfo() async throws {
+        let chainContext = try await BlockFrostChainContext(
+            projectId: "fake-project-id",
+            network: .preview,
+            client: Client(
+                serverURL: URL(string: "https://cardano-preview.blockfrost.io/api/v0")!,
+                transport: MockTransport()
+            )
+        )
+        
+        let drepInfo = try await chainContext.drepInfo(
+            drep: DRep.fromBech32("drep1kqhhkv66a0egfw7uyz7u8dv7fcvr4ck0c3ad9k9urx3yzhefup0")
+        )
+        
+        let expectedDRepInfo = DRepInfo(
+            active: true,
+            drep: try DRep.fromBech32("drep1kqhhkv66a0egfw7uyz7u8dv7fcvr4ck0c3ad9k9urx3yzhefup0"),
+            anchor: Anchor(
+                anchorUrl: try Url("https://anchor.test"),
+                anchorDataHash: AnchorDataHash(
+                    payload: Data(hex: "35aeb21ba4be07cf9fda041b635f107ef978238b3fccae9be1b571518ce9d1b7")
+                )
+            ),
+            stake: Coin(500000000),
+            status: .registered
+        )
+        
+        #expect(drepInfo == expectedDRepInfo)
+    }
 }
