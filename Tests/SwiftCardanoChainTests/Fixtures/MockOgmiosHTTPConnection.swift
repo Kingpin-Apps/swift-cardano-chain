@@ -36,6 +36,8 @@ final class MockOgmiosHTTPConnection: HTTPConnectable, @unchecked Sendable {
             return OgmiosMockData.operationalCertificates
         case "queryLedgerState/stakePoolsPerformances":
             return OgmiosMockData.stakePoolsPerformances
+        case "queryLedgerState/constitutionalCommittee":
+            return OgmiosMockData.constitutionalCommittee
         case "queryLedgerState/treasuryAndReserves":
             return OgmiosMockData.treasury
         case "queryLedgerState/delegateRepresentatives":
@@ -264,6 +266,60 @@ enum OgmiosMockData {
                         }
                     }
                 }
+            },
+            "id": null
+        }
+        """.data(using: .utf8)!
+
+    static let constitutionalCommittee = """
+        {
+            "jsonrpc": "2.0",
+            "method": "queryLedgerState/constitutionalCommittee",
+            "result": {
+                "members": [
+                    {
+                        "from": "script",
+                        "id": "1980dbf1ad624b0cb5410359b5ab14d008561994a6c2b6c53fabec00",
+                        "delegate": {
+                            "status": "authorized",
+                            "from": "script",
+                            "id": "646d1b3ac94568a422b687db6c47acdf849f1674982ae4f9a494be43"
+                        },
+                        "status": "active",
+                        "mandate": {
+                            "epoch": 1200
+                        }
+                    },
+                    {
+                        "from": "verificationKey",
+                        "id": "13493790d9b03483a1e1e684ea4faf1ee48a58f402574e7f2246f4d4",
+                        "delegate": {
+                            "status": "authorized",
+                            "from": "verificationKey",
+                            "id": "68bb0b4276021f82364056aa9f4d38ba5ac59b26c166cbeaa9408746"
+                        },
+                        "status": "active",
+                        "mandate": {
+                            "epoch": 1300
+                        }
+                    },
+                    {
+                        "from": "script",
+                        "id": "349e55f83e9af24813e6cb368df6a80d38951b2a334dfcdf26815558",
+                        "delegate": {
+                            "status": "resigned",
+                            "metadata": {
+                                "url": "ipfs://QmfY4Nwea4nmuuRdA2APrtoDNJQhaVVkfRkkZoueZgWcaZ",
+                                "hash": "c813570324d6be3185183d7f67944ff530064d5b8cc062bd9e530557b6a45721"
+                            }
+                        },
+                        "status": "active",
+                        "mandate": {
+                            "epoch": 1200
+                        }
+                    }
+                ],
+                "quorum": "2/3"
             },
             "id": null
         }

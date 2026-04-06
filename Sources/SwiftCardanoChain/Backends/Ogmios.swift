@@ -1157,4 +1157,76 @@ public class OgmiosChainContext: ChainContext {
             expiresAfter: entry.until.epoch
         )
     }
+
+    /// Get the committee member information for a given committee member credential.
+    /// - Parameter committeeMember: The `CommitteeColdCredential` object representing the committee member.
+    /// - Returns: The `CommitteeMemberInfo` object containing information about the committee member.
+    public func committeeMemberInfo(committeeMember: CommitteeColdCredential) async throws
+        -> CommitteeMemberInfo
+    {
+        let constitutionalCommittee = try await client.ledgerStateQuery.constitutionalCommittee
+            .result()
+
+        let coldCredentialHex = committeeMember.credential.payload.toHex.lowercased()
+        let member = constitutionalCommittee.members.first { member in
+            guard member.id.description.lowercased() == coldCredentialHex else {
+                return false
+            }
+
+            switch (committeeMember.credential, member.from) {
+            case (.scriptHash, .script), (.verificationKeyHash, .verificationKey):
+                return true
+            default:
+                return false
+            }
+        }
+
+        guard let member else {
+            throw CardanoChainError.valueError(
+                "Committee member not found for credential: \(committeeMember)"
+            )
+        }
+
+        guard let expirationEpoch = member.mandate.map({ Int($0.epoch) }) else {
+            throw CardanoChainError.valueError(
+                "Missing expiration epoch for committee member: \(committeeMember)"
+            )
+        }
+
+        let hotCredential: CommitteeHotCredential?
+        switch member.delegate {
+            case .authorized(let delegate):
+                switch delegate.from {
+                    case .script:
+                        hotCredential = CommitteeHotCredential(
+                            credential: .scriptHash(ScriptHash(payload: Data(hex: delegate.id.description)))
+                        )
+                    case .verificationKey:
+                        hotCredential = CommitteeHotCredential(
+                            credential: .verificationKeyHash(
+                                VerificationKeyHash(payload: Data(hex: delegate.id.description))
+                            )
+                        )
+                    }
+            case .resigned, .none:
+                hotCredential = nil
+        }
+
+        let status: CommitteeMemberStatus
+        switch member.status {
+            case .active:
+                status = .active
+            case .expired:
+                status = .expired
+            case .unrecognized:
+                status = .unrecognized
+        }
+
+        return CommitteeMemberInfo(
+            coldCredential: committeeMember,
+            hotCredential: hotCredential,
+            expiration: EpochNumber(expirationEpoch),
+            status: status
+        )
+    }
 }

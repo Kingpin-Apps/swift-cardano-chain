@@ -177,6 +177,20 @@ func createCardaonCLIMockCommandRunner(
             }
         )
 
+        .run(
+            arguments: .value([config.cardano!.cli!.string] + CLICommands.queryCommitteeState),
+            environment: .any,
+            workingDirectory: .any
+        )
+        .willReturn(
+            AsyncThrowingStream<CommandEvent, any Error> { continuation in
+                continuation.yield(
+                    .standardOutput([UInt8](CLIResponse.committeeState.utf8))
+                )
+                continuation.finish()
+            }
+        )
+
     return commandRunner
 }
 
@@ -251,6 +265,12 @@ struct CLICommands {
 
     static let queryGovState = [
         "conway", "query", "gov-state", "--output-json", "--testnet-magic", "2",
+    ]
+
+    static let queryCommitteeState = [
+        "conway", "query", "committee-state", "--cold-verification-key-hash",
+        "13493790d9b03483a1e1e684ea4faf1ee48a58f402574e7f2246f4d4", "--output-json",
+        "--testnet-magic", "2",
     ]
 }
 
@@ -534,6 +554,31 @@ struct CLIResponse {
               }
             }
           ]
+        }
+        """
+
+    static let committeeState = """
+        {
+            "committee": {
+                "keyHash-13493790d9b03483a1e1e684ea4faf1ee48a58f402574e7f2246f4d4": {
+                    "expiration": 653,
+                    "hotCredsAuthStatus": {
+                        "contents": {
+                            "keyHash": "68bb0b4276021f82364056aa9f4d38ba5ac59b26c166cbeaa9408746"
+                        },
+                        "tag": "MemberAuthorized"
+                    },
+                    "nextEpochChange": {
+                        "tag": "NoChangeExpected"
+                    },
+                    "status": "Active"
+                }
+            },
+            "epoch": 623,
+            "threshold": {
+                "denominator": 3,
+                "numerator": 2
+            }
         }
         """
 }

@@ -891,4 +891,79 @@ public class CardanoCliChainContext: ChainContext {
             expiredEpoch: expiredEpoch
         )
     }
+
+    /// Get the committee member information for a given committee member credential.
+    /// - Parameter committeeMember: The `CommitteeColdCredential` object representing the committee member.
+    /// - Returns: The `CommitteeMemberInfo` object containing information about the committee member.
+    public func committeeMemberInfo(committeeMember: CommitteeColdCredential) async throws
+        -> CommitteeMemberInfo
+    {
+        let result = try await cli.query.committeeState(
+            arguments: [
+                "--cold-verification-key-hash",
+                committeeMember.credential.payload.toHex,
+                "--output-json",
+            ]
+        )
+
+        guard let data = result.data(using: .utf8),
+            let committeeState = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let committee = committeeState["committee"] as? [String: Any]
+        else {
+            throw CardanoChainError.valueError("Failed to parse committee state JSON")
+        }
+
+        // Find the committee member entry for the given cold key hash
+        let coldKeyHexPrefix = committeeMember.credential.payload.toHex
+        let keyHashKey = "keyHash-\(coldKeyHexPrefix)"
+
+        guard let memberEntry = committee[keyHashKey] as? [String: Any] else {
+            throw CardanoChainError.valueError(
+                "Committee member not found for key hash: \(coldKeyHexPrefix)")
+        }
+
+        // Extract expiration epoch
+        guard let expiration = memberEntry["expiration"] as? Int else {
+            throw CardanoChainError.valueError("Missing expiration in committee member entry")
+        }
+
+        // Parse status
+        let statusStr = memberEntry["status"] as? String ?? "Unknown"
+        let status: CommitteeMemberStatus
+        switch statusStr.lowercased() {
+        case "active":
+            status = .active
+        case "expired":
+            status = .expired
+        default:
+            status = .unrecognized
+        }
+
+        // Extract hot credential from hotCredsAuthStatus
+        var hotCredential: CommitteeHotCredential?
+        if let hotCredsAuthStatus = memberEntry["hotCredsAuthStatus"] as? [String: Any],
+            let tag = hotCredsAuthStatus["tag"] as? String,
+            tag == "MemberAuthorized",
+            let contents = hotCredsAuthStatus["contents"] as? [String: Any],
+            let hotKeyHash = contents["keyHash"] as? String
+        {
+            hotCredential = CommitteeHotCredential(
+                credential: .scriptHash(
+                    try ScriptHash(from: .string(hotKeyHash))
+                )
+            )
+        }
+
+        guard let hotCred = hotCredential else {
+            throw CardanoChainError.valueError(
+                "Failed to parse hot credential from committee member entry")
+        }
+
+        return CommitteeMemberInfo(
+            coldCredential: committeeMember,
+            hotCredential: hotCred,
+            expiration: EpochNumber(expiration),
+            status: status
+        )
+    }
 }

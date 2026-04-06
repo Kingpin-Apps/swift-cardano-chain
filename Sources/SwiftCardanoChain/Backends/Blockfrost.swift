@@ -1136,4 +1136,11 @@ public class BlockFrostChainContext: ChainContext {
             expiredEpoch: govActionData.expiredEpoch != nil ? UInt64(govActionData.expiredEpoch!) : nil
         )
     }
+    
+    /// Get the committee member information for a given committee member credential.
+    /// - Parameter committeeMember: The `CommitteeColdCredential` object representing the committee member.
+    /// - Returns: The `CommitteeMemberInfo` object containing information about the committee member.
+    public func committeeMemberInfo(committeeMember: CommitteeColdCredential) async throws -> CommitteeMemberInfo {
+        throw CardanoChainError.notImplemented("committeeMemberInfo is not implemented in Blockfrost backend")
+    }
 }

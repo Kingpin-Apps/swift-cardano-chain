@@ -303,6 +303,35 @@ struct KoiosMockTransport: ClientTransport {
                 ]
                 """.data(using: .utf8)!
 
+        case "committee_info":
+            responseBody = """
+                {
+                    "proposal_id": "gov_action1fk4nx9zhkcdcyjaudwjtnkd7gagwyhqtth2zypawkc78gvdxkuzqqtvqdkv",
+                    "proposal_tx_hash": "4dab331457b61b824bbc6ba4b9d9be4750e25c0b5dd42207aeb63c7431a6b704",
+                    "proposal_index": 0,
+                    "quorum_numerator": 2,
+                    "quorum_denominator": 3,
+                    "members": [
+                        {
+                            "status": "authorized",
+                            "cc_hot_hex": "646d1b3ac94568a422b687db6c47acdf849f1674982ae4f9a494be43",
+                            "cc_cold_hex": "1980dbf1ad624b0cb5410359b5ab14d008561994a6c2b6c53fabec00",
+                            "expiration_epoch": 726,
+                            "cc_hot_has_script": true,
+                            "cc_cold_has_script": true
+                        },
+                        {
+                            "status": "resigned",
+                            "cc_hot_hex": null,
+                            "cc_cold_hex": "349e55f83e9af24813e6cb368df6a80d38951b2a334dfcdf26815558",
+                            "expiration_epoch": 653,
+                            "cc_hot_has_script": null,
+                            "cc_cold_has_script": true
+                        }
+                    ]
+                }
+                """.data(using: .utf8)!
+
         default:
             return (
                 HTTPResponse(status: .notFound),

@@ -1,8 +1,8 @@
-import Testing
 import Foundation
 import SwiftCardanoCore
-@testable import SwiftCardanoChain
+import Testing
 
+@testable import SwiftCardanoChain
 
 // MARK: - Test Suite
 
@@ -28,7 +28,8 @@ struct OgmiosChainContextTests {
     @Test("Test transaction data conversion")
     func testTransactionDataConversion() async throws {
         // Test TransactionData enum variants
-        let cborHex = "84a70081825820b35a4ba9ef3ce21adcd6879d08553642224304704d206c74d3ffb3e6eed3ca28000d80018182581d60cc30497f4ff962f4c1dca54cceefe39f86f1d7179668009f8eb71e598200a1581cec8b7d1dd0b124e8333d3fa8d818f6eac068231a287554e9ceae490ea24f5365636f6e6454657374746f6b656e1a009896804954657374746f6b656e1a00989680021a000493e00e8009a1581cec8b7d1dd0b124e8333d3fa8d818f6eac068231a287554e9ceae490ea24f5365636f6e6454657374746f6b656e1a009896804954657374746f6b656e1a00989680075820592a2df0e091566969b3044626faa8023dabe6f39c78f33bed9e105e55159221a200828258206443a101bdb948366fc87369336224595d36d8b0eee5602cba8b81a024e584735840846f408dee3b101fda0f0f7ca89e18b724b7ca6266eb29775d3967d6920cae7457accb91def9b77571e15dd2ede38b12cf92496ce7382fa19eb90ab7f73e49008258205797dc2cc919dfec0bb849551ebdf30d96e5cbe0f33f734a87fe826db30f7ef95840bdc771aa7b8c86a8ffcbe1b7a479c68503c8aa0ffde8059443055bf3e54b92f4fca5e0b9ca5bb11ab23b1390bb9ffce414fa398fc0b17f4dc76fe9f7e2c99c09018182018482051a075bcd1582041a075bcd0c8200581c9139e5c0a42f0f2389634c3dd18dc621f5594c5ba825d9a8883c66278200581c835600a2be276a18a4bebf0225d728f090f724f4c0acd591d066fa6ff5d90103a100a11902d1a16b7b706f6c6963795f69647da16d7b706f6c6963795f6e616d657da66b6465736372697074696f6e6a3c6f7074696f6e616c3e65696d6167656a3c72657175697265643e686c6f636174696f6ea367617277656176656a3c6f7074696f6e616c3e6568747470736a3c6f7074696f6e616c3e64697066736a3c72657175697265643e646e616d656a3c72657175697265643e667368613235366a3c72657175697265643e64747970656a3c72657175697265643e"
+        let cborHex =
+            "84a70081825820b35a4ba9ef3ce21adcd6879d08553642224304704d206c74d3ffb3e6eed3ca28000d80018182581d60cc30497f4ff962f4c1dca54cceefe39f86f1d7179668009f8eb71e598200a1581cec8b7d1dd0b124e8333d3fa8d818f6eac068231a287554e9ceae490ea24f5365636f6e6454657374746f6b656e1a009896804954657374746f6b656e1a00989680021a000493e00e8009a1581cec8b7d1dd0b124e8333d3fa8d818f6eac068231a287554e9ceae490ea24f5365636f6e6454657374746f6b656e1a009896804954657374746f6b656e1a00989680075820592a2df0e091566969b3044626faa8023dabe6f39c78f33bed9e105e55159221a200828258206443a101bdb948366fc87369336224595d36d8b0eee5602cba8b81a024e584735840846f408dee3b101fda0f0f7ca89e18b724b7ca6266eb29775d3967d6920cae7457accb91def9b77571e15dd2ede38b12cf92496ce7382fa19eb90ab7f73e49008258205797dc2cc919dfec0bb849551ebdf30d96e5cbe0f33f734a87fe826db30f7ef95840bdc771aa7b8c86a8ffcbe1b7a479c68503c8aa0ffde8059443055bf3e54b92f4fca5e0b9ca5bb11ab23b1390bb9ffce414fa398fc0b17f4dc76fe9f7e2c99c09018182018482051a075bcd1582041a075bcd0c8200581c9139e5c0a42f0f2389634c3dd18dc621f5594c5ba825d9a8883c66278200581c835600a2be276a18a4bebf0225d728f090f724f4c0acd591d066fa6ff5d90103a100a11902d1a16b7b706f6c6963795f69647da16d7b706f6c6963795f6e616d657da66b6465736372697074696f6e6a3c6f7074696f6e616c3e65696d6167656a3c72657175697265643e686c6f636174696f6ea367617277656176656a3c6f7074696f6e616c3e6568747470736a3c6f7074696f6e616c3e64697066736a3c72657175697265643e646e616d656a3c72657175697265643e667368613235366a3c72657175697265643e64747970656a3c72657175697265643e"
 
         let tx = try Transaction.fromCBORHex(cborHex)
 
@@ -62,7 +63,7 @@ struct OgmiosChainContextTests {
             epoch: 500,
             era: "conway",
             hash: "abcd1234",
-            slot: 123456789,
+            slot: 123_456_789,
             slotInEpoch: 65579,
             slotsToEpochEnd: 20821,
             syncProgress: "100.0"
@@ -71,7 +72,7 @@ struct OgmiosChainContextTests {
         #expect(tip.block == 123456)
         #expect(tip.epoch == 500)
         #expect(tip.era == "conway")
-        #expect(tip.slot == 123456789)
+        #expect(tip.slot == 123_456_789)
     }
 
     @Test("Test StakeAddressInfo structure")
@@ -79,28 +80,32 @@ struct OgmiosChainContextTests {
         let stakeInfo = StakeAddressInfo(
             active: true,
             address: "stake_test1upyz3gk6mw5he20apnwfn96cn9rscgvmmsxc9r86dh0k66gswf59n",
-            rewardAccountBalance: 100000000,
+            rewardAccountBalance: 100_000_000,
             stakeDelegation: nil,
             voteDelegation: nil
         )
 
         #expect(stakeInfo.active == true)
-        #expect(stakeInfo.rewardAccountBalance == 100000000)
+        #expect(stakeInfo.rewardAccountBalance == 100_000_000)
     }
 
     @Test("Test UTxO conversion types")
     func testUtxoConversionTypes() async throws {
         // Test that we can create the types needed for UTxO conversion
-        let txId = try TransactionId(from: .string("39a7a284c2a0948189dc45dec670211cd4d72f7b66c5726c08d9b3df11e44d58"))
+        let txId = try TransactionId(
+            from: .string("39a7a284c2a0948189dc45dec670211cd4d72f7b66c5726c08d9b3df11e44d58"))
         let txIn = TransactionInput(transactionId: txId, index: 0)
 
-        #expect(txIn.transactionId.payload.toHex == "39a7a284c2a0948189dc45dec670211cd4d72f7b66c5726c08d9b3df11e44d58")
+        #expect(
+            txIn.transactionId.payload.toHex
+                == "39a7a284c2a0948189dc45dec670211cd4d72f7b66c5726c08d9b3df11e44d58")
         #expect(txIn.index == 0)
     }
 
     @Test("Test Value with multi-assets")
     func testValueWithMultiAssets() async throws {
-        let policyId = ScriptHash(payload: Data(hex: "2e11e7313e00ccd086cfc4f1c3ebed4962d31b481b6a153c23601c0f"))
+        let policyId = ScriptHash(
+            payload: Data(hex: "2e11e7313e00ccd086cfc4f1c3ebed4962d31b481b6a153c23601c0f"))
         let assetName = try AssetName(payload: Data(hex: "636861726c69335f6164615f6e6674"))
 
         var asset = Asset([:])
@@ -109,9 +114,9 @@ struct OgmiosChainContextTests {
         var multiAsset = MultiAsset([:])
         multiAsset[policyId] = asset
 
-        let value = Value(coin: 1000000, multiAsset: multiAsset)
+        let value = Value(coin: 1_000_000, multiAsset: multiAsset)
 
-        #expect(value.coin == 1000000)
+        #expect(value.coin == 1_000_000)
         #expect(value.multiAsset[policyId] != nil)
         #expect(value.multiAsset[policyId]?[assetName] == 1)
     }
@@ -126,7 +131,7 @@ struct OgmiosChainContextTests {
             .operationError("test"),
             .transactionFailed("test"),
             .unsupportedNetwork("test"),
-            .valueError("test")
+            .valueError("test"),
         ]
 
         for error in errors {
@@ -220,14 +225,14 @@ struct OgmiosChainContextTests {
     func testLastBlockSlotViaMockClient() async throws {
         let context = try await createMockOgmiosChainContext()
         let slot = try await context.lastBlockSlot()
-        #expect(slot == 90918798)
+        #expect(slot == 90_918_798)
     }
 
     @Test("Test queryChainTip via mock client")
     func testQueryChainTipViaMockClient() async throws {
         let context = try await createMockOgmiosChainContext()
         let tip = try await context.queryChainTip()
-        #expect(tip.slot == 90918798)
+        #expect(tip.slot == 90_918_798)
         #expect(tip.epoch == 1052)
         #expect(tip.hash == "4dc5188a99ce636e624ab72104f6f18031dcd849c151ce1c8ef4871b7c3913b9")
     }
@@ -237,11 +242,11 @@ struct OgmiosChainContextTests {
         let context = try await createMockOgmiosChainContext()
         let params = try await context.genesisParameters()
 
-        #expect(params.activeSlotsCoefficient == 0.05)   // "1/20"
+        #expect(params.activeSlotsCoefficient == 0.05)  // "1/20"
         #expect(params.epochLength == 86400)
         #expect(params.maxKesEvolutions == 62)
         #expect(params.slotsPerKesPeriod == 129600)
-        #expect(params.slotLength == 1)                   // 1000ms / 1000 = 1
+        #expect(params.slotLength == 1)  // 1000ms / 1000 = 1
         #expect(params.maxLovelaceSupply == 45_000_000_000_000_000)
         #expect(params.securityParam == 432)
         #expect(params.networkMagic == 2)
@@ -271,14 +276,23 @@ struct OgmiosChainContextTests {
         let pools = try await context.stakePools()
 
         #expect(pools.count == 2)
-        #expect(pools.contains(where: { (try? $0.id()) == "pool1qqa8tkycj4zck4sy7n8mqr22x5g7tvm8hnp9st95wmuvvtw28th" }))
-        #expect(pools.contains(where: { (try? $0.id()) == "pool1qzq896ke4meh0tn9fl0dcnvtn2rzdz75lk3h8nmsuew8z5uln7r" }))
+        #expect(
+            pools.contains(where: {
+                (try? $0.id()) == "pool1qqa8tkycj4zck4sy7n8mqr22x5g7tvm8hnp9st95wmuvvtw28th"
+            }))
+        #expect(
+            pools.contains(where: {
+                (try? $0.id()) == "pool1qzq896ke4meh0tn9fl0dcnvtn2rzdz75lk3h8nmsuew8z5uln7r"
+            }))
     }
 
     @Test("Test UTxOs via mock client")
     func testUtxosViaMockClient() async throws {
         let context = try await createMockOgmiosChainContext()
-        let address = try Address(from: .string("addr_test1qp4kux2v7xcg9urqssdffff5p0axz9e3hcc43zz7pcuyle0e20hkwsu2ndpd9dh9anm4jn76ljdz0evj22stzrw9egxqmza5y3"))
+        let address = try Address(
+            from: .string(
+                "addr_test1qp4kux2v7xcg9urqssdffff5p0axz9e3hcc43zz7pcuyle0e20hkwsu2ndpd9dh9anm4jn76ljdz0evj22stzrw9egxqmza5y3"
+            ))
         let utxos = try await context.utxos(address: address)
 
         #expect(utxos.count == 2)
@@ -289,15 +303,18 @@ struct OgmiosChainContextTests {
     @Test("Test utxo(input:) via mock client")
     func testUtxoInputViaMockClient() async throws {
         let context = try await createMockOgmiosChainContext()
-        let txId = try TransactionId(from: .string("39a7a284c2a0948189dc45dec670211cd4d72f7b66c5726c08d9b3df11e44d58"))
+        let txId = try TransactionId(
+            from: .string("39a7a284c2a0948189dc45dec670211cd4d72f7b66c5726c08d9b3df11e44d58"))
         let input = TransactionInput(transactionId: txId, index: 0)
-        
+
         guard let (utxo, isSpent) = try await context.utxo(input: input) else {
             #expect(Bool(false), "Expected UTxO to be found")
             return
         }
-        
-        #expect(utxo.input.transactionId.payload.toHex == "39a7a284c2a0948189dc45dec670211cd4d72f7b66c5726c08d9b3df11e44d58")
+
+        #expect(
+            utxo.input.transactionId.payload.toHex
+                == "39a7a284c2a0948189dc45dec670211cd4d72f7b66c5726c08d9b3df11e44d58")
         #expect(utxo.input.index == 0)
         #expect(utxo.output.amount.coin == 5_000_000)
         #expect(isSpent == false)
@@ -307,7 +324,10 @@ struct OgmiosChainContextTests {
     func testStakeAddressInfoViaMockClient() async throws {
         let context = try await createMockOgmiosChainContext()
         // Use a base address (has staking part)
-        let address = try Address(from: .string("addr_test1qp4kux2v7xcg9urqssdffff5p0axz9e3hcc43zz7pcuyle0e20hkwsu2ndpd9dh9anm4jn76ljdz0evj22stzrw9egxqmza5y3"))
+        let address = try Address(
+            from: .string(
+                "addr_test1qp4kux2v7xcg9urqssdffff5p0axz9e3hcc43zz7pcuyle0e20hkwsu2ndpd9dh9anm4jn76ljdz0evj22stzrw9egxqmza5y3"
+            ))
         let stakeInfos = try await context.stakeAddressInfo(address: address)
 
         #expect(stakeInfos.count == 1)
@@ -319,7 +339,8 @@ struct OgmiosChainContextTests {
     func testStakeAddressInfoThrowsForNoStakingPart() async throws {
         let context = try await createMockOgmiosChainContext()
         // Enterprise address has no staking part (addr_test1v... format)
-        let enterpriseAddress = try Address(from: .string("addr_test1vr2p8st5t5cxqglyjky7vk98k7jtfhdpvhl4e97cezuhn0cqcexl7"))
+        let enterpriseAddress = try Address(
+            from: .string("addr_test1vr2p8st5t5cxqglyjky7vk98k7jtfhdpvhl4e97cezuhn0cqcexl7"))
         await #expect(throws: (any Error).self) {
             _ = try await context.stakeAddressInfo(address: enterpriseAddress)
         }
@@ -373,7 +394,8 @@ struct OgmiosChainContextTests {
     func testStakePoolInfoThrowsForUnknownPool() async throws {
         let context = try await createMockOgmiosChainContext()
         await #expect(throws: (any Error).self) {
-            _ = try await context.stakePoolInfo(poolId: "pool1unknown000000000000000000000000000000000000000000000")
+            _ = try await context.stakePoolInfo(
+                poolId: "pool1unknown000000000000000000000000000000000000000000000")
         }
     }
 
@@ -393,7 +415,7 @@ struct OgmiosChainContextTests {
         let params = try await context.protocolParameters()
         #expect(abs(params.poolPledgeInfluence - 0.3) < 0.0001)
         #expect(abs(params.monetaryExpansion - 0.003) < 0.0001)  // "3/1000"
-        #expect(abs(params.treasuryCut - 0.2) < 0.0001)           // "1/5"
+        #expect(abs(params.treasuryCut - 0.2) < 0.0001)  // "1/5"
     }
 
     @Test("Test epoch caching")
@@ -454,54 +476,128 @@ struct OgmiosChainContextTests {
         #expect(debug.contains("ChainContext"))
         #expect(debug.contains("networkId"))
     }
-    
+
     @Test("Test treasury")
     func testTreasury() async throws {
         let context = try await createMockOgmiosChainContext()
         let treasury = try await context.treasury()
-        
-        #expect(treasury == Coin(1000000000000000))
+
+        #expect(treasury == Coin(1_000_000_000_000_000))
     }
-    
+
     @Test("Test drepInfo")
     func testDrepInfo() async throws {
         let context = try await createMockOgmiosChainContext()
         let drepInfo = try await context.drepInfo(
             drep: DRep.fromBech32("drep1kqhhkv66a0egfw7uyz7u8dv7fcvr4ck0c3ad9k9urx3yzhefup0")
         )
-        
+
         let expectedDRepInfo = DRepInfo(
             active: true,
             drep: try DRep.fromBech32("drep1kqhhkv66a0egfw7uyz7u8dv7fcvr4ck0c3ad9k9urx3yzhefup0"),
             anchor: Anchor(
                 anchorUrl: try Url("https://anchor.test"),
                 anchorDataHash: AnchorDataHash(
-                    payload: Data(hex: "35aeb21ba4be07cf9fda041b635f107ef978238b3fccae9be1b571518ce9d1b7")
+                    payload: Data(
+                        hex: "35aeb21ba4be07cf9fda041b635f107ef978238b3fccae9be1b571518ce9d1b7")
                 )
             ),
-            deposit: Coin(500000000),
-            stake: Coin(500000000),
+            deposit: Coin(500_000_000),
+            stake: Coin(500_000_000),
             expiry: 639,
             status: .registered
         )
-        
+
         #expect(drepInfo == expectedDRepInfo)
     }
 
     @Test
     func testGovActionInfo() async throws {
         let chainContext = try await createMockOgmiosChainContext()
-        
+
         let txHash = "2dd15e0ef6e6a17841cb9541c27724072ce4d4b79b91e58432fbaa32d9572531"
         let govActionID = GovActionID(
             transactionID: TransactionId(payload: Data(hex: txHash)),
             govActionIndex: 1
         )
-        
+
         let govActionInfo = try await chainContext.govActionInfo(govActionID: govActionID)
-        
+
         #expect(govActionInfo.govActionId == govActionID)
         #expect(govActionInfo.proposedIn == 100)
         #expect(govActionInfo.expiresAfter == 130)
+    }
+
+    @Test("Test committeeMemberInfo for script credential")
+    func testCommitteeMemberInfoScriptCredential() async throws {
+        let chainContext = try await createMockOgmiosChainContext()
+
+        let coldCredential = CommitteeColdCredential(
+            credential: .scriptHash(
+                try ScriptHash(
+                    from: .string("1980dbf1ad624b0cb5410359b5ab14d008561994a6c2b6c53fabec00")
+                )
+            )
+        )
+
+        let expectedHotCredential = CommitteeHotCredential(
+            credential: .scriptHash(
+                try ScriptHash(
+                    from: .string("646d1b3ac94568a422b687db6c47acdf849f1674982ae4f9a494be43")
+                )
+            )
+        )
+
+        let memberInfo = try await chainContext.committeeMemberInfo(committeeMember: coldCredential)
+
+        #expect(memberInfo.coldCredential == coldCredential)
+        #expect(memberInfo.hotCredential == expectedHotCredential)
+        #expect(memberInfo.expiration == 1200)
+        #expect(memberInfo.status == .active)
+    }
+
+    @Test("Test committeeMemberInfo for verification key credential")
+    func testCommitteeMemberInfoVerificationKeyCredential() async throws {
+        let chainContext = try await createMockOgmiosChainContext()
+
+        let coldCredential = CommitteeColdCredential(
+            credential: .verificationKeyHash(
+                try VerificationKeyHash(
+                    from: .string("13493790d9b03483a1e1e684ea4faf1ee48a58f402574e7f2246f4d4")
+                )
+            )
+        )
+
+        let expectedHotCredential = CommitteeHotCredential(
+            credential: .verificationKeyHash(
+                try VerificationKeyHash(
+                    from: .string("68bb0b4276021f82364056aa9f4d38ba5ac59b26c166cbeaa9408746")
+                )
+            )
+        )
+
+        let memberInfo = try await chainContext.committeeMemberInfo(committeeMember: coldCredential)
+
+        #expect(memberInfo.coldCredential == coldCredential)
+        #expect(memberInfo.hotCredential == expectedHotCredential)
+        #expect(memberInfo.expiration == 1300)
+        #expect(memberInfo.status == .active)
+    }
+
+    @Test("Test committeeMemberInfo throws when member is missing")
+    func testCommitteeMemberInfoThrowsWhenMissing() async throws {
+        let chainContext = try await createMockOgmiosChainContext()
+
+        let missingCredential = CommitteeColdCredential(
+            credential: .scriptHash(
+                try ScriptHash(
+                    from: .string("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+                )
+            )
+        )
+
+        await #expect(throws: CardanoChainError.self) {
+            _ = try await chainContext.committeeMemberInfo(committeeMember: missingCredential)
+        }
     }
 }

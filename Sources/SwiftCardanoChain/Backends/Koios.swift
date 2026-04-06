@@ -956,14 +956,14 @@ public class KoiosChainContext: ChainContext {
         let status: DRepStatus?
 
         switch info.drepStatus {
-        case .registered:
-            status = .registered
-        case .deregistered:
-            status = .retired
-        case .notRegistered:
-            status = .notRegistered
-        default:
-            status = nil
+            case .registered:
+                status = .registered
+            case .deregistered:
+                status = .retired
+            case .notRegistered:
+                status = .notRegistered
+            default:
+                status = nil
         }
 
         let stake: Coin
@@ -1014,8 +1014,6 @@ public class KoiosChainContext: ChainContext {
             let proposals = try response.ok.body.json
             let txHash = govActionID.transactionID.payload.toHex.lowercased()
             let proposalIndex = Int(govActionID.govActionIndex)
-            
-            print(proposalRef)
 
             guard
                 let proposal = proposals.first(where: {
@@ -1025,7 +1023,7 @@ public class KoiosChainContext: ChainContext {
 
                     let proposalTxHash = ($0.proposalTxHash?.value as? String)?.lowercased()
                     let idx = $0.proposalIndex.map(Int.init)
-                    
+
                     return proposalTxHash == txHash && idx == proposalIndex
                 })
             else {
@@ -1036,49 +1034,49 @@ public class KoiosChainContext: ChainContext {
 
             if let type = proposal.proposalType {
                 switch type {
-                case .parameterChange:
-                    govAction = .parameterChangeAction(
-                        ParameterChangeAction(
-                            id: govActionID,
-                            protocolParamUpdate: ProtocolParamUpdate(),
-                            policyHash: nil
-                        ))
-                case .hardForkInitiation:
-                    govAction = .hardForkInitiationAction(
-                        HardForkInitiationAction(
-                            id: nil,
-                            protocolVersion: ProtocolVersion(major: 0, minor: 0)
-                        ))
-                case .treasuryWithdrawals:
-                    govAction = .treasuryWithdrawalsAction(
-                        TreasuryWithdrawalsAction(
-                            withdrawals: [:],
-                            policyHash: nil
-                        ))
-                case .noConfidence:
-                    govAction = .noConfidence(NoConfidence(id: govActionID))
-                case .newCommittee:
-                    govAction = .updateCommittee(
-                        UpdateCommittee(
-                            id: govActionID,
-                            coldCredentials: [],
-                            credentialEpochs: [:],
-                            interval: try! UnitInterval(from: .float(0.5))
-                        ))
-                case .newConstitution:
-                    govAction = .newConstitution(
-                        NewConstitution(
-                            id: govActionID,
-                            constitution: Constitution(
-                                anchor: Anchor(
-                                    anchorUrl: try! Url(""),
-                                    anchorDataHash: AnchorDataHash(payload: Data())
-                                ),
-                                scriptHash: nil
-                            )
-                        ))
-                default:
-                    govAction = .infoAction(.init())
+                    case .parameterChange:
+                        govAction = .parameterChangeAction(
+                            ParameterChangeAction(
+                                id: govActionID,
+                                protocolParamUpdate: ProtocolParamUpdate(),
+                                policyHash: nil
+                            ))
+                    case .hardForkInitiation:
+                        govAction = .hardForkInitiationAction(
+                            HardForkInitiationAction(
+                                id: nil,
+                                protocolVersion: ProtocolVersion(major: 0, minor: 0)
+                            ))
+                    case .treasuryWithdrawals:
+                        govAction = .treasuryWithdrawalsAction(
+                            TreasuryWithdrawalsAction(
+                                withdrawals: [:],
+                                policyHash: nil
+                            ))
+                    case .noConfidence:
+                        govAction = .noConfidence(NoConfidence(id: govActionID))
+                    case .newCommittee:
+                        govAction = .updateCommittee(
+                            UpdateCommittee(
+                                id: govActionID,
+                                coldCredentials: [],
+                                credentialEpochs: [:],
+                                interval: try! UnitInterval(from: .float(0.5))
+                            ))
+                    case .newConstitution:
+                        govAction = .newConstitution(
+                            NewConstitution(
+                                id: govActionID,
+                                constitution: Constitution(
+                                    anchor: Anchor(
+                                        anchorUrl: try! Url(""),
+                                        anchorDataHash: AnchorDataHash(payload: Data())
+                                    ),
+                                    scriptHash: nil
+                                )
+                            ))
+                    default:
+                        govAction = .infoAction(.init())
                 }
             }
 
@@ -1092,10 +1090,87 @@ public class KoiosChainContext: ChainContext {
                 droppedEpoch: proposal.droppedEpoch.map { UInt64($0) },
                 expiredEpoch: proposal.expiredEpoch.map { UInt64($0) }
             )
+        } catch {
+            throw CardanoChainError.koiosError("Failed to get proposal info: \(error)")
+        }
+    }
+
+    /// Get the committee member information for a given committee member credential.
+    /// - Parameter committeeMember: The `CommitteeColdCredential` object representing the committee member.
+    /// - Returns: The `CommitteeMemberInfo` object containing information about the committee member.
+    public func committeeMemberInfo(committeeMember: CommitteeColdCredential) async throws
+        -> CommitteeMemberInfo
+    {
+        do {
+            let response = try await api.client.committeeInfo()
+            let committeeInfo = try response.ok.body.json
+
+            let coldCredentialHex = committeeMember.credential.payload.toHex.lowercased()
+            let coldCredentialIsScript: Bool
+            switch committeeMember.credential {
+            case .scriptHash:
+                coldCredentialIsScript = true
+            case .verificationKeyHash:
+                coldCredentialIsScript = false
+            }
+
+            guard
+                let member = committeeInfo.members?.first(where: {
+                    $0.ccColdHex?.lowercased() == coldCredentialHex
+                        && ($0.ccColdHasScript ?? false) == coldCredentialIsScript
+                })
+            else {
+                throw CardanoChainError.valueError(
+                    "Committee member not found for credential: \(committeeMember)"
+                )
+            }
+
+            guard let expirationEpoch = member.expirationEpoch.map(Int.init) else {
+                throw CardanoChainError.valueError(
+                    "Missing expiration epoch for committee member: \(committeeMember)"
+                )
+            }
+
+            guard let hotHex = member.ccHotHex, let hotHasScript = member.ccHotHasScript else {
+                throw CardanoChainError.valueError(
+                    "Committee member does not have an authorized hot credential: \(committeeMember)"
+                )
+            }
+
+            let hotCredential: CommitteeHotCredential
+            if hotHasScript {
+                hotCredential = CommitteeHotCredential(
+                    credential: .scriptHash(ScriptHash(payload: Data(hex: hotHex)))
+                )
+            } else {
+                hotCredential = CommitteeHotCredential(
+                    credential: .verificationKeyHash(
+                        VerificationKeyHash(payload: Data(hex: hotHex))
+                    )
+                )
+            }
+
+            let currentEpoch = try await epoch()
+            let status: CommitteeMemberStatus
+            switch member.status {
+                case .authorized:
+                    status = expirationEpoch >= currentEpoch ? .active : .expired
+                case .notAuthorized, .resigned:
+                    status = .expired
+                case nil:
+                    status = expirationEpoch >= currentEpoch ? .unrecognized : .expired
+            }
+
+            return CommitteeMemberInfo(
+                coldCredential: committeeMember,
+                hotCredential: hotCredential,
+                expiration: EpochNumber(expirationEpoch),
+                status: status
+            )
         } catch let error as CardanoChainError {
             throw error
         } catch {
-            throw CardanoChainError.koiosError("Failed to get proposal info: \(error)")
+            throw CardanoChainError.koiosError("Failed to get committee member info: \(error)")
         }
     }
 }

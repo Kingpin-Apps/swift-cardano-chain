@@ -111,6 +111,11 @@ public protocol ChainContext: CustomStringConvertible, CustomDebugStringConverti
     /// - Parameter govActionID: The identifier of the governance action.
     /// - Returns: The `GovActionInfo` object containing information about the governance action.
     func govActionInfo(govActionID: GovActionID) async throws -> GovActionInfo
+    
+    /// Get the committee member information for a given committee member credential.
+    /// - Parameter committeeMember: The `CommitteeColdCredential` object representing the committee member.
+    /// - Returns: The `CommitteeMemberInfo` object containing information about the committee member.
+    func committeeMemberInfo(committeeMember: CommitteeColdCredential) async throws -> CommitteeMemberInfo
 }
 
 // MARK: - Default Implementation

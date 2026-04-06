@@ -1,91 +1,96 @@
-import Testing
+import Command
 import Foundation
+import Mockable
 import SwiftCardanoCore
 import SwiftCardanoUtils
-import Mockable
-import Command
 import SystemPackage
+import Testing
+
 @testable import SwiftCardanoChain
 
 @Suite("CardanoCLI Chain Context Tests")
 struct CardanoCLIContextTests {
-    
-    @Test("Test Initialization", arguments: [
-        (Network.mainnet, NetworkId.mainnet),
-        (Network.preprod, NetworkId.testnet),
-        (Network.preview, NetworkId.testnet),
-        
-    ])
+
+    @Test(
+        "Test Initialization",
+        arguments: [
+            (Network.mainnet, NetworkId.mainnet),
+            (Network.preprod, NetworkId.testnet),
+            (Network.preview, NetworkId.testnet),
+
+        ])
     func testInit(_ networks: (Network, NetworkId)) async throws {
         let config = createMockConfig()
         let runner = createCardaonCLIMockCommandRunner(config: config)
-        
+
         let cli = try await CardanoCLI(configuration: config, commandRunner: runner)
-        
+
         let chainContext = try await CardanoCliChainContext(
             nodeConfig: FilePath(configFilePath!),
             network: networks.0,
             cli: cli
         )
-        
+
         let epoch = try await chainContext.epoch()
         let network = chainContext.networkId
-        
+
         #expect(network == networks.1)
         #expect(epoch == 450)
     }
-    
+
     @Test("Test lastBlockSlot")
     func testLastBlockSlot() async throws {
         let config = createMockConfig()
         let runner = createCardaonCLIMockCommandRunner(config: config)
-        
+
         let cli = try await CardanoCLI(configuration: config, commandRunner: runner)
-        
+
         let chainContext = try await CardanoCliChainContext(
             nodeConfig: FilePath(configFilePath!),
             network: .preview,
             cli: cli
         )
-        
+
         let lastBlockSlot = try await chainContext.lastBlockSlot()
-        
-        #expect(lastBlockSlot == 123456789)
+
+        #expect(lastBlockSlot == 123_456_789)
     }
-    
+
     @Test("Test genesisParameters")
     func testGenesisParameters() async throws {
         let config = createMockConfig()
         let runner = createCardaonCLIMockCommandRunner(config: config)
-        
+
         let cli = try await CardanoCLI(configuration: config, commandRunner: runner)
-        
+
         let chainContext = try await CardanoCliChainContext(
             nodeConfig: FilePath(configFilePath!),
             network: .preview,
             cli: cli
         )
-        
+
         let genesisParameters = try await chainContext.genesisParameters()
-        
+
         #expect(genesisParameters.activeSlotsCoefficient == 0.05)
         #expect(genesisParameters.epochLength == 86400)
         #expect(genesisParameters.maxKesEvolutions == 62)
-        #expect(genesisParameters.maxLovelaceSupply == 45000000000000000)
+        #expect(genesisParameters.maxLovelaceSupply == 45_000_000_000_000_000)
         #expect(genesisParameters.networkId == "Testnet")
         #expect(genesisParameters.networkMagic == 2)
         #expect(genesisParameters.slotLength == 1)
         #expect(genesisParameters.securityParam == 432)
         #expect(genesisParameters.slotsPerKesPeriod == 129600)
-        #expect(genesisParameters.systemStart == ISO8601DateFormatter().date(from: "2022-10-25T00:00:00Z"))
+        #expect(
+            genesisParameters.systemStart
+                == ISO8601DateFormatter().date(from: "2022-10-25T00:00:00Z"))
         #expect(genesisParameters.updateQuorum == 5)
     }
-    
+
     @Test("Test protocolParameters")
     func testProtocolParameters() async throws {
         let config = createMockConfig()
         let runner = createCardaonCLIMockCommandRunner(config: config)
-        
+
         given(runner)
             .run(
                 arguments: .value([config.cardano!.cli!.string] + CLICommands.protocolParams),
@@ -100,26 +105,26 @@ struct CardanoCLIContextTests {
                     continuation.finish()
                 }
             )
-        
+
         let cli = try await CardanoCLI(configuration: config, commandRunner: runner)
-        
+
         let chainContext = try await CardanoCliChainContext(
             nodeConfig: FilePath(configFilePath!),
             network: .preview,
             cli: cli
         )
-        
+
         let protocolParameters = try await chainContext.protocolParameters()
-        
+
         #expect(protocolParameters.txFeePerByte == 44)
         #expect(protocolParameters.txFeeFixed == 155381)
     }
-    
+
     @Test("Test utxos")
     func testUTxOs() async throws {
         let config = createMockConfig()
         let runner = createCardaonCLIMockCommandRunner(config: config)
-        
+
         given(runner)
             .run(
                 arguments: .value([config.cardano!.cli!.string] + CLICommands.utxos),
@@ -134,25 +139,26 @@ struct CardanoCLIContextTests {
                     continuation.finish()
                 }
             )
-        
+
         let cli = try await CardanoCLI(configuration: config, commandRunner: runner)
-        
+
         let chainContext = try await CardanoCliChainContext(
             nodeConfig: FilePath(configFilePath!),
             network: .preview,
             cli: cli
         )
-        
+
         let address = try Address(
             from: .string(
                 "addr_test1qp4kux2v7xcg9urqssdffff5p0axz9e3hcc43zz7pcuyle0e20hkwsu2ndpd9dh9anm4jn76ljdz0evj22stzrw9egxqmza5y3"
             )
         )
-        
+
         let utxos = try await chainContext.utxos(address: address)
-        
+
         #expect(
-            utxos[0].input.transactionId.payload.toHex == "39a7a284c2a0948189dc45dec670211cd4d72f7b66c5726c08d9b3df11e44d58"
+            utxos[0].input.transactionId.payload.toHex
+                == "39a7a284c2a0948189dc45dec670211cd4d72f7b66c5726c08d9b3df11e44d58"
         )
     }
 
@@ -160,34 +166,37 @@ struct CardanoCLIContextTests {
     func testUtxoInput() async throws {
         let config = createMockConfig()
         let runner = createCardaonCLIMockCommandRunner(config: config)
-        
+
         let cli = try await CardanoCLI(configuration: config, commandRunner: runner)
-        
+
         let chainContext = try await CardanoCliChainContext(
             nodeConfig: FilePath(configFilePath!),
             network: .preview,
             cli: cli
         )
-        
-        let txId = try TransactionId(from: .string("39a7a284c2a0948189dc45dec670211cd4d72f7b66c5726c08d9b3df11e44d58"))
+
+        let txId = try TransactionId(
+            from: .string("39a7a284c2a0948189dc45dec670211cd4d72f7b66c5726c08d9b3df11e44d58"))
         let input = TransactionInput(transactionId: txId, index: 0)
-        
+
         guard let (utxo, isSpent) = try await chainContext.utxo(input: input) else {
             #expect(Bool(false), "Expected UTxO to be found")
             return
         }
-        
-        #expect(utxo.input.transactionId.payload.toHex == "39a7a284c2a0948189dc45dec670211cd4d72f7b66c5726c08d9b3df11e44d58")
+
+        #expect(
+            utxo.input.transactionId.payload.toHex
+                == "39a7a284c2a0948189dc45dec670211cd4d72f7b66c5726c08d9b3df11e44d58")
         #expect(utxo.input.index == 0)
-        #expect(utxo.output.amount.coin == 708864940)
+        #expect(utxo.output.amount.coin == 708_864_940)
         #expect(isSpent == false)
     }
-    
+
     @Test("Test submitTxCBOR")
     func testSubmitTxCBOR() async throws {
         let config = createMockConfig()
         let runner = createCardaonCLIMockCommandRunner(config: config)
-        
+
         given(runner)
             .run(
                 arguments: .value([config.cardano!.cli!.string] + CLICommands.queryTip),
@@ -224,7 +233,9 @@ struct CardanoCLIContextTests {
                 AsyncThrowingStream<CommandEvent, any Error> { continuation in
                     continuation.yield(
                         .standardOutput(
-                            [UInt8]("d1662b24fa9fe985fc2dce47455df399cb2e31e1e1819339e885801cc3578908".utf8)
+                            [UInt8](
+                                "d1662b24fa9fe985fc2dce47455df399cb2e31e1e1819339e885801cc3578908"
+                                    .utf8)
                         )
                     )
                     continuation.finish()
@@ -265,7 +276,9 @@ struct CardanoCLIContextTests {
                 AsyncThrowingStream<CommandEvent, any Error> { continuation in
                     continuation.yield(
                         .standardOutput(
-                            [UInt8]("d1662b24fa9fe985fc2dce47455df399cb2e31e1e1819339e885801cc3578908".utf8)
+                            [UInt8](
+                                "d1662b24fa9fe985fc2dce47455df399cb2e31e1e1819339e885801cc3578908"
+                                    .utf8)
                         )
                     )
                     continuation.finish()
@@ -306,29 +319,32 @@ struct CardanoCLIContextTests {
                 AsyncThrowingStream<CommandEvent, any Error> { continuation in
                     continuation.yield(
                         .standardOutput(
-                            [UInt8]("d1662b24fa9fe985fc2dce47455df399cb2e31e1e1819339e885801cc3578908".utf8)
+                            [UInt8](
+                                "d1662b24fa9fe985fc2dce47455df399cb2e31e1e1819339e885801cc3578908"
+                                    .utf8)
                         )
                     )
                     continuation.finish()
                 }
             )
-        
+
         let cli = try await CardanoCLI(configuration: config, commandRunner: runner)
-        
+
         let chainContext = try await CardanoCliChainContext(
             nodeConfig: FilePath(configFilePath!),
             network: .preview,
             cli: cli
         )
-        
-        let txCBOR = "84a70081825820b35a4ba9ef3ce21adcd6879d08553642224304704d206c74d3ffb3e6eed3ca28000d80018182581d60cc30497f4ff962f4c1dca54cceefe39f86f1d7179668009f8eb71e598200a1581cec8b7d1dd0b124e8333d3fa8d818f6eac068231a287554e9ceae490ea24f5365636f6e6454657374746f6b656e1a009896804954657374746f6b656e1a00989680021a000493e00e8009a1581cec8b7d1dd0b124e8333d3fa8d818f6eac068231a287554e9ceae490ea24f5365636f6e6454657374746f6b656e1a009896804954657374746f6b656e1a00989680075820592a2df0e091566969b3044626faa8023dabe6f39c78f33bed9e105e55159221a200828258206443a101bdb948366fc87369336224595d36d8b0eee5602cba8b81a024e584735840846f408dee3b101fda0f0f7ca89e18b724b7ca6266eb29775d3967d6920cae7457accb91def9b77571e15dd2ede38b12cf92496ce7382fa19eb90ab7f73e49008258205797dc2cc919dfec0bb849551ebdf30d96e5cbe0f33f734a87fe826db30f7ef95840bdc771aa7b8c86a8ffcbe1b7a479c68503c8aa0ffde8059443055bf3e54b92f4fca5e0b9ca5bb11ab23b1390bb9ffce414fa398fc0b17f4dc76fe9f7e2c99c09018182018482051a075bcd1582041a075bcd0c8200581c9139e5c0a42f0f2389634c3dd18dc621f5594c5ba825d9a8883c66278200581c835600a2be276a18a4bebf0225d728f090f724f4c0acd591d066fa6ff5d90103a100a11902d1a16b7b706f6c6963795f69647da16d7b706f6c6963795f6e616d657da66b6465736372697074696f6e6a3c6f7074696f6e616c3e65696d6167656a3c72657175697265643e686c6f636174696f6ea367617277656176656a3c6f7074696f6e616c3e6568747470736a3c6f7074696f6e616c3e64697066736a3c72657175697265643e646e616d656a3c72657175697265643e667368613235366a3c72657175697265643e64747970656a3c72657175697265643e"
-        
+
+        let txCBOR =
+            "84a70081825820b35a4ba9ef3ce21adcd6879d08553642224304704d206c74d3ffb3e6eed3ca28000d80018182581d60cc30497f4ff962f4c1dca54cceefe39f86f1d7179668009f8eb71e598200a1581cec8b7d1dd0b124e8333d3fa8d818f6eac068231a287554e9ceae490ea24f5365636f6e6454657374746f6b656e1a009896804954657374746f6b656e1a00989680021a000493e00e8009a1581cec8b7d1dd0b124e8333d3fa8d818f6eac068231a287554e9ceae490ea24f5365636f6e6454657374746f6b656e1a009896804954657374746f6b656e1a00989680075820592a2df0e091566969b3044626faa8023dabe6f39c78f33bed9e105e55159221a200828258206443a101bdb948366fc87369336224595d36d8b0eee5602cba8b81a024e584735840846f408dee3b101fda0f0f7ca89e18b724b7ca6266eb29775d3967d6920cae7457accb91def9b77571e15dd2ede38b12cf92496ce7382fa19eb90ab7f73e49008258205797dc2cc919dfec0bb849551ebdf30d96e5cbe0f33f734a87fe826db30f7ef95840bdc771aa7b8c86a8ffcbe1b7a479c68503c8aa0ffde8059443055bf3e54b92f4fca5e0b9ca5bb11ab23b1390bb9ffce414fa398fc0b17f4dc76fe9f7e2c99c09018182018482051a075bcd1582041a075bcd0c8200581c9139e5c0a42f0f2389634c3dd18dc621f5594c5ba825d9a8883c66278200581c835600a2be276a18a4bebf0225d728f090f724f4c0acd591d066fa6ff5d90103a100a11902d1a16b7b706f6c6963795f69647da16d7b706f6c6963795f6e616d657da66b6465736372697074696f6e6a3c6f7074696f6e616c3e65696d6167656a3c72657175697265643e686c6f636174696f6ea367617277656176656a3c6f7074696f6e616c3e6568747470736a3c6f7074696f6e616c3e64697066736a3c72657175697265643e646e616d656a3c72657175697265643e667368613235366a3c72657175697265643e64747970656a3c72657175697265643e"
+
         let tx = try Transaction.fromCBORHex(txCBOR)
-        
+
         let txId1 = try await chainContext.submitTx(tx: .transaction(tx))
         let txId2 = try await chainContext.submitTx(tx: .bytes(txCBOR.toData))
         let txId3 = try await chainContext.submitTx(tx: .string(txCBOR))
-        
+
         #expect(
             txId1 == "d1662b24fa9fe985fc2dce47455df399cb2e31e1e1819339e885801cc3578908"
         )
@@ -339,12 +355,12 @@ struct CardanoCLIContextTests {
             txId3 == "d1662b24fa9fe985fc2dce47455df399cb2e31e1e1819339e885801cc3578908"
         )
     }
-    
+
     @Test("Test stakeAddressInfo")
     func testStakeAddressInfo() async throws {
         let config = createMockConfig()
         let runner = createCardaonCLIMockCommandRunner(config: config)
-        
+
         given(runner)
             .run(
                 arguments: .value([config.cardano!.cli!.string] + CLICommands.stakeAddressInfo),
@@ -359,46 +375,48 @@ struct CardanoCLIContextTests {
                     continuation.finish()
                 }
             )
-        
+
         let cli = try await CardanoCLI(configuration: config, commandRunner: runner)
-        
+
         let chainContext = try await CardanoCliChainContext(
             nodeConfig: FilePath(configFilePath!),
             network: .preview,
             cli: cli
         )
-        
+
         let address = try Address(
             from: .string(
                 "stake_test1upyz3gk6mw5he20apnwfn96cn9rscgvmmsxc9r86dh0k66gswf59n"
             )
         )
-        
+
         let stakeAddressInfo = try await chainContext.stakeAddressInfo(address: address)
-        
+
         #expect(
-            stakeAddressInfo[0].address == "stake_test1upyz3gk6mw5he20apnwfn96cn9rscgvmmsxc9r86dh0k66gswf59n"
+            stakeAddressInfo[0].address
+                == "stake_test1upyz3gk6mw5he20apnwfn96cn9rscgvmmsxc9r86dh0k66gswf59n"
         )
         #expect(
-            stakeAddressInfo[0].stakeRegistrationDeposit == 2000000
+            stakeAddressInfo[0].stakeRegistrationDeposit == 2_000_000
         )
         #expect(
-            stakeAddressInfo[0].rewardAccountBalance == 100000000000
+            stakeAddressInfo[0].rewardAccountBalance == 100_000_000_000
         )
         #expect(
-            try stakeAddressInfo[0].stakeDelegation?.id() == "pool1m5947rydk4n0ywe6ctlav0ztt632lcwjef7fsy93sflz7ctcx6z"
+            try stakeAddressInfo[0].stakeDelegation?.id()
+                == "pool1m5947rydk4n0ywe6ctlav0ztt632lcwjef7fsy93sflz7ctcx6z"
         )
         #expect(
             try stakeAddressInfo[0].voteDelegation?
                 .id((.hex, .cip105)) == "b02f7b335aebf284bbdc20bdc3b59e4e183ae2cfc47ad2d8bc19a241"
         )
     }
-    
+
     @Test("Test stakePools")
     func testStakePools() async throws {
         let config = createMockConfig()
         let runner = createCardaonCLIMockCommandRunner(config: config)
-        
+
         given(runner)
             .run(
                 arguments: .value([config.cardano!.cli!.string] + CLICommands.stakePools),
@@ -413,40 +431,40 @@ struct CardanoCLIContextTests {
                     continuation.finish()
                 }
             )
-        
+
         let cli = try await CardanoCLI(configuration: config, commandRunner: runner)
-        
+
         let chainContext = try await CardanoCliChainContext(
             nodeConfig: FilePath(configFilePath!),
             network: .preview,
             cli: cli
         )
-        
+
         let stakePools = try await chainContext.stakePools()
-        
+
         #expect(
             try stakePools[0].id() == "pool1qqa8tkycj4zck4sy7n8mqr22x5g7tvm8hnp9st95wmuvvtw28th"
         )
     }
-    
+
     @Test("Test kesPeriodInfo throws without opCert")
     func testKESPeriodInfoThrowsWithoutOpCert() async throws {
         let config = createMockConfig()
         let runner = createCardaonCLIMockCommandRunner(config: config)
-        
+
         let cli = try await CardanoCLI(configuration: config, commandRunner: runner)
-        
+
         let chainContext = try await CardanoCliChainContext(
             nodeConfig: FilePath(configFilePath!),
             network: .preview,
             cli: cli
         )
-        
+
         await #expect(throws: CardanoChainError.self) {
             _ = try await chainContext.kesPeriodInfo(pool: nil, opCert: nil)
         }
     }
-    
+
     @Test("Test stakePoolInfo")
     func testStakePoolInfo() async throws {
         let config = createMockConfig()
@@ -513,12 +531,14 @@ struct CardanoCLIContextTests {
         // Verify pool operator
         let poolOperatorKey = PoolOperator(poolKeyHash: poolParams.poolOperator)
         #expect(
-            try poolOperatorKey.id(.hex) == "dd0b5f0c8db566f23b3ac2ffd63c4b5ea2afe1d2ca7c9810b1827e2f"
+            try poolOperatorKey.id(.hex)
+                == "dd0b5f0c8db566f23b3ac2ffd63c4b5ea2afe1d2ca7c9810b1827e2f"
         )
 
         // Verify VRF key hash
         #expect(
-            poolParams.vrfKeyHash.payload.toHex == "adbafc4eae2ee532f0f0dc47e502debbfd1436bd16abfafe24e2af6db4bd149d"
+            poolParams.vrfKeyHash.payload.toHex
+                == "adbafc4eae2ee532f0f0dc47e502debbfd1436bd16abfafe24e2af6db4bd149d"
         )
 
         // Verify pledge and cost
@@ -526,13 +546,15 @@ struct CardanoCLIContextTests {
         #expect(poolParams.cost == 340_000_000)
 
         // Verify margin (0.05 = 5%)
-        let expectedMargin = Double(poolParams.margin.numerator) / Double(poolParams.margin.denominator)
+        let expectedMargin =
+            Double(poolParams.margin.numerator) / Double(poolParams.margin.denominator)
         #expect(abs(expectedMargin - 0.05) < 0.0001)
 
         // Verify pool owners
         #expect(poolParams.poolOwners.count == 1)
         #expect(
-            poolParams.poolOwners.asArray[0].payload.toHex == "89218aeaab042f371399f159a08168b43a23f7c3b3db5c3a4c77a18e"
+            poolParams.poolOwners.asArray[0].payload.toHex
+                == "89218aeaab042f371399f159a08168b43a23f7c3b3db5c3a4c77a18e"
         )
 
         // Verify relays
@@ -552,9 +574,11 @@ struct CardanoCLIContextTests {
 
         // Verify metadata
         #expect(poolParams.poolMetadata != nil)
-        #expect(poolParams.poolMetadata?.url?.absoluteString == "https://meta.example.com/pool.json")
         #expect(
-            poolParams.poolMetadata?.poolMetadataHash?.payload.toHex == "db7b7e2943b84fe628fd75eb3cc01fc5c136a0a1dbc2cfb5fdeee6afdd943af1"
+            poolParams.poolMetadata?.url?.absoluteString == "https://meta.example.com/pool.json")
+        #expect(
+            poolParams.poolMetadata?.poolMetadataHash?.payload.toHex
+                == "db7b7e2943b84fe628fd75eb3cc01fc5c136a0a1dbc2cfb5fdeee6afdd943af1"
         )
 
         // Verify stake snapshot fields (stakeSet used for active stake)
@@ -567,33 +591,34 @@ struct CardanoCLIContextTests {
         let expectedActiveSize = Decimal(4_900_000_000_000) / Decimal(24_900_000_000_000_000)
         #expect(poolInfo.activeSize == expectedActiveSize)
     }
-    
+
     @Test("Test treasury")
     func testTreasury() async throws {
         let config = createMockConfig()
         let runner = createCardaonCLIMockCommandRunner(config: config)
-        
+
         let cli = try await CardanoCLI(configuration: config, commandRunner: runner)
-        
+
         let chainContext = try await CardanoCliChainContext(
             nodeConfig: FilePath(configFilePath!),
             network: .preview,
             cli: cli
         )
-        
+
         let treasury = try await chainContext.treasury()
-        
-        #expect(treasury == Coin(1000000000000000))
+
+        #expect(treasury == Coin(1_000_000_000_000_000))
     }
-    
-    @Test("Test drepInfo",
-          arguments: [
+
+    @Test(
+        "Test drepInfo",
+        arguments: [
             (
                 DRep(credential: .alwaysAbstain),
                 DRepInfo(
                     active: true,
                     drep: DRep(credential: .alwaysAbstain),
-                    stake: Coin(8784205971620742),
+                    stake: Coin(8_784_205_971_620_742),
                     status: .registered
                 )
             ),
@@ -602,7 +627,7 @@ struct CardanoCLIContextTests {
                 DRepInfo(
                     active: true,
                     drep: DRep(credential: .alwaysNoConfidence),
-                    stake: Coin(194879536262091),
+                    stake: Coin(194_879_536_262_091),
                     status: .registered
                 )
             ),
@@ -610,44 +635,53 @@ struct CardanoCLIContextTests {
                 try DRep.fromBech32("drep1kqhhkv66a0egfw7uyz7u8dv7fcvr4ck0c3ad9k9urx3yzhefup0"),
                 DRepInfo(
                     active: true,
-                    drep: try DRep.fromBech32("drep1kqhhkv66a0egfw7uyz7u8dv7fcvr4ck0c3ad9k9urx3yzhefup0"),
+                    drep: try DRep.fromBech32(
+                        "drep1kqhhkv66a0egfw7uyz7u8dv7fcvr4ck0c3ad9k9urx3yzhefup0"),
                     anchor: Anchor(
                         anchorUrl: try Url("https://anchor.test"),
                         anchorDataHash: AnchorDataHash(
-                            payload: Data(hex: "35aeb21ba4be07cf9fda041b635f107ef978238b3fccae9be1b571518ce9d1b7")
+                            payload: Data(
+                                hex:
+                                    "35aeb21ba4be07cf9fda041b635f107ef978238b3fccae9be1b571518ce9d1b7"
+                            )
                         )
                     ),
-                    deposit: Coin(500000000),
-                    stake: Coin(305554989074),
+                    deposit: Coin(500_000_000),
+                    stake: Coin(305_554_989_074),
                     expiry: 639,
                     status: .registered
                 )
             ),
             (
-                DRep(credential: .scriptHash(
-                    ScriptHash(
-                        payload: Data(
-                            hex: "5a5ba42f130741d62384c390cfc84d9ceecc8a4bef38059ff18ba74b"
-                        )
-                    )
-                )),
-                DRepInfo(
-                    active: true,
-                    drep: DRep(credential: .scriptHash(
+                DRep(
+                    credential: .scriptHash(
                         ScriptHash(
                             payload: Data(
                                 hex: "5a5ba42f130741d62384c390cfc84d9ceecc8a4bef38059ff18ba74b"
                             )
                         )
                     )),
+                DRepInfo(
+                    active: true,
+                    drep: DRep(
+                        credential: .scriptHash(
+                            ScriptHash(
+                                payload: Data(
+                                    hex: "5a5ba42f130741d62384c390cfc84d9ceecc8a4bef38059ff18ba74b"
+                                )
+                            )
+                        )),
                     anchor: Anchor(
                         anchorUrl: try Url("https://anchor.test"),
                         anchorDataHash: AnchorDataHash(
-                            payload: Data(hex: "35aeb21ba4be07cf9fda041b635f107ef978238b3fccae9be1b571518ce9d1b7")
+                            payload: Data(
+                                hex:
+                                    "35aeb21ba4be07cf9fda041b635f107ef978238b3fccae9be1b571518ce9d1b7"
+                            )
                         )
                     ),
-                    deposit: Coin(500000000),
-                    stake: Coin(305554989074),
+                    deposit: Coin(500_000_000),
+                    stake: Coin(305_554_989_074),
                     expiry: 639,
                     status: .registered
                 )
@@ -657,17 +691,17 @@ struct CardanoCLIContextTests {
     func testDRepInfo(of drep: DRep, drepInfo: DRepInfo) async throws {
         let config = createMockConfig()
         let runner = createCardaonCLIMockCommandRunner(config: config)
-        
+
         let cli = try await CardanoCLI(configuration: config, commandRunner: runner)
-        
+
         let chainContext = try await CardanoCliChainContext(
             nodeConfig: FilePath(configFilePath!),
             network: .preview,
             cli: cli
         )
-        
+
         let result = try await chainContext.drepInfo(drep: drep)
-        
+
         #expect(drepInfo == result)
     }
 
@@ -680,15 +714,15 @@ struct CardanoCLIContextTests {
             commandRunner: commandRunner
         )
         let chainContext = try await CardanoCliChainContext(cli: cli)
-        
+
         let txHash = "2dd15e0ef6e6a17841cb9541c27724072ce4d4b79b91e58432fbaa32d9572531"
         let govActionID = GovActionID(
             transactionID: TransactionId(payload: Data(hex: txHash)),
             govActionIndex: 1
         )
-        
+
         let govActionInfo = try await chainContext.govActionInfo(govActionID: govActionID)
-        
+
         #expect(govActionInfo.govActionId == govActionID)
         if case .treasuryWithdrawalsAction(let action) = govActionInfo.govAction {
             #expect(action.withdrawals.count == 1)
@@ -697,5 +731,37 @@ struct CardanoCLIContextTests {
         }
         #expect(govActionInfo.proposedIn == 100)
         #expect(govActionInfo.expiresAfter == 120)
+    }
+
+    @Test("Test committeeMemberInfo")
+    func testCommitteeMemberInfo() async throws {
+        let config = createMockConfig()
+        let runner = createCardaonCLIMockCommandRunner(config: config)
+
+        let cli = try await CardanoCLI(configuration: config, commandRunner: runner)
+
+        let chainContext = try await CardanoCliChainContext(
+            nodeConfig: FilePath(configFilePath!),
+            network: .preview,
+            cli: cli
+        )
+
+        // Create a committee cold credential from the test data hash
+        let coldKeyHash = try ScriptHash(
+            from: .string("13493790d9b03483a1e1e684ea4faf1ee48a58f402574e7f2246f4d4"))
+        let coldCredential = CommitteeColdCredential(
+            credential: .scriptHash(coldKeyHash)
+        )
+
+        let memberInfo = try await chainContext.committeeMemberInfo(committeeMember: coldCredential)
+
+        // Verify cold credential matches
+        #expect(memberInfo.coldCredential == coldCredential)
+
+        // Verify expiration epoch
+        #expect(memberInfo.expiration == 653)
+
+        // Verify expiration status
+        #expect(memberInfo.status == .active)
     }
 }
