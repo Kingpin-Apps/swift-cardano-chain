@@ -918,6 +918,42 @@ struct MockTransport: ClientTransport {
                         bytes: "",
                     )
                 )
+            case "get/governance/proposals/{tx_hash}/{cert_index}":
+                body = try JSONEncoder().encode(
+                    Components.Schemas.Proposal(
+                        txHash: "2dd15e0ef6e6a17841cb9541c27724072ce4d4b79b91e58432fbaa32d9572531",
+                        certIndex: 1,
+                        governanceType: .treasuryWithdrawals,
+                        governanceDescription: Components.Schemas.Proposal.GovernanceDescriptionPayload(),
+                        deposit: "12000",
+                        returnAddress: "stake_test1urd3hs7rlxwwdzthe6hj026dmyt3y0heuulctscyydh2kgck6nkmz",
+                        ratifiedEpoch: nil,
+                        enactedEpoch: 123,
+                        droppedEpoch: nil,
+                        expiredEpoch: nil,
+                        expiration: 120
+                    )
+                )
+            case "get/governance/proposals/{tx_hash}/{cert_index}/parameters":
+                body = try JSONEncoder().encode(
+                    Components.Schemas.ProposalParameters(
+                        txHash: "2dd15e0ef6e6a17841cb9541c27724072ce4d4b79b91e58432fbaa32d9572531",
+                        certIndex: 1,
+                        parameters: Components.Schemas.ProposalParameters.ParametersPayload(
+                            protocolMajorVer: 10,
+                            protocolMinorVer: 0
+                        )
+                    )
+                )
+            case "get/governance/proposals/{tx_hash}/{cert_index}/withdrawals":
+                body = try JSONEncoder().encode(
+                    [
+                        Components.Schemas.ProposalWithdrawalsPayload(
+                            stakeAddress: "stake_test1urd3hs7rlxwwdzthe6hj026dmyt3y0heuulctscyydh2kgck6nkmz",
+                            amount: "20000000"
+                        )
+                    ]
+                )
             default:
                 return (
                     HTTPResponse(status: .notFound),

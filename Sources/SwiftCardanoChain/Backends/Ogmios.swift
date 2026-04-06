@@ -852,7 +852,8 @@ public class OgmiosChainContext: ChainContext {
         let margin = UnitInterval(numerator: marginNum, denominator: marginDenom)
 
         let poolOperator = try PoolOperator(from: poolId)
-        let vrfKeyHash = VrfKeyHash(payload: Data(hex: ogmiosParams.vrfVerificationKeyHash.description))
+        let vrfKeyHash = VrfKeyHash(
+            payload: Data(hex: ogmiosParams.vrfVerificationKeyHash.description))
         let rewardAddress = try Address(from: .string(ogmiosParams.rewardAccount.description))
         let rewardAccountHash = RewardAccountHash(payload: rewardAddress.toBytes())
         let poolOwnersList: [VerificationKeyHash] = ogmiosParams.owners.map { owner in
@@ -862,7 +863,7 @@ public class OgmiosChainContext: ChainContext {
 
         var poolMetadata: PoolMetadata? = nil
         if let metadataUrl = ogmiosParams.metadata?.url,
-           let metadataHash = ogmiosParams.metadata?.hash
+            let metadataHash = ogmiosParams.metadata?.hash
         {
             let hashData = Data(hex: metadataHash.description)
             let url = try Url(metadataUrl.absoluteString)
@@ -895,7 +896,7 @@ public class OgmiosChainContext: ChainContext {
         // Get opcert counter from operationalCertificates query
         var opcertCounter: UInt? = nil
         if let opCerts = try? await client.ledgerStateQuery.operationalCertificates.result(),
-           let matchingPool = opCerts.value.first(where: { $0.key.value == poolId })
+            let matchingPool = opCerts.value.first(where: { $0.key.value == poolId })
         {
             opcertCounter = UInt(matchingPool.value)
         }
@@ -905,7 +906,8 @@ public class OgmiosChainContext: ChainContext {
         var liveSize: Decimal? = nil
         var ownerStake: UInt? = nil
         if let performances = try? await client.ledgerStateQuery.stakePoolsPerformances.result(),
-           let poolSummary = performances.stakePools.first(where: { $0.key.value == poolId })?.value
+            let poolSummary = performances.stakePools.first(where: { $0.key.value == poolId })?
+                .value
         {
             let poolStakeLovelace = poolSummary.stake.ada.lovelace
             let totalActiveStakeLovelace = performances.activeStakeInEpoch.ada.lovelace
@@ -929,12 +931,13 @@ public class OgmiosChainContext: ChainContext {
             status: .registered
         )
     }
-    
+
     /// Get the treasury balance.
     /// - Returns: The current balance of the treasury as a `Coin` object.
     /// - Throws: An error if the treasury balance cannot be retrieved.
     public func treasury() async throws -> Coin {
-        let response = try await client
+        let response =
+            try await client
             .ledgerStateQuery
             .treasuryAndReserves
             .result()
@@ -946,7 +949,7 @@ public class OgmiosChainContext: ChainContext {
     /// - Parameter drep: The `DRep` object.
     /// - Returns: The `DRepInfo` object containing information about the DRep.
     public func drepInfo(drep: DRep) async throws -> DRepInfo {
-        
+
         func ogmosisDRepInfoFromRegistered(
             drep: DRep,
             reg: DelegateRepresentativeSummary.Registered
@@ -954,17 +957,18 @@ public class OgmiosChainContext: ChainContext {
             let stake = Coin(reg.stake.ada.lovelace)
             let deposit = reg.deposit.map { Coin($0.ada.lovelace) }
             let expiry = reg.mandate.map { $0.epoch }
-            
+
             var anchor: SwiftCardanoCore.Anchor? = nil
             if let ogmiosAnchor = reg.metadata,
-               let hashData = Data(hexString: ogmiosAnchor.hash),
-               let anchorUrl = try? Url(ogmiosAnchor.url.absoluteString) {
+                let hashData = Data(hexString: ogmiosAnchor.hash),
+                let anchorUrl = try? Url(ogmiosAnchor.url.absoluteString)
+            {
                 anchor = SwiftCardanoCore.Anchor(
                     anchorUrl: anchorUrl,
                     anchorDataHash: AnchorDataHash(payload: hashData)
                 )
             }
-            
+
             return DRepInfo(
                 active: true,
                 drep: drep,
@@ -975,91 +979,182 @@ public class OgmiosChainContext: ChainContext {
                 status: .registered
             )
         }
-        
+
         switch drep.credential {
-            case .alwaysAbstain, .alwaysNoConfidence:
-                
-                let delegates = try await client
-                    .ledgerStateQuery
-                    .delegateRepresentatives
-                    .result()
-                
-                let stake: Coin
-                
-                switch drep.credential {
-                    case .alwaysAbstain:
-                        let found = delegates.first { if case .abstain = $0 { return true }; return false }
-                        if case .abstain(let a)? = found {
-                            stake = Coin(a.stake.ada.lovelace)
-                        } else {
-                            stake = Coin(0)
-                        }
-                    case .alwaysNoConfidence:
-                        let found = delegates.first { if case .noConfidence = $0 { return true }; return false }
-                        if case .noConfidence(let nc)? = found {
-                            stake = Coin(nc.stake.ada.lovelace)
-                        } else {
-                            stake = Coin(0)
-                        }
-                    default:
-                        stake = Coin(0)
+        case .alwaysAbstain, .alwaysNoConfidence:
+
+            let delegates =
+                try await client
+                .ledgerStateQuery
+                .delegateRepresentatives
+                .result()
+
+            let stake: Coin
+
+            switch drep.credential {
+            case .alwaysAbstain:
+                let found = delegates.first {
+                    if case .abstain = $0 { return true }
+                    return false
                 }
+                if case .abstain(let a)? = found {
+                    stake = Coin(a.stake.ada.lovelace)
+                } else {
+                    stake = Coin(0)
+                }
+            case .alwaysNoConfidence:
+                let found = delegates.first {
+                    if case .noConfidence = $0 { return true }
+                    return false
+                }
+                if case .noConfidence(let nc)? = found {
+                    stake = Coin(nc.stake.ada.lovelace)
+                } else {
+                    stake = Coin(0)
+                }
+            default:
+                stake = Coin(0)
+            }
+            return DRepInfo(
+                active: true,
+                drep: drep,
+                anchor: nil,
+                deposit: nil,
+                stake: stake,
+                expiry: nil,
+                status: .registered
+            )
+
+        case .verificationKeyHash(let hash):
+            let hexHash = hash.payload.toHex
+            let credential = try EncodingBase16(hexHash)
+            let params = QueryLedgerStateDelegateRepresentatives.Params(
+                keys: [.base16(credential)]
+            )
+            let delegates =
+                try await client
+                .ledgerStateQuery
+                .delegateRepresentatives
+                .result(params: params)
+
+            guard let delegate = delegates.first, case .registered(let reg) = delegate else {
                 return DRepInfo(
-                    active: true,
+                    active: false,
                     drep: drep,
                     anchor: nil,
                     deposit: nil,
-                    stake: stake,
+                    stake: Coin(0),
                     expiry: nil,
-                    status: .registered
+                    status: .notRegistered
                 )
+            }
+            return try ogmosisDRepInfoFromRegistered(drep: drep, reg: reg)
 
-            case .verificationKeyHash(let hash):
-                let hexHash = hash.payload.toHex
-                let credential = try EncodingBase16(hexHash)
-                let params = QueryLedgerStateDelegateRepresentatives.Params(
-                    keys: [.base16(credential)]
+        case .scriptHash(let hash):
+            let hexHash = hash.payload.toHex
+            let credential = try EncodingBase16(hexHash)
+            let params = QueryLedgerStateDelegateRepresentatives.Params(
+                scripts: [.base16(credential)],
+            )
+            let delegates =
+                try await client
+                .ledgerStateQuery
+                .delegateRepresentatives
+                .result(params: params)
+            guard let delegate = delegates.first, case .registered(let reg) = delegate else {
+                return DRepInfo(
+                    active: false,
+                    drep: drep,
+                    anchor: nil,
+                    deposit: nil,
+                    stake: Coin(0),
+                    expiry: nil,
+                    status: .notRegistered
                 )
-                let delegates = try await client
-                    .ledgerStateQuery
-                    .delegateRepresentatives
-                    .result(params: params)
-                
-                guard let delegate = delegates.first, case .registered(let reg) = delegate else {
-                    return DRepInfo(
-                        active: false,
-                        drep: drep,
-                        anchor: nil,
-                        deposit: nil,
-                        stake: Coin(0),
-                        expiry: nil,
-                        status: .notRegistered
-                    )
-                }
-                return try ogmosisDRepInfoFromRegistered(drep: drep, reg: reg)
-
-            case .scriptHash(let hash):
-                let hexHash = hash.payload.toHex
-                let credential = try EncodingBase16(hexHash)
-                let params = QueryLedgerStateDelegateRepresentatives.Params(
-                    scripts: [.base16(credential)],
-                )
-                let delegates = try await client
-                    .ledgerStateQuery
-                    .delegateRepresentatives
-                    .result(params: params)
-                guard let delegate = delegates.first, case .registered(let reg) = delegate else {
-                    return DRepInfo(
-                        active: false,
-                        drep: drep,
-                        anchor: nil,
-                        deposit: nil,
-                        stake: Coin(0),
-                        expiry: nil,
-                        status: .notRegistered
-                    )
-                }
-                return try ogmosisDRepInfoFromRegistered(drep: drep, reg: reg)
+            }
+            return try ogmosisDRepInfoFromRegistered(drep: drep, reg: reg)
         }
+    }
+
+    /// Get the governance action information for a given governance action ID.
+    /// - Parameter govActionID: The identifier of the governance action.
+    /// - Returns: The `GovActionInfo` object containing information about the governance action.
+    public func govActionInfo(govActionID: GovActionID) async throws -> GovActionInfo {
+        let proposals = try await client.ledgerStateQuery.governanceProposals.result()
+
+        guard
+            let entry = proposals.first(where: {
+                $0.proposal.transaction.id == govActionID.transactionID.payload.toHex
+                    && $0.proposal.index == UInt32(govActionID.govActionIndex)
+            })
+        else {
+            throw CardanoChainError.valueError("Governance action not found: \(govActionID)")
+        }
+
+        var govAction: GovAction = .infoAction(.init())
+
+        switch entry.action {
+        case .protocolParametersUpdate:
+            govAction = .parameterChangeAction(
+                ParameterChangeAction(
+                    id: govActionID,
+                    protocolParamUpdate: ProtocolParamUpdate(),  // Mapping complex update is out of scope for basic implementation
+                    policyHash: nil
+                ))
+        case .hardForkInitiation(let hardFork):
+            govAction = .hardForkInitiationAction(
+                HardForkInitiationAction(
+                    id: nil,
+                    protocolVersion: ProtocolVersion(
+                        major: Int(hardFork.version.major),
+                        minor: Int(hardFork.version.minor)
+                    )
+                ))
+        case .treasuryTransfer:
+            govAction = .treasuryWithdrawalsAction(
+                TreasuryWithdrawalsAction(
+                    withdrawals: [:],
+                    policyHash: nil
+                ))
+        case .treasuryWithdrawals:
+            var rewardWithdrawals: [SwiftCardanoCore.RewardAccount: Coin] = [:]
+            // Ogmios withdrawals mapping would go here
+            govAction = .treasuryWithdrawalsAction(
+                TreasuryWithdrawalsAction(
+                    withdrawals: rewardWithdrawals,
+                    policyHash: nil
+                ))
+        case .noConfidence:
+            govAction = .noConfidence(NoConfidence(id: govActionID))
+        case .constitutionalCommittee:
+            govAction = .updateCommittee(
+                UpdateCommittee(
+                    id: govActionID,
+                    coldCredentials: [],
+                    credentialEpochs: [:],
+                    interval: try! UnitInterval(from: .float(0.5))
+                ))
+        case .constitution:
+            govAction = .newConstitution(
+                NewConstitution(
+                    id: govActionID,
+                    constitution: Constitution(
+                        anchor: Anchor(
+                            anchorUrl: try! Url(""),
+                            anchorDataHash: AnchorDataHash(payload: Data())
+                        ),
+                        scriptHash: nil
+                    )
+                ))
+        case .information:
+            govAction = .infoAction(InfoAction())
+        }
+
+        return GovActionInfo(
+            govActionId: govActionID,
+            govAction: govAction,
+            proposedIn: entry.since.epoch,
+            expiresAfter: entry.until.epoch
+        )
     }
 }

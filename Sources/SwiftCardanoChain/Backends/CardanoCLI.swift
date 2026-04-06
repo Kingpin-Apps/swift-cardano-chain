@@ -5,14 +5,13 @@ import SwiftCardanoCore
 import SwiftCardanoUtils
 import SystemPackage
 
-
 /// A Cardano CLI wrapper for interacting with the Cardano blockchain
-public class CardanoCliChainContext: ChainContext {    
+public class CardanoCliChainContext: ChainContext {
     // MARK: - Properties
-    
-    public var name: String {  "Cardano-CLI" }
+
+    public var name: String { "Cardano-CLI" }
     public var type: ContextType { .online }
-    
+
     public let cli: CardanoCLI
     private var lastKnownBlockSlot: Int = 0
     private var lastChainTipFetch: TimeInterval = 0
@@ -44,7 +43,7 @@ public class CardanoCliChainContext: ChainContext {
         guard var self = self else {
             throw CardanoChainError.valueError("Self is nil")
         }
-        
+
         let epoch = try await cli.getEpoch()
         return epoch
     }
@@ -72,7 +71,7 @@ public class CardanoCliChainContext: ChainContext {
         guard var self = self else {
             throw CardanoChainError.valueError("Self is nil")
         }
-        
+
         guard let nodeConfig = self.cli.cardanoConfig.config else {
             throw CardanoChainError.valueError("Cardano node config is nil")
         }
@@ -136,12 +135,13 @@ public class CardanoCliChainContext: ChainContext {
         self.utxoCache = [:]
         self.datumCache = [:]
         self._network = network
-        
+
         if let cli = cli {
             self.cli = cli
         } else if let nodeConfig = nodeConfig,
-                  let binary = binary,
-                  let socket = socket {
+            let binary = binary,
+            let socket = socket
+        {
             self.cli = try await CardanoCLI(
                 configuration: Config(
                     cardano: CardanoConfig(
@@ -158,18 +158,18 @@ public class CardanoCliChainContext: ChainContext {
             self.cli = try await CardanoCLI(configuration: Config.default())
         }
     }
-    
+
     public init(cardanoConfig: CardanoConfig) async throws {
         self.refetchChainTipInterval = 1000
         self.utxoCache = [:]
         self.datumCache = [:]
         self._network = cardanoConfig.network
-        
+
         self.cli = try await CardanoCLI(
             configuration: Config(cardano: cardanoConfig)
         )
     }
-    
+
     // MARK: - Public Methods
 
     /// Query the chain tip
@@ -213,7 +213,7 @@ public class CardanoCliChainContext: ChainContext {
 
         return syncProgress != 100.0
     }
-    
+
     // MARK: - Private Methods
 
     /// Get a script object from a reference script dictionary
@@ -297,11 +297,11 @@ public class CardanoCliChainContext: ChainContext {
     public func utxo(input: TransactionInput) async throws -> (UTxO, isSpent: Bool)? {
         let txInStr = input.description  // "<txhash>#<index>"
         let result = try await cli.query.utxo(arguments: [
-            "--tx-in", txInStr, "--output-json", "--out-file",  "/dev/stdout"
+            "--tx-in", txInStr, "--output-json", "--out-file", "/dev/stdout",
         ])
 
         guard let data = result.data(using: .utf8),
-              let rawUtxos = try? JSONSerialization.jsonObject(with: data, options: [])
+            let rawUtxos = try? JSONSerialization.jsonObject(with: data, options: [])
                 as? [String: [String: Any]]
         else {
             throw CardanoChainError.valueError("Failed to parse UTxO JSON")
@@ -346,7 +346,7 @@ public class CardanoCliChainContext: ChainContext {
 
         var datumOption: DatumOption? = nil
         if let datumStr = utxoEntry["datum"] as? String,
-           let datumData = Data(hexString: datumStr)
+            let datumData = Data(hexString: datumStr)
         {
             datumOption = try DatumOption.fromCBOR(data: datumData)
         } else if let inlineDatum = utxoEntry["inlineDatum"] as? [AnyHashable: Any] {
@@ -383,7 +383,7 @@ public class CardanoCliChainContext: ChainContext {
         // Create a temporary file for the transaction
         let tempDir = FileManager.default.temporaryDirectory
         let tempFile = tempDir.appendingPathComponent(UUID().uuidString)
-        
+
         let era = try await self.era() ?? .conway
 
         // Write the transaction to the temporary file
@@ -431,7 +431,7 @@ public class CardanoCliChainContext: ChainContext {
     public func stakeAddressInfo(address: Address) async throws -> [StakeAddressInfo] {
         return try await cli.stakeAddressInfo(address: address)
     }
-    
+
     /// Get the list of stake pools
     ///
     /// - Returns: List of stake pool IDs
@@ -456,7 +456,7 @@ public class CardanoCliChainContext: ChainContext {
         // TODO: Implement transaction evaluation
         throw CardanoChainError.notImplemented("Transaction evaluation not implemented yet")
     }
-    
+
     /// Get the KES period information for a stake pool using cardano-cli.
     ///
     /// Queries the local node for KES period information using `cardano-cli query kes-period-info`.
@@ -475,23 +475,26 @@ public class CardanoCliChainContext: ChainContext {
     /// let kesInfo = try await chainContext.kesPeriodInfo(pool: nil, opCert: opCert)
     /// print("KES start period: \(kesInfo.onDiskKESStart ?? 0)")
     /// ```
-    public func kesPeriodInfo(pool: PoolOperator? = nil, opCert: OperationalCertificate?) async throws -> KESPeriodInfo {
+    public func kesPeriodInfo(pool: PoolOperator? = nil, opCert: OperationalCertificate?)
+        async throws -> KESPeriodInfo
+    {
         guard let opCert = opCert else {
-            throw CardanoChainError.valueError("Operational certificate is required for KES period info")
+            throw CardanoChainError.valueError(
+                "Operational certificate is required for KES period info")
         }
-        
+
         // Create a temporary file for the opCert
         let tempDir = FileManager.default.temporaryDirectory
         let tempOpCertFile = tempDir.appendingPathComponent(UUID().uuidString)
         let tempQueryFile = tempDir.appendingPathComponent(UUID().uuidString)
-        
+
         try opCert.save(to: tempOpCertFile.path)
-        
+
         defer {
             try? FileManager.default.removeItem(at: tempOpCertFile)
             try? FileManager.default.removeItem(at: tempQueryFile)
         }
-        
+
         let _ = try await cli.query.kesPeriodInfo(
             arguments: [
                 "--op-cert-file",
@@ -500,17 +503,17 @@ public class CardanoCliChainContext: ChainContext {
                 tempQueryFile.path,
             ]
         )
-        
+
         let data = try Data(contentsOf: URL(fileURLWithPath: tempQueryFile.path))
         let obj = try JSONSerialization.jsonObject(with: data, options: [])
         guard let dict = obj as? [String: Any] else {
             throw CardanoChainError.valueError("Top-level JSON is not a dictionary")
         }
-        
+
         let onChainOpCertCount = dict["qKesNodeStateOperationalCertificateNumber"] as? Int ?? -1
         let onDiskOpCertCount = dict["qKesOnDiskOperationalCertificateNumber"] as? Int ?? 0
         let onDiskKESStart = dict["qKesStartKesInterval"] as? Int ?? 0
-        
+
         return KESPeriodInfo(
             onChainOpCertCount: onChainOpCertCount,
             onDiskOpCertCount: onDiskOpCertCount,
@@ -525,31 +528,31 @@ public class CardanoCliChainContext: ChainContext {
     /// - Throws: `CardanoChainError.cardanoCLIError` if the query fails or parsing fails.
     public func stakePoolInfo(poolId: String) async throws -> StakePoolInfo {
         let poolOperator = try PoolOperator(from: poolId)
-        
+
         let poolState = try await cli.query.poolState(
             pool: poolOperator
         )
-        
+
         guard let poolEntry = poolState.pools.first(where: { $0.key == poolOperator }) else {
             throw CardanoChainError.cardanoCLIError("Pool not found or has no poolParams")
         }
-        
+
         let poolParams = try await poolEntry.value.poolParams.toPoolParams(
             poolOperator: poolOperator,
             strict: true
         )
-        
+
         let stakeSnapshot = try await cli.query.stakeSnapshot(
             pool: poolOperator
         )
-        
+
         let protocolState = try await cli.query.protocolState()
-        
+
         let opCertInfo = protocolState.oCertCounters.first(where: { $0.key == poolOperator })
-        
+
         var activeStake: UInt64? = nil
         var activeSize: Decimal? = nil
-        
+
         if let poolStakeInfo = stakeSnapshot.pools.first(
             where: { $0.key == poolOperator }
         ) {
@@ -578,31 +581,32 @@ public class CardanoCliChainContext: ChainContext {
             status: status
         )
     }
-    
+
     /// Get the treasury balance.
     /// - Returns: The current balance of the treasury as a `Coin` object.
     /// - Throws: An error if the treasury balance cannot be retrieved.
     public func treasury() async throws -> Coin {
         let currentTreasuryValue = try await cli.query.treasury(arguments: [])
-        
+
         guard let treasuryInt = UInt64(currentTreasuryValue) else {
             throw CardanoChainError.valueError("Failed to parse treasury balance")
         }
-        
+
         return Coin(treasuryInt)
     }
-    
+
     /// Get the DRep information.
     /// - Parameter drep: The `DRep` object.
     /// - Returns: The `DRepInfo` object containing information about the DRep.
     public func drepInfo(drep: DRep) async throws -> DRepInfo {
-        
+
         func parseDRepStateResult(_ result: String, drep: DRep) throws -> DRepInfo {
             guard let data = result.data(using: .utf8),
-                  let entries = try? JSONSerialization.jsonObject(with: data) as? [[Any]],
-                  let firstEntry = entries.first,
-                  firstEntry.count == 2,
-                  let stateDict = firstEntry[1] as? [String: Any] else {
+                let entries = try? JSONSerialization.jsonObject(with: data) as? [[Any]],
+                let firstEntry = entries.first,
+                firstEntry.count == 2,
+                let stateDict = firstEntry[1] as? [String: Any]
+            else {
                 return DRepInfo(
                     active: false,
                     drep: drep,
@@ -613,22 +617,23 @@ public class CardanoCliChainContext: ChainContext {
                     status: .notRegistered
                 )
             }
-            
+
             let deposit = (stateDict["deposit"] as? Int).map { Coin(UInt64($0)) }
             let expiry = (stateDict["expiry"] as? Int).map { UInt64($0) }
             let stakeRaw = stateDict["stake"] as? Int ?? 0
-            
+
             var anchor: Anchor? = nil
             if let anchorDict = stateDict["anchor"] as? [String: Any],
-               let urlStr = anchorDict["url"] as? String,
-               let hashStr = anchorDict["dataHash"] as? String,
-               let hashData = Data(hexString: hashStr) {
+                let urlStr = anchorDict["url"] as? String,
+                let hashStr = anchorDict["dataHash"] as? String,
+                let hashData = Data(hexString: hashStr)
+            {
                 anchor = try? Anchor(
                     anchorUrl: Url(urlStr),
                     anchorDataHash: AnchorDataHash(payload: hashData)
                 )
             }
-            
+
             return DRepInfo(
                 active: true,
                 drep: drep,
@@ -639,50 +644,251 @@ public class CardanoCliChainContext: ChainContext {
                 status: .registered
             )
         }
-        
+
         switch drep.credential {
-            case .alwaysAbstain, .alwaysNoConfidence:
-                let distKey = drep.credential == .alwaysAbstain
-                    ? "drep-alwaysAbstain"
-                    : "drep-alwaysNoConfidence"
-                
-                let distResult = try await cli
-                    .query
-                    .drepStakeDistribution(arguments: [
-                        "--all-dreps",
-                        "--output-json"
-                    ])
-                
-                var stake = Coin(0)
-                
-                if let distData = distResult.data(using: .utf8),
-                   let distDict = try? JSONSerialization.jsonObject(with: distData) as? [String: Any],
-                   let stakeRaw = distDict[distKey] as? Int64 {
-                    stake = Coin(UInt64(stakeRaw))
-                }
-                
-                return DRepInfo(
-                    active: true,
-                    drep: drep,
-                    stake: stake,
-                    status: .registered
-                )
+        case .alwaysAbstain, .alwaysNoConfidence:
+            let distKey =
+                drep.credential == .alwaysAbstain
+                ? "drep-alwaysAbstain"
+                : "drep-alwaysNoConfidence"
 
-            case .verificationKeyHash(let hash):
-                let result = try await cli.query.drepState(arguments: [
-                    "--drep-key-hash", hash.payload.toHex,
-                    "--include-stake",
-                    "--output-json"
+            let distResult =
+                try await cli
+                .query
+                .drepStakeDistribution(arguments: [
+                    "--all-dreps",
+                    "--output-json",
                 ])
-                return try parseDRepStateResult(result, drep: drep)
 
-            case .scriptHash(let hash):
-                let result = try await cli.query.drepState(arguments: [
-                    "--drep-script-hash", hash.payload.toHex,
-                    "--include-stake",
-                    "--output-json"
-                ])
-                return try parseDRepStateResult(result, drep: drep)
+            var stake = Coin(0)
+
+            if let distData = distResult.data(using: .utf8),
+                let distDict = try? JSONSerialization.jsonObject(with: distData) as? [String: Any],
+                let stakeRaw = distDict[distKey] as? Int64
+            {
+                stake = Coin(UInt64(stakeRaw))
+            }
+
+            return DRepInfo(
+                active: true,
+                drep: drep,
+                stake: stake,
+                status: .registered
+            )
+
+        case .verificationKeyHash(let hash):
+            let result = try await cli.query.drepState(arguments: [
+                "--drep-key-hash", hash.payload.toHex,
+                "--include-stake",
+                "--output-json",
+            ])
+            return try parseDRepStateResult(result, drep: drep)
+
+        case .scriptHash(let hash):
+            let result = try await cli.query.drepState(arguments: [
+                "--drep-script-hash", hash.payload.toHex,
+                "--include-stake",
+                "--output-json",
+            ])
+            return try parseDRepStateResult(result, drep: drep)
         }
+    }
+
+    /// Get the governance action information for a given governance action ID.
+    /// - Parameter govActionID: The identifier of the governance action.
+    /// - Returns: The `GovActionInfo` object containing information about the governance action.
+    public func govActionInfo(govActionID: GovActionID) async throws -> GovActionInfo {
+        let result = try await cli.query.govState(arguments: ["--output-json"])
+
+        guard let data = result.data(using: .utf8),
+            let govState = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let proposals = govState["proposals"] as? [[String: Any]]
+        else {
+            throw CardanoChainError.valueError(
+                "Failed to parse gov-state JSON or missing proposals")
+        }
+
+        let txHash = govActionID.transactionID.payload.toHex.lowercased()
+        let index = govActionID.govActionIndex
+
+        let nextRatifyState = govState["nextRatifyState"] as? [String: Any]
+        let enactedGovActions = nextRatifyState?["enactedGovActions"] as? [[String: Any]] ?? []
+        let expiredGovActions = nextRatifyState?["expiredGovActions"] as? [[String: Any]] ?? []
+        let currentEpoch = UInt64(try await self.epoch())
+
+        func actionIdMatches(_ actionId: [String: Any]) -> Bool {
+            guard let pTxId = actionId["txId"] as? String else {
+                return false
+            }
+
+            let pIndex: Int
+            if let idx = actionId["govActionIx"] as? Int {
+                pIndex = idx
+            } else if let idx = actionId["govActionIx"] as? NSNumber {
+                pIndex = idx.intValue
+            } else {
+                return false
+            }
+
+            return pTxId.lowercased() == txHash && pIndex == index
+        }
+
+        func actionExists(in entries: [[String: Any]]) -> Bool {
+            entries.contains { entry in
+                if let nestedActionId = entry["actionId"] as? [String: Any] {
+                    return actionIdMatches(nestedActionId)
+                }
+                return actionIdMatches(entry)
+            }
+        }
+
+        let proposal = proposals.first(where: {
+            guard let actionId = $0["actionId"] as? [String: Any] else {
+                return false
+            }
+            return actionIdMatches(actionId)
+        })
+
+        func parseGovAction(_ proposal: [String: Any]) throws -> GovAction {
+            guard let proposalProcedure = proposal["proposalProcedure"] as? [String: Any],
+                let actionDict = proposalProcedure["govAction"] as? [String: Any],
+                let tag = actionDict["tag"] as? String
+            else {
+                throw CardanoChainError.valueError("Missing govAction in proposal procedure")
+            }
+
+            let contents = actionDict["contents"] as? [Any] ?? []
+
+            switch tag {
+            case "ParameterChange":
+                // contents: [prevGovActionId, pParamUpdate, policyHash]
+                // For now, return a basic ParameterChangeAction as mapping pParamUpdate is complex
+                return .parameterChangeAction(
+                    ParameterChangeAction(
+                        id: govActionID,
+                        protocolParamUpdate: ProtocolParamUpdate(),
+                        policyHash: nil
+                    ))
+            case "HardForkInitiation":
+                // contents: [prevGovActionId, protocolVersion]
+                var protocolVersion = ProtocolVersion(major: 0, minor: 0)
+                if contents.count >= 2, let pvDict = contents[1] as? [String: Any] {
+                    protocolVersion = ProtocolVersion(
+                        major: pvDict["major"] as? Int ?? 0,
+                        minor: pvDict["minor"] as? Int ?? 0
+                    )
+                }
+                return .hardForkInitiationAction(
+                    HardForkInitiationAction(
+                        id: nil,
+                        protocolVersion: protocolVersion
+                    ))
+            case "TreasuryWithdrawals":
+                // contents: [[{credential info}, lovelace], ...], policyHash]
+                var withdrawals: [RewardAccount: Coin] = [:]
+                if let withdrawalsList = contents.first as? [[Any]] {
+                    for entry in withdrawalsList {
+                        if entry.count >= 2, let amount = entry[1] as? NSNumber {
+                            // Parse credential object to extract hash and build reward address
+                            if let credentialObj = entry[0] as? [String: Any] {
+                                var credentialHash: Data?
+                                var addressType: UInt8 = 0xE0  // mainnet reward account (keyHash)
+
+                                if let keyHashStr = credentialObj["keyHash"] as? String {
+                                    credentialHash = Data(hexString: keyHashStr)
+                                    addressType = 0xE0  // 224 = mainnet + keyHash credential
+                                } else if let scriptHashStr = credentialObj["scriptHash"] as? String
+                                {
+                                    credentialHash = Data(hexString: scriptHashStr)
+                                    addressType = 0xE1  // 225 = mainnet + scriptHash credential
+                                }
+
+                                if let credentialData = credentialHash {
+                                    // Prepend network + type byte to credential
+                                    var fullData = Data([addressType])
+                                    fullData.append(credentialData)
+                                    withdrawals[RewardAccount(fullData)] = Coin(amount.uint64Value)
+                                }
+                            }
+                        }
+                    }
+                }
+                // policyHash is ScriptHash type
+                var policyHash: ScriptHash? = nil
+                if contents.count > 1, let policyHashStr = contents[1] as? String {
+                    policyHash = try? ScriptHash(from: .string(policyHashStr))
+                }
+                return .treasuryWithdrawalsAction(
+                    TreasuryWithdrawalsAction(
+                        withdrawals: withdrawals,
+                        policyHash: policyHash
+                    ))
+            case "NoConfidence":
+                return .noConfidence(NoConfidence(id: govActionID))
+            case "UpdateCommittee":
+                return .updateCommittee(
+                    UpdateCommittee(
+                        id: govActionID,
+                        coldCredentials: [],
+                        credentialEpochs: [:],
+                        interval: try! UnitInterval(from: .float(0.5))
+                    ))
+            case "NewConstitution":
+                return .newConstitution(
+                    NewConstitution(
+                        id: govActionID,
+                        constitution: Constitution(
+                            anchor: Anchor(
+                                anchorUrl: try! Url(""),
+                                anchorDataHash: AnchorDataHash(payload: Data())
+                            ),
+                            scriptHash: nil
+                        )
+                    ))
+            case "InfoAction":
+                return .infoAction(InfoAction())
+            default:
+                return .infoAction(InfoAction())
+            }
+        }
+
+        let inEnactedSet = actionExists(in: enactedGovActions)
+        let inExpiredSet = actionExists(in: expiredGovActions)
+        let proposalsEmpty = proposals.isEmpty
+
+        let proposedIn = (proposal?["proposedIn"] as? Int).map { UInt64($0) }
+        let expiresAfter = (proposal?["expiresAfter"] as? Int).map { UInt64($0) }
+        let expiredByEpoch = expiresAfter.map { currentEpoch > $0 } ?? false
+        let missingFromProposals = proposal == nil
+
+        // User-defined status rules:
+        // 1) Ratified: in proposals and in nextRatifyState.enactedGovActions
+        // 2) Dropped: proposals are empty
+        // 3) Expired: in expiredGovActions, or missing from proposals, or currentEpoch > expiresAfter
+        let ratifiedEpoch: UInt64? = (proposal != nil && inEnactedSet) ? currentEpoch : nil
+        let droppedEpoch: UInt64? = (ratifiedEpoch == nil && proposalsEmpty) ? currentEpoch : nil
+        let expiredEpoch: UInt64? =
+            (ratifiedEpoch == nil && droppedEpoch == nil
+                && (inExpiredSet || missingFromProposals || expiredByEpoch))
+            ? currentEpoch : nil
+
+        let parsedGovAction: GovAction
+        if let proposal {
+            parsedGovAction = try parseGovAction(proposal)
+        } else {
+            // When the proposal is no longer present, return a neutral placeholder action.
+            parsedGovAction = .infoAction(InfoAction())
+        }
+
+        return GovActionInfo(
+            govActionId: govActionID,
+            govAction: parsedGovAction,
+            proposedIn: proposedIn,
+            expiresAfter: expiresAfter,
+            ratifiedEpoch: ratifiedEpoch,
+            enactedEpoch: nil,
+            droppedEpoch: droppedEpoch,
+            expiredEpoch: expiredEpoch
+        )
     }
 }

@@ -106,6 +106,11 @@ public protocol ChainContext: CustomStringConvertible, CustomDebugStringConverti
     /// - Parameter drep: The `DRep` object.
     /// - Returns: The `DRepInfo` object containing information about the DRep.
     func drepInfo(drep: DRep) async throws -> DRepInfo
+    
+    /// Get the governance action information for a given governance action ID.
+    /// - Parameter govActionID: The identifier of the governance action.
+    /// - Returns: The `GovActionInfo` object containing information about the governance action.
+    func govActionInfo(govActionID: GovActionID) async throws -> GovActionInfo
 }
 
 // MARK: - Default Implementation

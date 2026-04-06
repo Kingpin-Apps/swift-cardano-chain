@@ -1030,4 +1030,110 @@ public class BlockFrostChainContext: ChainContext {
             status: status
         )
     }
+    
+    /// Get the governance action information for a given governance action ID.
+    /// - Parameter govActionID: The identifier of the governance action.
+    /// - Returns: The `GovActionInfo` object containing information about the governance action.
+    public func govActionInfo(govActionID: GovActionID) async throws -> GovActionInfo {
+        let response = try await api.client.getGovernanceProposalsTxHashCertIndex(
+            .init(
+                path: .init(
+                    txHash: govActionID.transactionID.payload.toHex,
+                    certIndex: Int(govActionID.govActionIndex)
+                )
+            )
+        )
+        let govActionData = try response.ok.body.json
+        
+        var govAction: GovAction = .infoAction(.init())
+        
+        switch govActionData.governanceType {
+        case .infoAction:
+            govAction = .infoAction(.init())
+        case .hardForkInitiation:
+            let paramsResponse = try await api.client.getGovernanceProposalsTxHashCertIndexParameters(
+                .init(path: .init(
+                    txHash: govActionID.transactionID.payload.toHex,
+                    certIndex: Int(govActionID.govActionIndex)
+                ))
+            )
+            let params = try paramsResponse.ok.body.json.parameters
+            govAction = .hardForkInitiationAction(.init(
+                id: nil,
+                protocolVersion: ProtocolVersion(
+                    major: params.protocolMajorVer ?? 0,
+                    minor: params.protocolMinorVer ?? 0
+                )
+            ))
+        case .parameterChange:
+            let paramsResponse = try await api.client.getGovernanceProposalsTxHashCertIndexParameters(
+                .init(path: .init(
+                    txHash: govActionID.transactionID.payload.toHex,
+                    certIndex: Int(govActionID.govActionIndex)
+                ))
+            )
+            let params = try paramsResponse.ok.body.json.parameters
+            
+            // Construct ProtocolParamUpdate from Blockfrost params
+            let update = ProtocolParamUpdate(
+                minFeeA: params.minFeeA != nil ? Coin(params.minFeeA!) : nil,
+                minFeeB: params.minFeeB != nil ? Coin(params.minFeeB!) : nil,
+                maxBlockBodySize: params.maxBlockSize != nil ? UInt32(params.maxBlockSize!) : nil,
+                maxTransactionSize: params.maxTxSize != nil ? UInt32(params.maxTxSize!) : nil,
+                maxBlockHeaderSize: params.maxBlockHeaderSize != nil ? UInt16(params.maxBlockHeaderSize!) : nil,
+                keyDeposit: params.keyDeposit != nil ? Coin(Int(params.keyDeposit!)!) : nil,
+                poolDeposit: params.poolDeposit != nil ? Coin(Int(params.poolDeposit!)!) : nil,
+                maximumEpoch: params.eMax != nil ? EpochInterval(params.eMax!) : nil,
+                nOpt: params.nOpt != nil ? UInt16(params.nOpt!) : nil,
+                poolPledgeInfluence: params.a0 != nil ? try? NonNegativeInterval(from: .float(params.a0!)) : nil,
+                expansionRate: params.rho != nil ? try? UnitInterval(from: .float(params.rho!)) : nil,
+                treasuryGrowthRate: params.tau != nil ? try? UnitInterval(from: .float(params.tau!)) : nil,
+                decentralizationConstant: params.decentralisationParam != nil ? try? UnitInterval(from: .float(params.decentralisationParam!)) : nil,
+                extraEntropy: params.extraEntropy != nil ? 0 : nil, // Placeholder as extraEntropy in ProtocolParamUpdate is UInt32
+                protocolVersion: (params.protocolMajorVer != nil && params.protocolMinorVer != nil) ? ProtocolVersion(major: params.protocolMajorVer!, minor: params.protocolMinorVer!) : nil,
+                minPoolCost: params.minPoolCost != nil ? Coin(Int(params.minPoolCost!)!) : nil,
+                adaPerUtxoByte: params.coinsPerUtxoSize != nil ? Coin(Int(params.coinsPerUtxoSize!)!) : nil,
+                costModels: nil, // Mapping cost models is complex due to different versions
+                executionCosts: (params.priceMem != nil && params.priceStep != nil) ? try? ExUnitPrices(from: .list([.float(params.priceMem!), .float(params.priceStep!)])) : nil,
+                maxTxExUnits: (params.maxTxExMem != nil && params.maxTxExSteps != nil) ? try? ExUnits(from: .list([.uint(UInt(params.maxTxExMem!)!), .uint(UInt(params.maxTxExSteps!)!)])) : nil,
+                maxBlockExUnits: (params.maxBlockExMem != nil && params.maxBlockExSteps != nil) ? try? ExUnits(from: .list([.uint(UInt(params.maxBlockExMem!)!), .uint(UInt(params.maxBlockExSteps!)!)])) : nil,
+                maxValueSize: params.maxValSize != nil ? UInt32(params.maxValSize!) : nil,
+                collateralPercentage: params.collateralPercent != nil ? UInt16(params.collateralPercent!) : nil,
+                maxCollateralInputs: params.maxCollateralInputs != nil ? UInt16(params.maxCollateralInputs!) : nil
+            )
+            govAction = .parameterChangeAction(ParameterChangeAction(id: govActionID, protocolParamUpdate: update, policyHash: nil))
+        case .noConfidence:
+            govAction = .noConfidence(.init(id: govActionID)) // Using same ID as placeholder
+        case .newCommittee:
+            govAction = .updateCommittee(.init(id: govActionID, coldCredentials: [], credentialEpochs: [:], interval: try! UnitInterval(from: .float(0.5))))
+        case .newConstitution:
+            govAction = .newConstitution(.init(id: govActionID, constitution: .init(anchor: .init(anchorUrl: try! Url(""), anchorDataHash: .init(payload: Data())), scriptHash: nil)))
+        case .treasuryWithdrawals:
+            let withdrawalsResponse = try await api.client.getGovernanceProposalsTxHashCertIndexWithdrawals(
+                .init(path: .init(
+                    txHash: govActionID.transactionID.payload.toHex,
+                    certIndex: Int(govActionID.govActionIndex)
+                ))
+            )
+            let withdrawalsData = try withdrawalsResponse.ok.body.json
+            var withdrawals: [RewardAccount: Coin] = [:]
+            for item in withdrawalsData {
+                withdrawals[RewardAccount(Data(hexString: item.stakeAddress) ?? Data())] = Coin(Int(item.amount)!)
+            }
+            govAction = .treasuryWithdrawalsAction(.init(withdrawals: withdrawals, policyHash: nil))
+        @unknown default:
+            govAction = .infoAction(.init())
+        }
+        
+        return GovActionInfo(
+            govActionId: govActionID,
+            govAction: govAction,
+            proposedIn: nil,
+            expiresAfter: UInt64(govActionData.expiration),
+            ratifiedEpoch: govActionData.ratifiedEpoch != nil ? UInt64(govActionData.ratifiedEpoch!) : nil,
+            enactedEpoch: govActionData.enactedEpoch != nil ? UInt64(govActionData.enactedEpoch!) : nil,
+            droppedEpoch: govActionData.droppedEpoch != nil ? UInt64(govActionData.droppedEpoch!) : nil,
+            expiredEpoch: govActionData.expiredEpoch != nil ? UInt64(govActionData.expiredEpoch!) : nil
+        )
+    }
 }

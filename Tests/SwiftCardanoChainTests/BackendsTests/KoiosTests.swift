@@ -342,4 +342,28 @@ struct KoiosChainContextTests {
         
         #expect(drepInfo == expectedDRepInfo)
     }
+
+    @Test
+    func testGovActionInfo() async throws {
+        let chainContext = try await KoiosChainContext(
+            network: .preview,
+            client: Client(
+                serverURL: try SwiftKoios.Network.preview.url(),
+                transport: KoiosMockTransport()
+            )
+        )
+        
+        
+        let txHash = "2dd15e0ef6e6a17841cb9541c27724072ce4d4b79b91e58432fbaa32d9572531"
+        let govActionID = GovActionID(
+            transactionID: TransactionId(payload: Data(hex: txHash)),
+            govActionIndex: 0
+        )
+        
+        let govActionInfo = try await chainContext.govActionInfo(govActionID: govActionID)
+        
+        #expect(govActionInfo.govActionId == govActionID)
+        #expect(govActionInfo.proposedIn == 100)
+        #expect(govActionInfo.expiresAfter == 120)
+    }
 }

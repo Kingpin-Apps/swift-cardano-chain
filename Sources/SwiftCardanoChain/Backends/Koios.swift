@@ -448,8 +448,8 @@ public class KoiosChainContext: ChainContext {
             let isSpent = result.isSpent ?? false
 
             guard let txHashStr = result.txHash,
-                  let txIndexDouble = result.txIndex,
-                  let addressStr = result.address
+                let txIndexDouble = result.txIndex,
+                let addressStr = result.address
             else {
                 return nil
             }
@@ -464,7 +464,7 @@ public class KoiosChainContext: ChainContext {
 
             // Parse lovelace from value field
             if let valueContainer = result.value,
-               let valueStr = valueContainer.value as? String
+                let valueStr = valueContainer.value as? String
             {
                 lovelaceAmount = UInt64(valueStr) ?? 0
             }
@@ -473,8 +473,8 @@ public class KoiosChainContext: ChainContext {
             if let assetList = result.assetList {
                 for asset in assetList {
                     guard let policyIdStr = asset.policyId?.value as? String,
-                          let assetNameStr = asset.assetName?.value as? String,
-                          let quantityStr = asset.quantity
+                        let assetNameStr = asset.assetName?.value as? String,
+                        let quantityStr = asset.quantity
                     else { continue }
 
                     let policyId = try ScriptHash(from: .string(policyIdStr))
@@ -494,13 +494,13 @@ public class KoiosChainContext: ChainContext {
             var script: ScriptType? = nil
 
             if let datumHashValue = result.datumHash?.value as? String,
-               result.inlineDatum == nil
+                result.inlineDatum == nil
             {
                 datumHash = try DatumHash(from: .string(datumHashValue))
             }
 
             if let inlineDatum = result.inlineDatum?.value as? String,
-               let datumData = Data(hexString: inlineDatum)
+                let datumData = Data(hexString: inlineDatum)
             {
                 let plutusData = try PlutusData.fromCBOR(data: datumData)
                 datumOption = DatumOption(datum: plutusData)
@@ -845,7 +845,7 @@ public class KoiosChainContext: ChainContext {
 
         var poolMetadata: PoolMetadata? = nil
         if let urlString = pool.metaUrl, let hashString = pool.metaHash,
-           let hashData = Data(hexString: hashString)
+            let hashData = Data(hexString: hashString)
         {
             poolMetadata = try await PoolMetadata.fetch(
                 url: try Url(urlString),
@@ -864,7 +864,7 @@ public class KoiosChainContext: ChainContext {
             relays: relays,
             poolMetadata: poolMetadata
         )
-        
+
         let livePledge: UInt? = pool.livePledge.flatMap { UInt($0) }
         let liveStake: UInt? = pool.liveStake.flatMap { UInt($0) }
         let activeStake: UInt? = pool.activeStake.flatMap { UInt($0) }
@@ -910,24 +910,26 @@ public class KoiosChainContext: ChainContext {
                 )
             )
         )
-        
+
         let totalsPayload = try totalsResponse.ok.body.json
-        
+
         guard totalsPayload.count == 1 else {
-            throw CardanoChainError.koiosError("Unexpected response format for totals endpoint: expected 1 item, got \(totalsPayload.count)")
+            throw CardanoChainError.koiosError(
+                "Unexpected response format for totals endpoint: expected 1 item, got \(totalsPayload.count)"
+            )
         }
-        
+
         guard let treasuryStr = totalsPayload[0].treasury else {
             throw CardanoChainError.koiosError("Treasury balance is missing in totals response")
         }
-        
+
         guard let treasuryInt = UInt64(treasuryStr) else {
             throw CardanoChainError.valueError("Failed to parse treasury balance")
         }
-        
+
         return Coin(treasuryInt)
     }
-    
+
     /// Get the DRep information.
     /// - Parameter drep: The `DRep` object.
     /// - Returns: The `DRepInfo` object containing information about the DRep.
@@ -937,7 +939,7 @@ public class KoiosChainContext: ChainContext {
             body: .json(.init(_drepIds: [drepId]))
         )
         let payload = try response.ok.body.json
-        
+
         guard let info = payload.first else {
             return DRepInfo(
                 active: false,
@@ -949,47 +951,48 @@ public class KoiosChainContext: ChainContext {
                 status: .notRegistered
             )
         }
-        
+
         let active = info.active ?? false
         let status: DRepStatus?
-        
+
         switch info.drepStatus {
-            case .registered:
-                status = .registered
-            case .deregistered:
-                status = .retired
-            case .notRegistered:
-                status = .notRegistered
-            default:
-                status = nil
+        case .registered:
+            status = .registered
+        case .deregistered:
+            status = .retired
+        case .notRegistered:
+            status = .notRegistered
+        default:
+            status = nil
         }
-        
+
         let stake: Coin
         if let amountStr = info.amount, let amountInt = UInt64(amountStr) {
             stake = Coin(amountInt)
         } else {
             stake = Coin(0)
         }
-        
+
         let deposit: Coin?
         if let depositStr = info.deposit, let depositInt = UInt64(depositStr) {
             deposit = Coin(depositInt)
         } else {
             deposit = nil
         }
-        
+
         let expiry: UInt64? = info.expiresEpochNo.map { UInt64($0) }
-        
+
         var anchor: Anchor? = nil
         if let urlStr = info.metaUrl, let hashStr = info.metaHash,
-           !urlStr.isEmpty, !hashStr.isEmpty,
-           let hashData = Data(hexString: hashStr) {
+            !urlStr.isEmpty, !hashStr.isEmpty,
+            let hashData = Data(hexString: hashStr)
+        {
             anchor = try? Anchor(
                 anchorUrl: Url(urlStr),
                 anchorDataHash: AnchorDataHash(payload: hashData)
             )
         }
-        
+
         return DRepInfo(
             active: active,
             drep: drep,
@@ -999,5 +1002,100 @@ public class KoiosChainContext: ChainContext {
             expiry: expiry,
             status: status
         )
+    }
+
+    /// Get the governance action information for a given governance action ID.
+    /// - Parameter govActionID: The identifier of the governance action.
+    /// - Returns: The `GovActionInfo` object containing information about the governance action.
+    public func govActionInfo(govActionID: GovActionID) async throws -> GovActionInfo {
+        do {
+            let proposalRef = try govActionID.id()
+            let response = try await api.client.proposalList()
+            let proposals = try response.ok.body.json
+            let txHash = govActionID.transactionID.payload.toHex.lowercased()
+            let proposalIndex = Int(govActionID.govActionIndex)
+            
+            print(proposalRef)
+
+            guard
+                let proposal = proposals.first(where: {
+                    if $0.proposalId == proposalRef {
+                        return true
+                    }
+
+                    let proposalTxHash = ($0.proposalTxHash?.value as? String)?.lowercased()
+                    let idx = $0.proposalIndex.map(Int.init)
+                    
+                    return proposalTxHash == txHash && idx == proposalIndex
+                })
+            else {
+                throw CardanoChainError.valueError("Governance action not found: \(govActionID)")
+            }
+
+            var govAction: GovAction = .infoAction(.init())
+
+            if let type = proposal.proposalType {
+                switch type {
+                case .parameterChange:
+                    govAction = .parameterChangeAction(
+                        ParameterChangeAction(
+                            id: govActionID,
+                            protocolParamUpdate: ProtocolParamUpdate(),
+                            policyHash: nil
+                        ))
+                case .hardForkInitiation:
+                    govAction = .hardForkInitiationAction(
+                        HardForkInitiationAction(
+                            id: nil,
+                            protocolVersion: ProtocolVersion(major: 0, minor: 0)
+                        ))
+                case .treasuryWithdrawals:
+                    govAction = .treasuryWithdrawalsAction(
+                        TreasuryWithdrawalsAction(
+                            withdrawals: [:],
+                            policyHash: nil
+                        ))
+                case .noConfidence:
+                    govAction = .noConfidence(NoConfidence(id: govActionID))
+                case .newCommittee:
+                    govAction = .updateCommittee(
+                        UpdateCommittee(
+                            id: govActionID,
+                            coldCredentials: [],
+                            credentialEpochs: [:],
+                            interval: try! UnitInterval(from: .float(0.5))
+                        ))
+                case .newConstitution:
+                    govAction = .newConstitution(
+                        NewConstitution(
+                            id: govActionID,
+                            constitution: Constitution(
+                                anchor: Anchor(
+                                    anchorUrl: try! Url(""),
+                                    anchorDataHash: AnchorDataHash(payload: Data())
+                                ),
+                                scriptHash: nil
+                            )
+                        ))
+                default:
+                    govAction = .infoAction(.init())
+                }
+            }
+
+            return GovActionInfo(
+                govActionId: govActionID,
+                govAction: govAction,
+                proposedIn: proposal.proposedEpoch.map { UInt64($0) },
+                expiresAfter: proposal.expiration.map { UInt64($0) },
+                ratifiedEpoch: proposal.ratifiedEpoch.map { UInt64($0) },
+                enactedEpoch: proposal.enactedEpoch.map { UInt64($0) },
+                droppedEpoch: proposal.droppedEpoch.map { UInt64($0) },
+                expiredEpoch: proposal.expiredEpoch.map { UInt64($0) }
+            )
+        } catch let error as CardanoChainError {
+            throw error
+        } catch {
+            throw CardanoChainError.koiosError("Failed to get proposal info: \(error)")
+        }
     }
 }

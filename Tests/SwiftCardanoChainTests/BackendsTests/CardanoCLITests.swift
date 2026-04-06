@@ -670,4 +670,32 @@ struct CardanoCLIContextTests {
         
         #expect(drepInfo == result)
     }
+
+    @Test
+    func testGovActionInfo() async throws {
+        let config = createMockConfig()
+        let commandRunner = createCardaonCLIMockCommandRunner(config: config)
+        let cli = try await CardanoCLI(
+            configuration: config,
+            commandRunner: commandRunner
+        )
+        let chainContext = try await CardanoCliChainContext(cli: cli)
+        
+        let txHash = "2dd15e0ef6e6a17841cb9541c27724072ce4d4b79b91e58432fbaa32d9572531"
+        let govActionID = GovActionID(
+            transactionID: TransactionId(payload: Data(hex: txHash)),
+            govActionIndex: 1
+        )
+        
+        let govActionInfo = try await chainContext.govActionInfo(govActionID: govActionID)
+        
+        #expect(govActionInfo.govActionId == govActionID)
+        if case .treasuryWithdrawalsAction(let action) = govActionInfo.govAction {
+            #expect(action.withdrawals.count == 1)
+        } else {
+            Issue.record("Expected treasuryWithdrawalsAction, got \(govActionInfo.govAction)")
+        }
+        #expect(govActionInfo.proposedIn == 100)
+        #expect(govActionInfo.expiresAfter == 120)
+    }
 }
