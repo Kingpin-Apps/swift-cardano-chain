@@ -119,13 +119,13 @@ public protocol ChainContext: CustomStringConvertible, CustomDebugStringConverti
 }
 
 // MARK: - Default Implementation
-extension ChainContext {
+public extension ChainContext {
     /// Submit a transaction to the blockchain.
     ///
     /// - Parameter tx: The transaction to be submitted.
     /// - Throws: `InvalidArgumentException` when the transaction is invalid.
     /// - Throws: `TransactionFailedException` when submission fails.
-    public func submitTx(tx: TransactionData) async throws -> String {
+    func submitTx(tx: TransactionData) async throws -> String {
         switch tx {
         case .transaction(let transaction):
             return try await submitTxCBOR(cbor: transaction.toCBORData())
@@ -140,7 +140,7 @@ extension ChainContext {
     ///
     /// - Parameter tx: The transaction to be evaluated.
     /// - Returns: A dictionary mapping redeemer strings to execution units.
-    public func evaluateTx(tx: Transaction) async throws -> [String: ExecutionUnits] {
+    func evaluateTx(tx: Transaction) async throws -> [String: ExecutionUnits] {
         return try await evaluateTxCBOR(cbor: tx.toCBORData())
     }
     
@@ -175,6 +175,7 @@ extension ChainContext {
     func stakePoolInfo(poolId: String) async throws -> StakePoolInfo {
         throw CardanoChainError.notImplemented("stakePoolInfo(poolId:) is not implemented for \(Self.self).")
     }
+    
     func treasury() async throws -> Coin {
         throw CardanoChainError.notImplemented("treasury() is not implemented for \(Self.self).")
     }
