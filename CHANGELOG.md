@@ -1,3 +1,9 @@
+## 0.2.14 (2026-04-07)
+
+### Fix
+
+- add CardanoChainError.notImplemented
+
 ## 0.2.13 (2026-04-06)
 
 ### Fix
