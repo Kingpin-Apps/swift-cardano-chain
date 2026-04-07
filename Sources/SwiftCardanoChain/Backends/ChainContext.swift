@@ -143,6 +143,53 @@ extension ChainContext {
     public func evaluateTx(tx: Transaction) async throws -> [String: ExecutionUnits] {
         return try await evaluateTxCBOR(cbor: tx.toCBORData())
     }
+    
+    func utxos(address: Address) async throws -> [UTxO] {
+        throw CardanoChainError.notImplemented("utxos(address:) is not implemented for \(Self.self).")
+    }
+    
+    func utxo(input: TransactionInput) async throws -> (UTxO, isSpent: Bool)? {
+        throw CardanoChainError.notImplemented("utxo(input:) is not implemented for \(Self.self).")
+    }
+    
+    func submitTxCBOR(cbor: Data) async throws -> String {
+        throw CardanoChainError.notImplemented("submitTxCBOR(cbor:) is not implemented for \(Self.self).")
+    }
+    
+    func evaluateTxCBOR(cbor: Data) async throws -> [String: ExecutionUnits] {
+        throw CardanoChainError.notImplemented("evaluateTxCBOR(cbor:) is not implemented for \(Self.self).")
+    }
+    
+    func stakeAddressInfo(address: Address) async throws -> [StakeAddressInfo] {
+        throw CardanoChainError.notImplemented("stakeAddressInfo(address:) is not implemented for \(Self.self).")
+    }
+    
+    func stakePools() async throws -> [PoolOperator] {
+        throw CardanoChainError.notImplemented("stakePools() is not implemented for \(Self.self).")
+    }
+    
+    func kesPeriodInfo(pool: PoolOperator?, opCert: OperationalCertificate?) async throws -> KESPeriodInfo {
+        throw CardanoChainError.notImplemented("kesPeriodInfo(pool:opCert:) is not implemented for \(Self.self).")
+    }
+    
+    func stakePoolInfo(poolId: String) async throws -> StakePoolInfo {
+        throw CardanoChainError.notImplemented("stakePoolInfo(poolId:) is not implemented for \(Self.self).")
+    }
+    func treasury() async throws -> Coin {
+        throw CardanoChainError.notImplemented("treasury() is not implemented for \(Self.self).")
+    }
+    
+    func drepInfo(drep: DRep) async throws -> DRepInfo {
+        throw CardanoChainError.notImplemented("drepInfo(drep:) is not implemented for \(Self.self).")
+    }
+    
+    func govActionInfo(govActionID: GovActionID) async throws -> GovActionInfo {
+        throw CardanoChainError.notImplemented("govActionInfo(govActionID:) is not implemented for \(Self.self).")
+    }
+    
+    func committeeMemberInfo(committeeMember: CommitteeColdCredential) async throws -> CommitteeMemberInfo {
+        throw CardanoChainError.notImplemented("committeeMemberInfo(committeeMember:) is not implemented for \(Self.self).")
+    }
 }
 
 // MARK: - StringConvertible Implementation

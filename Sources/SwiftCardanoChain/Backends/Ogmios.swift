@@ -1117,7 +1117,7 @@ public class OgmiosChainContext: ChainContext {
                     policyHash: nil
                 ))
         case .treasuryWithdrawals:
-            var rewardWithdrawals: [SwiftCardanoCore.RewardAccount: Coin] = [:]
+            let rewardWithdrawals: [SwiftCardanoCore.RewardAccount: Coin] = [:]
             // Ogmios withdrawals mapping would go here
             govAction = .treasuryWithdrawalsAction(
                 TreasuryWithdrawalsAction(
