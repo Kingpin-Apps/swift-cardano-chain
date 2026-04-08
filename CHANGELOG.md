@@ -1,3 +1,9 @@
+## 0.2.16 (2026-04-08)
+
+### Fix
+
+- sort cost model keys in Blockfrost and update to latest core
+
 ## 0.2.15 (2026-04-07)
 
 ### Fix
