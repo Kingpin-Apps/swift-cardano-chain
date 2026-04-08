@@ -193,15 +193,12 @@ public class BlockFrostChainContext: ChainContext {
                 committeeMaxTermLength: Int(protocolParams.committeeMaxTermLength!)!,
                 committeeMinSize: Int(protocolParams.committeeMinSize!)!,
                 costModels: ProtocolParametersCostModels(
-                    PlutusV1: (costModels["PlutusV1"] as! [String: Int]).map { key, value in
-                        return value
-                    },
-                    PlutusV2: (costModels["PlutusV2"] as! [String: Int]).map { key, value in
-                        return value
-                    },
-                    PlutusV3: (costModels["PlutusV3"] as! [String: Int]).map { key, value in
-                        return value
-                    }
+                    PlutusV1: (costModels["PlutusV1"] as! [String: Int])
+                        .sorted { $0.key < $1.key }.map { $0.value },
+                    PlutusV2: (costModels["PlutusV2"] as! [String: Int])
+                        .sorted { $0.key < $1.key }.map { $0.value },
+                    PlutusV3: (costModels["PlutusV3"] as! [String: Int])
+                        .sorted { $0.key < $1.key }.map { $0.value }
                 ),
                 dRepActivity: Int(protocolParams.drepActivity!)!,
                 dRepDeposit: Int(protocolParams.drepDeposit!)!,
