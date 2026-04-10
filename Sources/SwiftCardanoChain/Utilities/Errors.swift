@@ -6,6 +6,7 @@ enum CardanoChainError: Error, CustomStringConvertible, Equatable {
     case invalidArgument(String?)
     case invalidAdaHandle(String?)
     case koiosError(String?)
+    case offlineTransferError(String?)
     case transactionFailed(String?)
     case operationError(String?)
     case unsupportedNetwork(String?)
@@ -24,6 +25,8 @@ enum CardanoChainError: Error, CustomStringConvertible, Equatable {
                 return message ?? "Invalid argument error occurred."
             case .koiosError(let message):
                 return message ?? "Failed to retrieve data from Koios."
+            case .offlineTransferError(let message):
+                return message ?? "Offline transfer file error."
             case .operationError(let message):
                 return message ?? "Operation failed error occurred."
             case .transactionFailed(let message):
