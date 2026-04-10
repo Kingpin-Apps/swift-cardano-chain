@@ -27,12 +27,13 @@ struct ChainContextExtensionsTests {
     func testEvaluateTxForwardsCBOR() async throws {
         let context = RecordingChainContext()
         let tx = try Transaction.fromCBORHex(testCborHex)
-        let txCBOR = try tx.toCBORData()
 
         let result = try await context.evaluateTx(tx: tx)
 
+        let evaluatedCBOR = try #require(context.evaluatedCBOR)
+        let evaluatedTx = try Transaction.fromCBOR(data: evaluatedCBOR)
         #expect(result == context.evaluateResult)
-        #expect(context.evaluatedCBOR == txCBOR)
+        #expect(evaluatedTx.id == tx.id)
     }
 
     @Test("description and debugDescription use ChainContext extension defaults")

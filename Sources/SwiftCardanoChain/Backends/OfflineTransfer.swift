@@ -198,7 +198,7 @@ public class OfflineTransferChainContext: ChainContext {
         )
         let txEntry = OfflineTransferTransaction(txJson: txJSON)
         let historyEntry = OfflineTransferHistory(
-            action: "SAVE_TRANSACTION:\(txHash)"
+            action: .saveTransaction(txId: txHash)
         )
 
         offlineTransfer.transactions.append(txEntry)

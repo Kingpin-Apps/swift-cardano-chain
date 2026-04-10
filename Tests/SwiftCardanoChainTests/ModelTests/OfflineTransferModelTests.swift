@@ -32,15 +32,14 @@ struct OfflineTransferComponentModelTests {
 
     @Test("history and file entries auto-populate ISO8601 dates")
     func componentDefaultsPopulateDates() throws {
-        let history = OfflineTransferHistory(action: "NEW")
+        let history = OfflineTransferHistory(action: .new)
         let fileEntry = OfflineTransferFileEntry(name: "payment.skey", size: 128)
 
-        #expect(history.action == "NEW")
+        #expect(history.action == .new)
         #expect(history.date != nil)
         #expect(fileEntry.name == "payment.skey")
         #expect(fileEntry.size == 128)
         #expect(fileEntry.date != nil)
-        #expect(ISO8601DateFormatter().date(from: history.date!) != nil)
         #expect(ISO8601DateFormatter().date(from: fileEntry.date!) != nil)
     }
 
@@ -78,6 +77,160 @@ struct OfflineTransferComponentModelTests {
     }
 }
 
+@Suite("HistoryType.from(_:) Tests")
+struct HistoryTypeFromStringTests {
+
+    // MARK: Simple cases
+
+    @Test("clearFiles") func clearFiles() {
+        #expect(HistoryType.from("attached files cleared") == .clearFiles)
+    }
+
+    @Test("clearHistory") func clearHistory() {
+        #expect(HistoryType.from("history cleared") == .clearHistory)
+    }
+
+    @Test("clearTransactions") func clearTransactions() {
+        #expect(HistoryType.from("cleared all transactions") == .clearTransactions)
+    }
+
+    @Test("new") func new() {
+        #expect(HistoryType.from("new file created") == .new)
+    }
+
+    // MARK: Parameterised cases
+
+    @Test("addUtxoInfo") func addUtxoInfo() {
+        #expect(HistoryType.from("added utxo-info for wallet.json") == .addUtxoInfo(fileName: "wallet.json"))
+    }
+
+    @Test("addStakeAddr") func addStakeAddr() {
+        #expect(HistoryType.from("added stake address rewards-state for stake1abc") == .addStakeAddr(fileName: "stake1abc"))
+    }
+
+    @Test("attach") func attach() {
+        #expect(HistoryType.from("attached file payment.skey") == .attach(fileName: "payment.skey"))
+    }
+
+    @Test("extractedFile") func extractedFile() {
+        #expect(HistoryType.from("extracted file payment.vkey") == .extractedFile(fileName: "payment.vkey"))
+    }
+
+    @Test("saveTransaction") func saveTransaction() {
+        #expect(HistoryType.from("tx save abc123") == .saveTransaction(txId: "abc123"))
+    }
+
+    @Test("submitTransaction") func submitTransaction() {
+        #expect(
+            HistoryType.from("tx submit abc123 - utxo from Alice to Bob")
+            == .submitTransaction(txId: "abc123", fromName: "Alice", toName: "Bob")
+        )
+    }
+
+    @Test("submitRewardsTransaction") func submitRewardsTransaction() {
+        #expect(
+            HistoryType.from("tx submit abc123 - withdrawal from stake1abc to Bob")
+            == .submitRewardsTransaction(txId: "abc123", stakeName: "stake1abc", toName: "Bob")
+        )
+    }
+
+    @Test("submitStakeTransaction") func submitStakeTransaction() {
+        #expect(
+            HistoryType.from("tx submit abc123 - stake-registration for stake1abc, payment via Alice")
+            == .submitStakeTransaction(txId: "abc123", transactionType: "stake-registration", stakeName: "stake1abc", fromName: "Alice")
+        )
+    }
+
+    @Test("submitPoolTransaction") func submitPoolTransaction() {
+        #expect(
+            HistoryType.from("tx submit abc123 - pool-registration for Pool TICK, payment via Alice")
+            == .submitPoolTransaction(txId: "abc123", transactionType: "pool-registration", poolTicker: "TICK", fromName: "Alice")
+        )
+    }
+
+    @Test("signedPoolRegistrationTransaction") func signedPoolRegistrationTransaction() {
+        #expect(
+            HistoryType.from("signed pool registration transaction for TICK, payment via Alice")
+            == .signedPoolRegistrationTransaction(poolTicker: "TICK", payName: "Alice")
+        )
+    }
+
+    @Test("signedPoolDeregistrationTransaction") func signedPoolDeregistrationTransaction() {
+        #expect(
+            HistoryType.from("signed pool retirement transaction for TICK, payment via Alice")
+            == .signedPoolDeregistrationTransaction(poolTicker: "TICK", payName: "Alice")
+        )
+    }
+
+    @Test("signedStakeKeyRegistrationTransaction") func signedStakeKeyRegistrationTransaction() {
+        #expect(
+            HistoryType.from("signed staking key registration transaction for 'stake1abc', payment via 'addr1xyz'")
+            == .signedStakeKeyRegistrationTransaction(stakeAddr: "stake1abc", fromAddr: "addr1xyz")
+        )
+    }
+
+    @Test("signedDelegationTransaction") func signedDelegationTransaction() {
+        #expect(
+            HistoryType.from("signed delegation cert registration transaction for 'stake1abc', payment via 'addr1xyz'")
+            == .signedDelegationTransaction(stakeAddr: "stake1abc", fromAddr: "addr1xyz")
+        )
+    }
+
+    @Test("signedStakeKeyDeregistrationTransaction") func signedStakeKeyDeregistrationTransaction() {
+        #expect(
+            HistoryType.from("signed staking key deregistration transaction for 'stake1abc', payment via 'addr1xyz'")
+            == .signedStakeKeyDeregistrationTransaction(stakeAddr: "stake1abc", fromAddr: "addr1xyz")
+        )
+    }
+
+    @Test("signedUtxoTransaction") func signedUtxoTransaction() {
+        #expect(
+            HistoryType.from("signed utxo transaction from 'addr1abc' to 'addr1xyz'")
+            == .signedUtxoTransaction(fromAddr: "addr1abc", toAddr: "addr1xyz")
+        )
+    }
+
+    @Test("signedRewardsWithdrawal") func signedRewardsWithdrawal() {
+        #expect(
+            HistoryType.from("signed rewards withdrawal from 'stake1abc' to 'addr1xyz', payment via 'addr1pay'")
+            == .signedRewardsWithdrawal(stakeAddr: "stake1abc", toAddr: "addr1xyz", paymentAddr: "addr1pay")
+        )
+    }
+
+    // MARK: Fallback
+
+    @Test("unrecognised string falls back to raw") func rawFallback() {
+        #expect(HistoryType.from("some unknown action") == .raw("some unknown action"))
+    }
+
+    // MARK: Round-trip
+
+    @Test("all cases round-trip through description") func roundTrip() {
+        let cases: [HistoryType] = [
+            .clearFiles, .clearHistory, .clearTransactions, .new,
+            .addUtxoInfo(fileName: "wallet.json"),
+            .addStakeAddr(fileName: "stake1abc"),
+            .attach(fileName: "payment.skey"),
+            .extractedFile(fileName: "payment.vkey"),
+            .saveTransaction(txId: "abc123"),
+            .submitTransaction(txId: "abc123", fromName: "Alice", toName: "Bob"),
+            .submitRewardsTransaction(txId: "abc123", stakeName: "stake1abc", toName: "Bob"),
+            .submitStakeTransaction(txId: "abc123", transactionType: "stake-registration", stakeName: "stake1abc", fromName: "Alice"),
+            .submitPoolTransaction(txId: "abc123", transactionType: "pool-registration", poolTicker: "TICK", fromName: "Alice"),
+            .signedPoolRegistrationTransaction(poolTicker: "TICK", payName: "Alice"),
+            .signedPoolDeregistrationTransaction(poolTicker: "TICK", payName: "Alice"),
+            .signedStakeKeyRegistrationTransaction(stakeAddr: "stake1abc", fromAddr: "addr1xyz"),
+            .signedDelegationTransaction(stakeAddr: "stake1abc", fromAddr: "addr1xyz"),
+            .signedStakeKeyDeregistrationTransaction(stakeAddr: "stake1abc", fromAddr: "addr1xyz"),
+            .signedUtxoTransaction(fromAddr: "addr1abc", toAddr: "addr1xyz"),
+            .signedRewardsWithdrawal(stakeAddr: "stake1abc", toAddr: "addr1xyz", paymentAddr: "addr1pay"),
+        ]
+        for historyType in cases {
+            #expect(HistoryType.from(historyType.description) == historyType)
+        }
+    }
+}
+
 @Suite("OfflineTransfer Root Model Tests")
 struct OfflineTransferModelTests {
 
@@ -90,7 +243,7 @@ struct OfflineTransferModelTests {
         let transfer = OfflineTransfer(
             general: OfflineTransferGeneral(offlineVersion: "1.0.0", onlineVersion: "2.0.0"),
             protocol: OfflineTransferProtocolData(era: .conway, network: .preview),
-            history: [OfflineTransferHistory(date: "2025-01-01T00:00:00Z", action: "NEW")],
+            history: [OfflineTransferHistory(date: ISO8601DateFormatter().date(from: "2025-01-01T00:00:00Z"), action: .new)],
             files: [
                 OfflineTransferFileEntry(
                     name: "payment.vkey", date: "2025-01-01T01:00:00Z", size: 10)
@@ -163,8 +316,8 @@ struct OfflineTransferModelTests {
 
         #expect(FileManager.default.fileExists(atPath: path.string))
         #expect(transfer.history.count == 1)
-        #expect(transfer.history.first?.action == "NEW")
-        #expect(ISO8601DateFormatter().date(from: transfer.history.first?.date ?? "") != nil)
+        #expect(transfer.history.first?.action == .new)
+        #expect(transfer.history.first?.date != nil)
     }
 }
 

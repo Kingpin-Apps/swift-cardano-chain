@@ -116,7 +116,7 @@ private func makeContext(
             era: .conway,
             network: network
         ),
-        history: [OfflineTransferHistory(action: "NEW")],
+        history: [OfflineTransferHistory(action: .new)],
         addresses: [
             try AddressInfo(
                 name: addressInfo.name,
@@ -327,7 +327,8 @@ struct OfflineTransferChainContextTests {
 
         // History should record the save action.
         let saveEntry = reloaded.history.first(where: {
-            $0.action?.hasPrefix("SAVE_TRANSACTION:") == true
+            if case .saveTransaction = $0.action { return true }
+            return false
         })
         #expect(saveEntry != nil)
 
@@ -603,7 +604,7 @@ struct OfflineTransferChainContextTests {
                 era: .conway,
                 network: .preview
             ),
-            history: [OfflineTransferHistory(date: "2025-01-01T00:00:00Z", action: "NEW")],
+            history: [OfflineTransferHistory(date: ISO8601DateFormatter().date(from: "2025-01-01T00:00:00Z"), action: .new)],
             treasury: Coin(999)
         )
 
@@ -616,7 +617,7 @@ struct OfflineTransferChainContextTests {
         #expect(loaded.protocol.genesisParameters?.epochLength == 432_000)
         #expect(loaded.treasury == Coin(999))
         #expect(loaded.history.count == 1)
-        #expect(loaded.history[0].action == "NEW")
+        #expect(loaded.history[0].action == .new)
     }
 
     @Test("OfflineTransfer.new creates file on disk")
@@ -631,6 +632,6 @@ struct OfflineTransferChainContextTests {
 
         #expect(FileManager.default.fileExists(atPath: path.string))
         #expect(transfer.history.count == 1)
-        #expect(transfer.history[0].action == "NEW")
+        #expect(transfer.history[0].action == .new)
     }
 }

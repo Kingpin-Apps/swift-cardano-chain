@@ -54,16 +54,230 @@ public struct OfflineTransferProtocolData: Codable {
     }
 }
 
+// MARK: - HistoryType
+
+/// The action recorded in an ``OfflineTransferHistory`` entry.
+///
+/// Simple cases carry a fixed description string. Parameterised cases mirror
+/// Python's `partial`-based enum values: they carry their arguments as
+/// associated values and produce the same formatted string via ``description``.
+/// A ``raw(_:)`` catch-all case is used when decoding an unrecognised string
+/// from an existing JSON file.
+public enum HistoryType: Sendable, Equatable {
+    // MARK: Simple cases
+    case clearFiles
+    case clearHistory
+    case clearTransactions
+    case new
+
+    // MARK: Parameterised cases
+    case addUtxoInfo(fileName: String)
+    case addStakeAddr(fileName: String)
+    case attach(fileName: String)
+    case extractedFile(fileName: String)
+    case saveTransaction(txId: String)
+    case submitTransaction(txId: String, fromName: String, toName: String)
+    case submitRewardsTransaction(txId: String, stakeName: String, toName: String)
+    case submitStakeTransaction(txId: String, transactionType: String, stakeName: String, fromName: String)
+    case submitPoolTransaction(txId: String, transactionType: String, poolTicker: String, fromName: String)
+    case signedPoolRegistrationTransaction(poolTicker: String, payName: String)
+    case signedPoolDeregistrationTransaction(poolTicker: String, payName: String)
+    case signedStakeKeyRegistrationTransaction(stakeAddr: String, fromAddr: String)
+    case signedDelegationTransaction(stakeAddr: String, fromAddr: String)
+    case signedStakeKeyDeregistrationTransaction(stakeAddr: String, fromAddr: String)
+    case signedUtxoTransaction(fromAddr: String, toAddr: String)
+    case signedRewardsWithdrawal(stakeAddr: String, toAddr: String, paymentAddr: String)
+
+    // MARK: Fallback for decoding unrecognised strings from existing JSON files
+    case raw(String)
+}
+
+extension HistoryType: CustomStringConvertible {
+    public var description: String {
+        switch self {
+        case .clearFiles:
+            return "attached files cleared"
+        case .clearHistory:
+            return "history cleared"
+        case .clearTransactions:
+            return "cleared all transactions"
+        case .new:
+            return "new file created"
+        case .addUtxoInfo(let fileName):
+            return "added utxo-info for \(fileName)"
+        case .addStakeAddr(let fileName):
+            return "added stake address rewards-state for \(fileName)"
+        case .attach(let fileName):
+            return "attached file \(fileName)"
+        case .extractedFile(let fileName):
+            return "extracted file \(fileName)"
+        case .saveTransaction(let txId):
+            return "tx save \(txId)"
+        case .submitTransaction(let txId, let fromName, let toName):
+            return "tx submit \(txId) - utxo from \(fromName) to \(toName)"
+        case .submitRewardsTransaction(let txId, let stakeName, let toName):
+            return "tx submit \(txId) - withdrawal from \(stakeName) to \(toName)"
+        case .submitStakeTransaction(let txId, let transactionType, let stakeName, let fromName):
+            return "tx submit \(txId) - \(transactionType) for \(stakeName), payment via \(fromName)"
+        case .submitPoolTransaction(let txId, let transactionType, let poolTicker, let fromName):
+            return "tx submit \(txId) - \(transactionType) for Pool \(poolTicker), payment via \(fromName)"
+        case .signedPoolRegistrationTransaction(let poolTicker, let payName):
+            return "signed pool registration transaction for \(poolTicker), payment via \(payName)"
+        case .signedPoolDeregistrationTransaction(let poolTicker, let payName):
+            return "signed pool retirement transaction for \(poolTicker), payment via \(payName)"
+        case .signedStakeKeyRegistrationTransaction(let stakeAddr, let fromAddr):
+            return "signed staking key registration transaction for '\(stakeAddr)', payment via '\(fromAddr)'"
+        case .signedDelegationTransaction(let stakeAddr, let fromAddr):
+            return "signed delegation cert registration transaction for '\(stakeAddr)', payment via '\(fromAddr)'"
+        case .signedStakeKeyDeregistrationTransaction(let stakeAddr, let fromAddr):
+            return "signed staking key deregistration transaction for '\(stakeAddr)', payment via '\(fromAddr)'"
+        case .signedUtxoTransaction(let fromAddr, let toAddr):
+            return "signed utxo transaction from '\(fromAddr)' to '\(toAddr)'"
+        case .signedRewardsWithdrawal(let stakeAddr, let toAddr, let paymentAddr):
+            return "signed rewards withdrawal from '\(stakeAddr)' to '\(toAddr)', payment via '\(paymentAddr)'"
+        case .raw(let value):
+            return value
+        }
+    }
+}
+
+extension HistoryType {
+    /// Parse a `HistoryType` from its description string.
+    ///
+    /// Returns `.raw(string)` if the string does not match any known pattern.
+    public static func from(_ string: String) -> HistoryType {
+        // Simple fixed-string cases.
+        switch string {
+            case "attached files cleared":   return .clearFiles
+            case "history cleared":          return .clearHistory
+            case "cleared all transactions": return .clearTransactions
+            case "new file created":         return .new
+            default: break
+        }
+
+        // Strip a known prefix; returns the remainder or nil.
+        func drop(_ prefix: String) -> String? {
+            string.hasPrefix(prefix) ? String(string.dropFirst(prefix.count)) : nil
+        }
+
+        // Split a string on the first occurrence of a separator.
+        func split(_ sep: String, in s: String) -> (String, String)? {
+            guard let r = s.range(of: sep) else { return nil }
+            return (String(s[..<r.lowerBound]), String(s[r.upperBound...]))
+        }
+
+        if let rest = drop("added utxo-info for ") {
+            return .addUtxoInfo(fileName: rest)
+        }
+        if let rest = drop("added stake address rewards-state for ") {
+            return .addStakeAddr(fileName: rest)
+        }
+        if let rest = drop("attached file ") {
+            return .attach(fileName: rest)
+        }
+        if let rest = drop("extracted file ") {
+            return .extractedFile(fileName: rest)
+        }
+        if let rest = drop("tx save ") {
+            return .saveTransaction(txId: rest)
+        }
+        // "tx submit {txId} - …"
+        if let rest = drop("tx submit "), let (txId, suffix) = split(" - ", in: rest) {
+            if let fromRest = suffix.hasPrefix("utxo from ") ? String(suffix.dropFirst("utxo from ".count)) : nil,
+               let (fromName, toName) = split(" to ", in: fromRest) {
+                return .submitTransaction(txId: txId, fromName: fromName, toName: toName)
+            }
+            if let fromRest = suffix.hasPrefix("withdrawal from ") ? String(suffix.dropFirst("withdrawal from ".count)) : nil,
+               let (stakeName, toName) = split(" to ", in: fromRest) {
+                return .submitRewardsTransaction(txId: txId, stakeName: stakeName, toName: toName)
+            }
+            // Pool variant must be checked before the generic stake variant.
+            if let (typeAndPool, fromName) = split(", payment via ", in: suffix),
+               let (txType, poolTicker) = split(" for Pool ", in: typeAndPool) {
+                return .submitPoolTransaction(txId: txId, transactionType: txType, poolTicker: poolTicker, fromName: fromName)
+            }
+            if let (typeAndStake, fromName) = split(", payment via ", in: suffix),
+               let (txType, stakeName) = split(" for ", in: typeAndStake) {
+                return .submitStakeTransaction(txId: txId, transactionType: txType, stakeName: stakeName, fromName: fromName)
+            }
+        }
+        if let rest = drop("signed pool registration transaction for "),
+           let (ticker, payName) = split(", payment via ", in: rest) {
+            return .signedPoolRegistrationTransaction(poolTicker: ticker, payName: payName)
+        }
+        if let rest = drop("signed pool retirement transaction for "),
+           let (ticker, payName) = split(", payment via ", in: rest) {
+            return .signedPoolDeregistrationTransaction(poolTicker: ticker, payName: payName)
+        }
+        if let rest = drop("signed staking key registration transaction for '"),
+           let (stakeAddr, fromRest) = split("', payment via '", in: rest) {
+            return .signedStakeKeyRegistrationTransaction(stakeAddr: stakeAddr, fromAddr: String(fromRest.dropLast()))
+        }
+        if let rest = drop("signed delegation cert registration transaction for '"),
+           let (stakeAddr, fromRest) = split("', payment via '", in: rest) {
+            return .signedDelegationTransaction(stakeAddr: stakeAddr, fromAddr: String(fromRest.dropLast()))
+        }
+        if let rest = drop("signed staking key deregistration transaction for '"),
+           let (stakeAddr, fromRest) = split("', payment via '", in: rest) {
+            return .signedStakeKeyDeregistrationTransaction(stakeAddr: stakeAddr, fromAddr: String(fromRest.dropLast()))
+        }
+        if let rest = drop("signed utxo transaction from '"),
+           let (fromAddr, toRest) = split("' to '", in: rest) {
+            return .signedUtxoTransaction(fromAddr: fromAddr, toAddr: String(toRest.dropLast()))
+        }
+        if let rest = drop("signed rewards withdrawal from '"),
+           let (stakeAddr, toRest) = split("' to '", in: rest),
+           let (toAddr, payRest) = split("', payment via '", in: toRest) {
+            return .signedRewardsWithdrawal(stakeAddr: stakeAddr, toAddr: toAddr, paymentAddr: String(payRest.dropLast()))
+        }
+
+        return .raw(string)
+    }
+}
+
+extension HistoryType: Codable {
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(description)
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let value = try container.decode(String.self)
+        self = HistoryType.from(value)
+    }
+}
+
 // MARK: - OfflineTransferHistory
 
 /// A history entry recording an action performed on the offline transfer file.
-public struct OfflineTransferHistory: Codable, Sendable {
-    public var date: String?
-    public var action: String?
+public struct OfflineTransferHistory: Sendable {
+    public var date: Date?
+    public var action: HistoryType?
 
-    public init(date: String? = nil, action: String? = nil) {
-        self.date = date ?? ISO8601DateFormatter().string(from: Date())
+    public init(date: Date? = nil, action: HistoryType? = nil) {
+        self.date = date ?? Date()
         self.action = action
+    }
+}
+
+extension OfflineTransferHistory: Codable {
+    enum CodingKeys: String, CodingKey { case date, action }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        if let raw = try container.decodeIfPresent(String.self, forKey: .date) {
+            date = ISO8601DateFormatter().date(from: raw)
+        }
+        action = try container.decodeIfPresent(HistoryType.self, forKey: .action)
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        if let date {
+            try container.encode(ISO8601DateFormatter().string(from: date), forKey: .date)
+        }
+        try container.encodeIfPresent(action, forKey: .action)
     }
 }
 
@@ -289,9 +503,8 @@ public struct OfflineTransfer: Codable {
 
     /// Create a new, empty `OfflineTransfer` file with an initial history entry, save it, and return it.
     public static func new(at path: FilePath) throws -> OfflineTransfer {
-        let now = ISO8601DateFormatter().string(from: Date())
         let transfer = OfflineTransfer(
-            history: [OfflineTransferHistory(date: now, action: "NEW")]
+            history: [OfflineTransferHistory(action: .new)]
         )
         try transfer.save(to: path)
         return transfer

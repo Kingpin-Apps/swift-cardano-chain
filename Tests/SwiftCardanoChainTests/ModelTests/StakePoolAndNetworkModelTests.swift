@@ -93,10 +93,10 @@ struct StakePoolInfoModelTests {
 }
 
 private struct DummyNetworkValues: NetworkDependable {
-    var mainnet = "main"
-    var preprod: String? = "preprod"
-    var preview: String? = "preview"
-    var guildnet: String? = "guildnet"
+    var mainnet: String { "mainnet" }
+    var preprod: String? { "preprod" }
+    var preview: String? { "preview" }
+    var guildnet: String? { "guildnet" } 
 }
 
 @Suite("NetworkProtocols Model Tests")
@@ -106,7 +106,7 @@ struct NetworkDependableModelTests {
     func forNetworkReturnsConfiguredValue() {
         let values = DummyNetworkValues()
 
-        #expect(values.forNetwork(.mainnet) == "main")
+        #expect(values.forNetwork(.mainnet) == "mainnet")
         #expect(values.forNetwork(.preprod) == "preprod")
         #expect(values.forNetwork(.preview) == "preview")
         #expect(values.forNetwork(.guildnet) == "guildnet")
