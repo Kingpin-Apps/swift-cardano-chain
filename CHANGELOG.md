@@ -1,3 +1,9 @@
+## 0.3.1 (2026-04-10)
+
+### Fix
+
+- use enum tor history action
+
 ## 0.3.0 (2026-04-10)
 
 ### Feat
