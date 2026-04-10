@@ -4,8 +4,8 @@ import Testing
 
 @testable import SwiftCardanoChain
 
-@Suite("AdaHandleUtils Utilities Tests")
-struct AdaHandleUtilsUtilitiesTests {
+@Suite("AdaHandleUtils Tests")
+struct AdaHandleUtilsTests {
 
     @Suite("Normalization")
     struct NormalizationTests {
@@ -15,12 +15,105 @@ struct AdaHandleUtilsUtilitiesTests {
             #expect(normalizeHandle("$Alice") == "alice")
             #expect(normalizeHandle("  $ALICE@Sub  ") == "alice@sub")
             #expect(normalizeHandle("NoPrefix") == "noprefix")
+            #expect(normalizeHandle("$alice@bob") == "alice@bob")
         }
 
         @Test("isSubHandle detects @")
         func testIsSubHandle() {
             #expect(isSubHandle("alice@sub"))
             #expect(!isSubHandle("alice"))
+            #expect(isSubHandle("alice@bob@charlie"))
+        }
+    }
+
+    @Suite("Ada Handle Format Validation")
+    struct AdaHandleFormatValidationTests {
+
+        @Test("valid root handles return normalized lowercase values")
+        func testValidRootHandles() throws {
+            let validHandles = [
+                "$alice", "$bob123", "$my_handle", "$a-b.c", "$a", "$abcdefghijklmno",
+            ]
+
+            for handle in validHandles {
+                #expect(try checkAdaHandleFormat(handle) == handle.lowercased())
+            }
+        }
+
+        @Test("valid sub handles return normalized lowercase values")
+        func testValidSubHandles() throws {
+            let validHandles = ["$alice@bob", "$root1@sub2", "$my-handle@sub_domain"]
+
+            for handle in validHandles {
+                #expect(try checkAdaHandleFormat(handle) == handle.lowercased())
+            }
+        }
+
+        @Test("mixed-case handles normalize to lowercase")
+        func testMixedCaseHandleNormalization() throws {
+            #expect(try checkAdaHandleFormat("$ALICE") == "$alice")
+            #expect(try checkAdaHandleFormat("$MyHandle123") == "$myhandle123")
+        }
+
+        @Test("invalid handle formats throw")
+        func testInvalidHandleFormatsThrow() {
+            let invalidHandles: [String?] = [
+                "alice",
+                "$thishandleiswaytoolong",
+                "$",
+                "$alice!",
+                "$alice space",
+                nil,
+            ]
+
+            for handle in invalidHandles {
+                #expect(throws: (any Error).self) {
+                    _ = try checkAdaHandleFormat(handle)
+                }
+            }
+        }
+    }
+
+    @Suite("Root Ada Handle Validation")
+    struct RootHandleValidationTests {
+
+        @Test("valid root handles return true")
+        func testValidRootHandleValues() {
+            #expect(isValidAdaRootHandle("$alice"))
+            #expect(isValidAdaRootHandle("$bob123"))
+            #expect(isValidAdaRootHandle("$my_handle"))
+            #expect(isValidAdaRootHandle("$a-b.c"))
+        }
+
+        @Test("invalid root handles return false")
+        func testInvalidRootHandleValues() {
+            #expect(!isValidAdaRootHandle(nil))
+            #expect(!isValidAdaRootHandle("alice"))
+            #expect(!isValidAdaRootHandle("$"))
+            #expect(!isValidAdaRootHandle("$thisistoolongforhandle"))
+            #expect(!isValidAdaRootHandle("$alice@bob"))
+            #expect(!isValidAdaRootHandle("$alice!"))
+        }
+    }
+
+    @Suite("Sub Ada Handle Validation")
+    struct SubHandleValidationTests {
+
+        @Test("valid sub handles return true")
+        func testValidSubHandleValues() {
+            #expect(isValidAdaSubHandle("$alice@bob"))
+            #expect(isValidAdaSubHandle("$root1@sub2"))
+            #expect(isValidAdaSubHandle("$my-handle@sub_domain"))
+        }
+
+        @Test("invalid sub handles return false")
+        func testInvalidSubHandleValues() {
+            #expect(!isValidAdaSubHandle(nil))
+            #expect(!isValidAdaSubHandle("$alice"))
+            #expect(!isValidAdaSubHandle("alice@bob"))
+            #expect(!isValidAdaSubHandle("$@bob"))
+            #expect(!isValidAdaSubHandle("$alice@"))
+            #expect(!isValidAdaSubHandle("$thisistoolongforrootpart@bob"))
         }
     }
 
@@ -32,6 +125,8 @@ struct AdaHandleUtilsUtilitiesTests {
             #expect(convertAssetNameToHex("alice") == "616c696365")
             #expect(convertAssetNameToHex("A") == "41")
             #expect(convertAssetNameToHex("") == "")
+            #expect(convertAssetNameToHex("ada") == "616461")
+            #expect(convertAssetNameToHex("ab") == "6162")
         }
 
         @Test("assetFingerprint combines policy and asset name hex")
@@ -61,6 +156,9 @@ struct AdaHandleUtilsUtilitiesTests {
             #expect(throws: AdaHandleError.self) {
                 _ = try getPolicyId(for: .sanchonet)
             }
+            #expect(throws: AdaHandleError.self) {
+                _ = try getPolicyId(for: .custom(9999))
+            }
         }
     }
 
@@ -86,10 +184,29 @@ struct AdaHandleUtilsUtilitiesTests {
                 Issue.record("Unexpected error type: \(error)")
             }
         }
+
+        @Test("createHandlesClient throws for non-mainnet networks")
+        func testCreateHandlesClientThrowsForNonMainnetNetworks() {
+            #expect(throws: (any Error).self) {
+                _ = try createHandlesClient(network: .preview)
+            }
+            #expect(throws: (any Error).self) {
+                _ = try createHandlesClient(network: .preprod)
+            }
+            #expect(throws: (any Error).self) {
+                _ = try createHandlesClient(network: .sanchonet)
+            }
+        }
     }
 
     @Suite("Datum Parsing")
     struct DatumParsingTests {
+
+        @Test("extractResolvedAddressFromDatum returns nil for empty hex")
+        func testExtractResolvedAddressFromDatumEmptyHex() throws {
+            let result = try extractResolvedAddressFromDatum(datumHex: "", network: .mainnet)
+            #expect(result == nil)
+        }
 
         @Test("extractResolvedAddressFromDatum returns nil when key is missing")
         func testExtractResolvedAddressFromDatumMissingKey() throws {
