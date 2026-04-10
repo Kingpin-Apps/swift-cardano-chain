@@ -1,3 +1,9 @@
+## 0.3.0 (2026-04-10)
+
+### Feat
+
+- add OfflineTransfer chain context
+
 ## 0.2.16 (2026-04-08)
 
 ### Fix
