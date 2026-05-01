@@ -1,3 +1,9 @@
+## 0.3.2 (2026-05-01)
+
+### Fix
+
+- add Node Socket chain context
+
 ## 0.3.1 (2026-04-10)
 
 ### Fix
