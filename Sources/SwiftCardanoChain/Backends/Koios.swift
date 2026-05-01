@@ -4,12 +4,52 @@ import PotentCBOR
 import SwiftCardanoCore
 import SwiftKoios
 
-/// A `Koios <https://www.koios.rest/>`_ API wrapper for the client code to interact with.
+/// A chain context implementation backed by the [Koios](https://www.koios.rest) distributed API.
 ///
-/// - Parameters:
-///   - apiKey: A Koios API Key obtained from https://www.koios.rest.
-///   - network: Network to use.
-///   - baseUrl: Base URL for the Koios API. Defaults to the mainnet url.
+/// `KoiosChainContext` queries the Koios elastic query layer, a community-run, elastic API
+/// for Cardano. Unlike BlockFrost, Koios is decentralised — multiple community nodes serve the
+/// same REST interface, so there is no single point of failure.
+///
+/// An API key is optional for low-volume usage; create one at https://www.koios.rest for
+/// higher rate limits.
+///
+/// ## Creating a Context
+///
+/// ```swift
+/// // Without an API key (rate-limited)
+/// let context = try await KoiosChainContext(network: .mainnet)
+///
+/// // From an environment variable
+/// let context = try await KoiosChainContext(
+///     network: .mainnet,
+///     environmentVariable: "KOIOS_API_KEY"
+/// )
+///
+/// // With an API key directly
+/// let context = try await KoiosChainContext(
+///     apiKey: "your-koios-api-key",
+///     network: .preprod
+/// )
+/// ```
+///
+/// ## Supported Networks
+///
+/// `.mainnet`, `.preprod`, `.preview`, `.guildnet`, `.sanchonet`
+///
+/// ## Topics
+///
+/// ### Creating a Context
+/// - ``init(apiKey:network:basePath:environmentVariable:client:)``
+///
+/// ### Querying Chain State
+/// - ``utxos(address:)``
+/// - ``stakeAddressInfo(address:)``
+/// - ``stakePools()``
+/// - ``stakePoolInfo(poolId:)``
+///
+/// ### Transaction Operations
+/// - ``submitTxCBOR(cbor:)``
+/// - ``evaluateTxCBOR(cbor:)``
 public class KoiosChainContext: ChainContext {
 
     // MARK: - Properties

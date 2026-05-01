@@ -5,7 +5,59 @@ import SwiftCardanoCore
 import SwiftCardanoUtils
 import SystemPackage
 
-/// A Cardano CLI wrapper for interacting with the Cardano blockchain
+/// A chain context implementation that shells out to the `cardano-cli` binary.
+///
+/// `CardanoCliChainContext` wraps a local `cardano-cli` installation and requires access to a
+/// running `cardano-node` socket. It is the right choice when you control the server
+/// environment and need full local-node fidelity without running Ogmios or the NtC socket
+/// directly.
+///
+/// Protocol parameters, UTxO sets, and the chain tip are cached to avoid redundant CLI
+/// invocations. Cache lifetimes and sizes are configurable at initialisation time.
+///
+/// ## Creating a Context
+///
+/// ```swift
+/// // Minimal — reads node config, binary and socket from ~/.cardano-cli/config
+/// let context = try await CardanoCliChainContext(network: .mainnet)
+///
+/// // Explicit paths
+/// let context = try await CardanoCliChainContext(
+///     nodeConfig: FilePath("/opt/cardano/mainnet/config.json"),
+///     binary: FilePath("/usr/local/bin/cardano-cli"),
+///     socket: FilePath("/ipc/node.socket"),
+///     network: .mainnet
+/// )
+///
+/// // Tuned caching
+/// let context = try await CardanoCliChainContext(
+///     nodeConfig: FilePath("/opt/cardano/preview/config.json"),
+///     binary: FilePath("/usr/local/bin/cardano-cli"),
+///     socket: FilePath("/ipc/node.socket"),
+///     network: .preview,
+///     refetchChainTipInterval: 30,
+///     utxoCacheSize: 5_000,
+///     datumCacheSize: 1_000
+/// )
+/// ```
+///
+/// ## Supported Networks
+///
+/// `.mainnet`, `.preprod`, `.preview`
+///
+/// ## Topics
+///
+/// ### Creating a Context
+/// - ``init(nodeConfig:binary:socket:network:era:ttlBuffer:refetchChainTipInterval:utxoCacheSize:datumCacheSize:cli:)``
+///
+/// ### Querying Chain State
+/// - ``utxos(address:)``
+/// - ``stakeAddressInfo(address:)``
+/// - ``stakePools()``
+///
+/// ### Transaction Operations
+/// - ``submitTxCBOR(cbor:)``
+/// - ``evaluateTxCBOR(cbor:)``
 public class CardanoCliChainContext: ChainContext {
     // MARK: - Properties
 
@@ -118,7 +170,7 @@ public class CardanoCliChainContext: ChainContext {
     ///   - refetchChainTipInterval: Interval in seconds to refetch the chain tip
     ///   - utxoCacheSize: Size of the UTxO cache
     ///   - datumCacheSize: Size of the datum cache
-    ///   - client: An instance of a CLIClient. If nil, a default CardanoCLIClient will be created.
+    ///   - cli: An instance of a CLIClient. If nil, a default CardanoCLIClient will be created.
     public init(
         nodeConfig: FilePath? = nil,
         binary: FilePath? = nil,

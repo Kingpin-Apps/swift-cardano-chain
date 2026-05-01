@@ -31,7 +31,7 @@ public struct AdaHandlePolicyIds: NetworkDependable {
 ///
 /// ## Topics
 /// ### Main Functions
-/// - ``resolveAdahandle(handle:config:)``
+/// - ``resolveAdahandle(handle:network:)``
 ///
 /// ### Helper Functions
 /// - ``normalizeHandle(_:)``
@@ -110,7 +110,7 @@ public func isValidAdaSubHandle(_ handle: String?) -> Bool {
 ///
 /// - Parameters:
 ///   - handle: The AdaHandle to resolve (with or without leading '$')
-///   - config: The multitool configuration containing network settings and policy IDs
+///   - network: The Cardano network used to select the correct policy ID and API endpoint
 ///
 /// - Returns: A bech32-encoded Cardano payment address
 ///
@@ -230,9 +230,7 @@ public func assetFingerprint(policyId: String, assetNameHex: String) -> String {
 
 /// Gets the AdaHandle policy ID for the specified network.
 ///
-/// - Parameters:
-///   - network: The Cardano network
-///   - config: The multitool configuration
+/// - Parameter network: The Cardano network
 /// - Returns: The policy ID hex string
 /// - Throws: ``AdaHandleError/adahandleNetworkNotSupported(_:)`` if unsupported
 public func getPolicyId(for network: SwiftCardanoCore.Network) throws -> String {

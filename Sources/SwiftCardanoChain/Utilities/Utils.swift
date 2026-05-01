@@ -20,7 +20,8 @@ public func convertAssetNameHEX2ASCII(assetName: String) -> String {
 /// Executes an async operation with exponential backoff retry logic.
 ///
 /// - Parameters:
-///   - maxAttempts: Maximum number of retry attempts (default: 5)
+///   - maxRetryAttempts: Maximum number of retry attempts (default: 5)
+///   - baseRetryDelay: Base delay in milliseconds between attempts, doubled on each retry (default: 200)
 ///   - operation: The async operation to retry
 /// - Returns: The result of the operation
 /// - Throws: The last error encountered if all retries fail

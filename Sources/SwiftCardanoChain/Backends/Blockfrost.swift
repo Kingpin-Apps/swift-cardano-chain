@@ -4,12 +4,46 @@ import PotentCBOR
 import SwiftBlockfrostAPI
 import SwiftCardanoCore
 
-/// A `BlockFrost <https://blockfrost.io/>`_ API wrapper for the client code to interact with.
+/// A chain context implementation backed by the [BlockFrost](https://blockfrost.io) cloud API.
 ///
-/// - Parameters:
-///   - projectId: A BlockFrost project ID obtained from https://blockfrost.io.
-///   - network: Network to use.
-///   - baseUrl: Base URL for the BlockFrost API. Defaults to the mainnet url.
+/// `BlockFrostChainContext` is the easiest way to interact with Cardano without running a local
+/// node. It forwards all chain queries to the BlockFrost REST API and requires no local
+/// infrastructure beyond a project ID.
+///
+/// ## Creating a Context
+///
+/// ```swift
+/// // From an environment variable (recommended for CI/production)
+/// let context = try await BlockFrostChainContext(
+///     network: .mainnet,
+///     environmentVariable: "BLOCKFROST_API_KEY"
+/// )
+///
+/// // Or with a project ID directly
+/// let context = try await BlockFrostChainContext(
+///     projectId: "mainnetXXXXXXXXXXXXXXXXXXXX",
+///     network: .mainnet
+/// )
+/// ```
+///
+/// ## Supported Networks
+///
+/// `.mainnet`, `.preprod`, `.preview`
+///
+/// ## Topics
+///
+/// ### Creating a Context
+/// - ``init(projectId:network:basePath:environmentVariable:client:)``
+///
+/// ### Querying Chain State
+/// - ``utxos(address:)``
+/// - ``stakeAddressInfo(address:)``
+/// - ``stakePools()``
+/// - ``stakePoolInfo(poolId:)``
+///
+/// ### Transaction Operations
+/// - ``submitTxCBOR(cbor:)``
+/// - ``evaluateTxCBOR(cbor:)``
 public class BlockFrostChainContext: ChainContext {
 
     // MARK: - Properties

@@ -1,13 +1,13 @@
 import Foundation
 import SwiftCardanoCore
 
-public enum PoolStatus: Codable {
+public enum PoolStatus: Codable, Sendable {
     case registered
     case retired
     case retiring(epoch: UInt)
 }
 
-public struct StakePoolInfo: Codable {
+public struct StakePoolInfo: Codable, Sendable {
     public var poolParams: PoolParams
     public var livePledge: UInt?
     public var liveStake: UInt?

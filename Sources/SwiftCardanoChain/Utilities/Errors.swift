@@ -1,6 +1,6 @@
 import Foundation
 
-enum CardanoChainError: Error, CustomStringConvertible, Equatable {
+public enum CardanoChainError: Error, CustomStringConvertible, Equatable {
     case blockfrostError(String?)
     case cardanoCLIError(String?)
     case invalidArgument(String?)
@@ -13,7 +13,7 @@ enum CardanoChainError: Error, CustomStringConvertible, Equatable {
     case valueError(String?)
     case notImplemented(String?)
     
-    var description: String {
+    public var description: String {
         switch self {
             case .cardanoCLIError(let message):
                 return message ?? "Failed to execute Cardano CLI command."

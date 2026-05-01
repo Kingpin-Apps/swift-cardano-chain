@@ -2,455 +2,322 @@
 [![](https://img.shields.io/endpoint?url=https%3A%2F%2Fswiftpackageindex.com%2Fapi%2Fpackages%2FKingpin-Apps%2Fswift-cardano-chain%2Fbadge%3Ftype%3Dswift-versions)](https://swiftpackageindex.com/Kingpin-Apps/swift-cardano-chain)
 [![](https://img.shields.io/endpoint?url=https%3A%2F%2Fswiftpackageindex.com%2Fapi%2Fpackages%2FKingpin-Apps%2Fswift-cardano-chain%2Fbadge%3Ftype%3Dplatforms)](https://swiftpackageindex.com/Kingpin-Apps/swift-cardano-chain)
 
-# SwiftCardanoChain - Swift implementation of Cardano Chain Contexts
+# SwiftCardanoChain
 
-SwiftCardanoChain is a Swift implementation of Cardano Data Types with CBOR (and JSON) serialization.
+A Swift library for interacting with the Cardano blockchain through a unified `ChainContext` protocol backed by six pluggable implementations.
 
-## Usage
-To add SwiftCardanoChain as dependency to your Xcode project, select `File` > `Swift Packages` > `Add Package Dependency`, enter its repository URL: `https://github.com/Kingpin-Apps/swift-cardano-chain.git` and import `SwiftCardanoChain`.
+## Installation
 
-Then, to use it in your source code, add:
+Add the package in Xcode via **File › Add Package Dependencies** and enter the repository URL:
+
+```
+https://github.com/Kingpin-Apps/swift-cardano-chain.git
+```
+
+Or add it to your `Package.swift`:
+
+```swift
+.package(url: "https://github.com/Kingpin-Apps/swift-cardano-chain.git", from: "0.3.0")
+```
+
+Then import it in your source files:
 
 ```swift
 import SwiftCardanoChain
-
-let blockfrostChainContext = try await BlockFrostChainContext(
-    network: .preview,
-    environmentVariable: "BLOCKFROST_API_KEY"
-)
-
-    
-let cardanoCliChainContext = try CardanoCliChainContext(
-    configFile: URL(fileURLWithPath: "/path/to/preview/config.json"),
-    network: .preview
-)
 ```
 
 ## Overview
 
-SwiftCardanoChain provides two powerful chain context implementations that allow you to read from and write to the Cardano blockchain:
+SwiftCardanoChain provides a single `ChainContext` protocol and six concrete implementations.
+Pick the one that matches your environment — the rest of your code stays the same.
 
-- **BlockFrostChainContext**: Uses the BlockFrost API for cloud-based blockchain interactions
-- **CardanoCliChainContext**: Uses the Cardano CLI for local node interactions
+| Context | When to use |
+|---|---|
+| `BlockFrostChainContext` | Cloud API — no local node required |
+| `KoiosChainContext` | Decentralised community API — no local node required |
+| `CardanoCliChainContext` | Local node via `cardano-cli` |
+| `OgmiosChainContext` | Local node via the Ogmios WebSocket bridge |
+| `NodeSocketChainContext` | Local node via the NtC Unix socket directly |
+| `OfflineTransferChainContext` | Air-gapped / offline transaction signing |
 
-Both implementations conform to the `ChainContext` protocol and provide the same interface for:
-- Reading blockchain data (UTxOs, protocol parameters, genesis parameters)
-- Writing transactions to the blockchain
-- Evaluating transaction execution units
-- Querying stake address information
+All contexts support:
+
+- Reading blockchain data (UTxOs, protocol parameters, genesis parameters, epoch, era, slot)
+- Submitting and evaluating transactions
+- Querying stake addresses, pools, DReps, governance actions, and committee members
 
 ## Getting Started
 
-### BlockFrost Chain Context
-
-The BlockFrost chain context is ideal for applications that need to interact with the Cardano blockchain without running a local node.
+### BlockFrost (Cloud — No Local Node)
 
 ```swift
 import SwiftCardanoChain
 
-// Initialize with environment variable
-let chainContext = try await BlockFrostChainContext<Never>(
+// From an environment variable (recommended)
+let context = try await BlockFrostChainContext(
     network: .preview,
     environmentVariable: "BLOCKFROST_API_KEY"
 )
 
-// Or initialize with project ID directly
-let chainContext = try await BlockFrostChainContext<Never>(
-    projectId: "your-project-id",
+// Or with a project ID directly
+let context = try await BlockFrostChainContext(
+    projectId: "previewXXXXXXXXXXXXXXXXXXXX",
+    network: .preview
+)
+```
+
+### Koios (Community API — No Local Node)
+
+Supports `.mainnet`, `.preprod`, `.preview`, `.guildnet`, and `.sanchonet`.
+
+```swift
+// Without an API key (rate-limited)
+let context = try await KoiosChainContext(network: .mainnet)
+
+// With an API key
+let context = try await KoiosChainContext(
+    apiKey: "your-koios-api-key",
     network: .mainnet
 )
 ```
 
-### Cardano CLI Chain Context
-
-The Cardano CLI chain context is perfect for applications that have access to a local Cardano node.
+### Cardano CLI (Local Node)
 
 ```swift
-import SwiftCardanoChain
+let context = try await CardanoCliChainContext(
+    nodeConfig: FilePath("/opt/cardano/preview/config.json"),
+    binary:     FilePath("/usr/local/bin/cardano-cli"),
+    socket:     FilePath("/ipc/node.socket"),
+    network:    .preview
+)
+```
 
-let chainContext = try CardanoCliChainContext<Never>(
-    configFile: URL(fileURLWithPath: "/path/to/config.json"),
-    network: .preview
+### Ogmios (Local Node via WebSocket)
+
+```swift
+let context = try await OgmiosChainContext(
+    host: "localhost",
+    port: 1337,
+    network: .mainnet
+)
+```
+
+### NodeSocket (Local Node — Direct NtC)
+
+```swift
+let context = NodeSocketChainContext(
+    socketPath: FilePath("/ipc/node.socket"),
+    network: .mainnet
+)
+```
+
+### OfflineTransfer (Air-Gapped Signing)
+
+```swift
+// Load a transfer file prepared by an online machine
+let context = try OfflineTransferChainContext(
+    filePath: FilePath("/path/to/transfer.json"),
+    network: .mainnet
 )
 ```
 
 ## Reading Blockchain Data
 
-### Getting UTxOs
-
-Retrieve all UTxOs for a specific address:
+### UTxOs
 
 ```swift
-let address = try Address(
-    from: .string("addr_test1qp4kux2v7xcg9urqssdffff5p0axz9e3hcc43zz7pcuyle0e20hkwsu2ndpd9dh9anm4jn76ljdz0evj22stzrw9egxqmza5y3")
-)
-
-let utxos = try await chainContext.utxos(address: address)
+let address = try Address(from: .string("addr1..."))
+let utxos   = try await context.utxos(address: address)
 
 for utxo in utxos {
-    print("Transaction ID: \(utxo.input.transactionId.payload.toHex)")
-    print("Output Index: \(utxo.input.index)")
-    print("Address: \(try utxo.output.address.toBech32())")
-    print("Amount: \(utxo.output.amount.coin) lovelace")
-    
-    // Handle multi-assets if present
+    print("\(utxo.input.transactionId.payload.toHex)#\(utxo.input.index)")
+    print("  \(utxo.output.amount.coin) lovelace")
+
     for (policyId, assets) in utxo.output.amount.multiAsset {
         for (assetName, amount) in assets {
-            print("Asset: \(policyId.payload.toHex).\(assetName.name.toHex) = \(amount)")
+            print("  \(policyId.payload.toHex).\(assetName.name.toHex) = \(amount)")
         }
     }
 }
 ```
 
-### Getting Protocol Parameters
-
-Retrieve current protocol parameters:
+### Protocol Parameters
 
 ```swift
-let protocolParams = try await chainContext.protocolParameters()
+let params = try await context.protocolParameters()
 
-print("Min fee per byte: \(protocolParams.txFeePerByte)")
-print("Fixed fee: \(protocolParams.txFeeFixed)")
-print("Max transaction size: \(protocolParams.maxTxSize)")
-print("UTxO cost per byte: \(protocolParams.utxoCostPerByte)")
+print("Min fee per byte : \(params.txFeePerByte)")
+print("Fixed fee        : \(params.txFeeFixed)")
+print("Max tx size      : \(params.maxTxSize)")
+print("UTxO cost/byte   : \(params.utxoCostPerByte)")
 ```
 
-### Getting Genesis Parameters
-
-Retrieve genesis parameters for the network:
+### Genesis Parameters
 
 ```swift
-let genesisParams = try await chainContext.genesisParameters()
+let genesis = try await context.genesisParameters()
 
-print("Network ID: \(genesisParams.networkId)")
-print("Network Magic: \(genesisParams.networkMagic)")
-print("Slot length: \(genesisParams.slotLength) seconds")
-print("Epoch length: \(genesisParams.epochLength) slots")
-print("Security parameter: \(genesisParams.securityParam)")
+print("Network magic  : \(genesis.networkMagic)")
+print("Slot length    : \(genesis.slotLength)s")
+print("Epoch length   : \(genesis.epochLength) slots")
+print("Security param : \(genesis.securityParam)")
 ```
 
-### Getting Current Blockchain State
+### Current Chain State
 
 ```swift
-// Get current epoch
-let currentEpoch = try await chainContext.epoch()
-print("Current epoch: \(currentEpoch)")
+let epoch = try await context.epoch()
+let slot  = try await context.lastBlockSlot()
+let era   = try await context.era()
 
-// Get last block slot
-let lastSlot = try await chainContext.lastBlockSlot()
-print("Last block slot: \(lastSlot)")
-
-// Get network type
-let network = chainContext.network
-print("Network: \(network)")
+print("Epoch \(epoch), slot \(slot), era \(era?.description ?? "unknown")")
 ```
 
 ## Writing to the Blockchain
 
 ### Submitting Transactions
 
-The chain contexts provide multiple ways to submit transactions:
-
-#### Submit a Transaction Object
+All contexts accept transactions in three forms:
 
 ```swift
-// Assuming you have a built transaction
-let transaction: Transaction<Never> = // ... your transaction
+// Transaction object
+let txId = try await context.submitTx(tx: .transaction(transaction))
 
-let txId = try await chainContext.submitTx(tx: .transaction(transaction))
-print("Transaction submitted with ID: \(txId)")
+// CBOR bytes
+let txId = try await context.submitTx(tx: .bytes(cborData))
+
+// CBOR hex string
+let txId = try await context.submitTx(tx: .string("84a700..."))
+
+print("Submitted: \(txId)")
 ```
 
-#### Submit CBOR Data
+### Evaluating Plutus Script Execution Units
 
 ```swift
-let cborData = transaction.toCBORData()
-let txId = try await chainContext.submitTx(tx: .bytes(cborData))
-print("Transaction submitted with ID: \(txId)")
-```
+let units = try await context.evaluateTx(tx: transaction)
 
-#### Submit CBOR Hex String
-
-```swift
-let cborHex = "84a70081825820b35a4ba9ef3ce21adcd6879d..."
-let txId = try await chainContext.submitTx(tx: .string(cborHex))
-print("Transaction submitted with ID: \(txId)")
-```
-
-### Evaluating Transaction Execution Units
-
-Before submitting a transaction with Plutus scripts, you may need to evaluate execution units:
-
-```swift
-// Evaluate using transaction object
-let executionUnits = try await chainContext.evaluateTx(tx: transaction)
-
-for (redeemerIndex, units) in executionUnits {
-    print("Redeemer \(redeemerIndex): \(units.mem) memory, \(units.steps) steps")
+for (redeemer, eu) in units {
+    print("\(redeemer): mem=\(eu.mem) steps=\(eu.steps)")
 }
-
-// Or evaluate using CBOR data
-let executionUnits = try await chainContext.evaluateTxCBOR(cbor: cborData)
 ```
 
 ## Staking Operations
 
-### Querying Stake Address Information
-
 ```swift
-let stakeAddress = try Address(
-    from: .string("stake_test1upyz3gk6mw5he20apnwfn96cn9rscgvmmsxc9r86dh0k66gswf59n")
-)
-
-let stakeInfo = try await chainContext.stakeAddressInfo(address: stakeAddress)
+let stakeAddress = try Address(from: .string("stake1..."))
+let stakeInfo    = try await context.stakeAddressInfo(address: stakeAddress)
 
 for info in stakeInfo {
-    print("Address: \(info.address)")
-    print("Balance: \(info.rewardAccountBalance) lovelace")
-    print("Delegated to pool: \(info.stakeDelegation ?? "None")")
-    print("Vote delegation: \(info.voteDelegation ?? "None")")
-    print("DRep: \(info.delegateRepresentative ?? "None")")
+    print("Rewards : \(info.rewardAccountBalance) lovelace")
+    print("Pool    : \(info.stakeDelegation ?? "unregistered")")
+    print("DRep    : \(info.delegateRepresentative ?? "none")")
 }
+```
+
+## Governance Queries (Conway Era)
+
+```swift
+// DRep information
+let drepInfo = try await context.drepInfo(drep: someDRep)
+
+// Governance action details
+let govInfo = try await context.govActionInfo(govActionID: someActionId)
+
+// Committee member state
+let cmInfo = try await context.committeeMemberInfo(committeeMember: cred)
+```
+
+## Offline Signing Workflow
+
+For air-gapped transaction signing, see the `OfflineTransferChainContext`:
+
+```swift
+// --- Online machine ---
+var transfer = OfflineTransfer()
+transfer.addUtxos(try await onlineContext.utxos(address: address), for: address)
+transfer.protocol.protocolParameters = try await onlineContext.protocolParameters()
+transfer.protocol.genesisParameters  = try await onlineContext.genesisParameters()
+transfer.protocol.era                = try await onlineContext.era()
+transfer.protocol.network            = .mainnet
+try transfer.save(to: FilePath("/path/to/transfer.json"))
+
+// --- Copy file to offline machine ---
+
+// --- Offline machine ---
+let offlineContext = try OfflineTransferChainContext(
+    filePath: FilePath("/path/to/transfer.json"),
+    network: .mainnet
+)
+let utxos = try await offlineContext.utxos(address: address)  // from the file
+// ... build and sign transaction ...
+try await offlineContext.submitTx(tx: .string(signedCborHex)) // writes to file
+
+// --- Copy file back and submit online ---
+let txId = try await onlineContext.submitTx(tx: .string(signedCborHex))
 ```
 
 ## Error Handling
 
-Both chain contexts use the `CardanoChainError` enum for error handling:
+All contexts throw `CardanoChainError`:
 
 ```swift
 do {
-    let utxos = try await chainContext.utxos(address: address)
-    // Process UTxOs
+    let utxos = try await context.utxos(address: address)
 } catch let error as CardanoChainError {
     switch error {
-    case .blockfrostError(let message):
-        print("BlockFrost API error: \(message)")
-    case .transactionFailed(let message):
-        print("Transaction failed: \(message)")
-    case .invalidArgument(let message):
-        print("Invalid argument: \(message)")
-    case .valueError(let message):
-        print("Value error: \(message)")
-    case .unsupportedNetwork(let message):
-        print("Unsupported network: \(message)")
+    case .blockfrostError(let msg):      print("BlockFrost: \(msg ?? "")")
+    case .koiosError(let msg):           print("Koios: \(msg ?? "")")
+    case .cardanoCLIError(let msg):      print("CardanoCLI: \(msg ?? "")")
+    case .operationError(let msg):       print("Operation: \(msg ?? "")")
+    case .transactionFailed(let msg):    print("Tx failed: \(msg ?? "")")
+    case .invalidArgument(let msg):      print("Bad argument: \(msg ?? "")")
+    case .unsupportedNetwork(let msg):   print("Bad network: \(msg ?? "")")
+    case .offlineTransferError(let msg): print("Offline: \(msg ?? "")")
+    case .notImplemented(let msg):       print("Not implemented: \(msg ?? "")")
+    default:                             print("Other: \(error)")
     }
 } catch {
-    print("Unexpected error: \(error)")
+    print("Unexpected: \(error)")
 }
 ```
 
-## Network Configuration
+## Network Support
 
-Both chain contexts support multiple Cardano networks:
+| Network | BlockFrost | Koios | CardanoCLI | Ogmios | NodeSocket | OfflineTransfer |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|
+| mainnet   | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| preprod   | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| preview   | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| guildnet  |   | ✓ |   |   |   |   |
+| sanchonet |   | ✓ |   |   |   |   |
+
+## Performance and Caching
+
+| Context | Cached data |
+|---|---|
+| BlockFrost | Protocol params (per epoch), genesis params (permanent) |
+| Koios | Protocol params (per epoch), genesis params (permanent) |
+| CardanoCLI | Genesis params (permanent), protocol params (per tip update), UTxOs (per slot+address), datums (LRU) |
+| Ogmios | Epoch + protocol params (60s TTL), genesis params (permanent) |
+| NodeSocket | Epoch (60s TTL), protocol params (per epoch), genesis params (permanent) |
+| OfflineTransfer | Everything read from file — no caching needed |
+
+Configure CardanoCLI cache sizes at initialisation:
 
 ```swift
-// Mainnet
-let mainnetContext = try await BlockFrostChainContext<Never>(
-    projectId: "mainnet-project-id",
-    network: .mainnet
-)
-
-// Preprod testnet
-let preprodContext = try await BlockFrostChainContext<Never>(
-    projectId: "preprod-project-id",
-    network: .preprod
-)
-
-// Preview testnet
-let previewContext = try await BlockFrostChainContext<Never>(
-    projectId: "preview-project-id",
-    network: .preview
+let context = try await CardanoCliChainContext(
+    nodeConfig: FilePath("/opt/cardano/preview/config.json"),
+    binary:     FilePath("/usr/local/bin/cardano-cli"),
+    socket:     FilePath("/ipc/node.socket"),
+    network:    .preview,
+    refetchChainTipInterval: 30,   // seconds
+    utxoCacheSize: 5_000,
+    datumCacheSize: 1_000
 )
 ```
 
-## Understanding ReedemerType
+## Documentation
 
-The `ChainContext` protocol uses a generic `associatedtype` called `ReedemerType` that must conform to `CBORSerializable & Hashable`. This type parameter determines how Plutus script redeemers are represented in your transactions.
-
-### What are Redeemers?
-
-In Cardano's extended UTxO (eUTxO) model, when you spend UTxOs that are locked by Plutus scripts, you must provide:
-- **Datum**: Data associated with the UTxO (the "lock")
-- **Redeemer**: Data you provide to "unlock" the UTxO (the "key")
-- **Script Context**: Information about the transaction (provided automatically)
-
-The `ReedemerType` generic parameter specifies the Swift type used to represent redeemer data in your transactions.
-
-### When to Use `Never`
-
-Use `Never` as your `ReedemerType` when your application:
-
-1. **Only performs simple transactions** without Plutus scripts
-2. **Only reads blockchain data** (UTxOs, protocol parameters, etc.)
-3. **Submits pre-built transactions** as CBOR data or hex strings
-4. **Doesn't need to construct transactions** with custom redeemer types
-
-```swift
-// For read-only operations or simple transactions
-let chainContext = try await BlockFrostChainContext<Never>(
-    projectId: "your-project-id",
-    network: .mainnet
-)
-
-// Reading data works perfectly with Never
-let utxos = try await chainContext.utxos(address: address)
-let protocolParams = try await chainContext.protocolParameters()
-
-// Submitting pre-built transactions works too
-let txId = try await chainContext.submitTx(tx: .string(cborHex))
-```
-
-### When to Use Custom Types
-
-Define a custom `ReedemerType` when your application:
-
-1. **Constructs transactions** that interact with specific Plutus scripts
-2. **Has domain-specific redeemer data** structures
-3. **Needs type safety** for redeemer construction
-
-```swift
-// Define your custom redeemer type
-struct MyRedeemer: CBORSerializable, Hashable {
-    let action: String
-    let amount: Int
-    let recipient: String
-    
-    func toCBOR() -> CBOR {
-        // Implementation to serialize to CBOR
-        return .array([
-            .textString(action),
-            .unsignedInteger(UInt64(amount)),
-            .textString(recipient)
-        ])
-    }
-    
-    static func fromCBOR(_ cbor: CBOR) throws -> MyRedeemer {
-        // Implementation to deserialize from CBOR
-        guard case let .array(items) = cbor,
-              items.count == 3,
-              case let .textString(action) = items[0],
-              case let .unsignedInteger(amount) = items[1],
-              case let .textString(recipient) = items[2] else {
-            throw CBORError.invalidFormat
-        }
-        return MyRedeemer(action: action, amount: Int(amount), recipient: recipient)
-    }
-}
-
-// Use your custom redeemer type
-let chainContext = try await BlockFrostChainContext<MyRedeemer>(
-    projectId: "your-project-id",
-    network: .mainnet
-)
-
-// Now you can work with strongly-typed transactions
-let transaction = Transaction<MyRedeemer>(
-    body: transactionBody,
-    witnessSet: witnessSet
-)
-
-let txId = try await chainContext.submitTx(tx: .transaction(transaction))
-```
-
-### Common Redeemer Types
-
-#### Unit Redeemer (for simple unlocking)
-```swift
-struct UnitRedeemer: CBORSerializable, Hashable {
-    func toCBOR() -> CBOR {
-        return .null  // Plutus Unit type
-    }
-    
-    static func fromCBOR(_ cbor: CBOR) throws -> UnitRedeemer {
-        return UnitRedeemer()
-    }
-}
-```
-
-#### Action-based Redeemer (for different script actions)
-```swift
-enum ScriptAction: CBORSerializable, Hashable {
-    case mint(amount: Int)
-    case burn(amount: Int)
-    case transfer(to: String)
-    
-    func toCBOR() -> CBOR {
-        switch self {
-        case .mint(let amount):
-            return .array([.unsignedInteger(0), .unsignedInteger(UInt64(amount))])
-        case .burn(let amount):
-            return .array([.unsignedInteger(1), .unsignedInteger(UInt64(amount))])
-        case .transfer(let to):
-            return .array([.unsignedInteger(2), .textString(to)])
-        }
-    }
-    
-    static func fromCBOR(_ cbor: CBOR) throws -> ScriptAction {
-        guard case let .array(items) = cbor,
-              items.count >= 2,
-              case let .unsignedInteger(tag) = items[0] else {
-            throw CBORError.invalidFormat
-        }
-        
-        switch tag {
-        case 0:
-            guard case let .unsignedInteger(amount) = items[1] else {
-                throw CBORError.invalidFormat
-            }
-            return .mint(amount: Int(amount))
-        case 1:
-            guard case let .unsignedInteger(amount) = items[1] else {
-                throw CBORError.invalidFormat
-            }
-            return .burn(amount: Int(amount))
-        case 2:
-            guard case let .textString(to) = items[1] else {
-                throw CBORError.invalidFormat
-            }
-            return .transfer(to: to)
-        default:
-            throw CBORError.invalidFormat
-        }
-    }
-}
-```
-
-### Practical Guidelines
-
-1. **Start with `Never`** if you're unsure - it works for most use cases
-2. **Use `Never` for prototyping** and testing blockchain interactions
-3. **Define custom types** only when you need to construct transactions with specific script interactions
-4. **Keep redeemer types simple** and focused on the data your scripts need
-5. **Test CBOR serialization** thoroughly - incorrect serialization will cause transaction failures
-
-### Type Safety Benefits
-
-Using specific redeemer types provides:
-- **Compile-time safety**: Catch redeemer structure errors at build time
-- **Clear documentation**: Types serve as documentation for script interfaces
-- **IDE support**: Better autocomplete and refactoring capabilities
-- **Maintainability**: Easier to update when script interfaces change
-
-## Performance Considerations
-
-### Caching
-
-Both implementations include intelligent caching:
-
-- **Protocol parameters** are cached per epoch
-- **Genesis parameters** are cached permanently
-- **UTxOs** are cached by slot and address (CardanoCLI only)
-- **Chain tip** data has configurable refresh intervals
-
-### Resource Management
-
-```swift
-// Configure CardanoCLI context with custom cache sizes
-let cliContext = try CardanoCliChainContext<Never>(
-    configFile: configURL,
-    network: .preview,
-    refetchChainTipInterval: 30.0, // Refresh every 30 seconds
-    utxoCacheSize: 5000,          // Cache up to 5000 UTxO sets
-    datumCacheSize: 1000          // Cache up to 1000 datums
-)
-```
+Full DocC documentation with per-backend usage guides is available via Xcode's documentation
+browser (**Product › Build Documentation**) or at Swift Package Index.
