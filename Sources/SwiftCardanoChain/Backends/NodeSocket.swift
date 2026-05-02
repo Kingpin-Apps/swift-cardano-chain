@@ -179,45 +179,96 @@ public final class NodeSocketChainContext: ChainContext, @unchecked Sendable {
 
     // MARK: - ChainContext: Chain tip
 
-    /// Query the current chain tip via NtC `LocalStateQuery`.
+    /// Fetch the current network tip — including block height — via the ChainSync
+    /// mini-protocol.
     ///
-    /// The local node only exposes the ledger tip's slot and block hash, plus the
-    /// current epoch number; `block` (height), `slotInEpoch`, `slotsToEpochEnd`, and
-    /// `syncProgress` are not available over NtC and are returned as `nil`.
+    /// Local-state-query does not expose the block number, but every ChainSync
+    /// `RollForward` / `RollBackward` message carries a `Tip` that does. This method
+    /// opens a fresh connection, starts a `follow` stream from `origin`, takes the
+    /// `Tip` off the first event, and tears the stream down — so the caller pays the
+    /// cost of receiving exactly one (small) Byron block per call.
+    ///
+    /// - Returns: A `Tip` with the current network `point` (slot + hash) and `blockNo`.
+    /// - Throws: `CardanoChainError.operationError` if the chain-sync stream finishes
+    ///   without yielding an event.
+    public func currentTip() async throws -> Tip {
+        try await withClient { try await Self.fetchTip(via: $0) }
+    }
+
+    /// Query the current chain tip and enrich it with derived epoch / sync data.
+    ///
+    /// Combines three NtC queries plus a ChainSync round-trip on a single connection:
+    /// - `LocalStateQuery.queryEpochNo` for the current epoch number,
+    /// - `LocalStateQuery.queryGenesisConfig` for `systemStart`, `epochLength`, and
+    ///   `slotLength`,
+    /// - `ChainSync.follow` (one event) for the network `Tip`, which provides the
+    ///   block height that LSQ does not expose.
+    ///
+    /// `slotInEpoch` and `slotsToEpochEnd` are derived from the slot using the
+    /// network's Byron→Shelley transition epoch (mainnet=208, preprod=4, others=0).
+    /// `syncProgress` is the wall-clock time of the tip slot divided by the wall-clock
+    /// time elapsed since `systemStart`, expressed as a percentage with two decimals.
     public func chainTip() async throws -> ChainTip {
-        let (point, epochNo) = try await withClient { connection in
-            async let tip = connection.queryLedgerTip()
-            async let epoch = connection.queryEpochNo()
-            return try await (tip, epoch)
+        let network = self._network
+        let (tip, epochNo, epochLength, slotLength, systemStart) = try await withClient {
+            connection in
+            // LocalStateQuery uses a single state machine per connection — Acquire→Query→
+            // Release — so the LSQ calls must be sequential. Run them first, finish their
+            // sessions, then do the ChainSync round-trip last so its cancellation doesn't
+            // overlap with anything else on the wire.
+            let resolvedEpoch = try await connection.queryEpochNo()
+            let genConfig = try await connection.queryGenesisConfig()
+            guard case .shelley(let shelley) = genConfig else {
+                throw CardanoChainError.operationError(
+                    "Unexpected genesis configuration era; expected Shelley")
+            }
+            let params = try Self.convertShelleyGenesis(shelley, network: network)
+            let resolvedTip = try await Self.fetchTip(via: connection)
+            return (
+                resolvedTip,
+                resolvedEpoch,
+                params.epochLength,
+                params.slotLength,
+                params.systemStart
+            )
         }
 
         let currentEpoch = Int(epochNo)
         let era = Era.fromEpoch(epoch: epochNo).rawValue
-
-        switch point {
+        let slotInt: Int
+        let hashHex: String?
+        switch tip.point {
         case .origin:
-            return ChainTip(
-                block: nil,
-                epoch: currentEpoch,
-                era: era,
-                hash: nil,
-                slot: 0,
-                slotInEpoch: nil,
-                slotsToEpochEnd: nil,
-                syncProgress: nil
-            )
+            slotInt = 0
+            hashHex = nil
         case .blockPoint(let slot, let hash):
-            return ChainTip(
-                block: nil,
-                epoch: currentEpoch,
-                era: era,
-                hash: hash.map { String(format: "%02x", $0) }.joined(),
-                slot: Int(slot),
-                slotInEpoch: nil,
-                slotsToEpochEnd: nil,
-                syncProgress: nil
-            )
+            slotInt = Int(slot)
+            hashHex = hash.map { String(format: "%02x", $0) }.joined()
         }
+
+        let (slotInEpoch, slotsToEpochEnd) = Self.epochSlotPosition(
+            absoluteSlot: slotInt,
+            network: network,
+            shelleyEpochLength: epochLength
+        )
+
+        let syncProgress = Self.syncProgressString(
+            absoluteSlot: slotInt,
+            network: network,
+            systemStart: systemStart,
+            shelleySlotLengthSeconds: slotLength
+        )
+
+        return ChainTip(
+            block: Int(tip.blockNo),
+            epoch: currentEpoch,
+            era: era,
+            hash: hashHex,
+            slot: slotInt,
+            slotInEpoch: slotInEpoch,
+            slotsToEpochEnd: slotsToEpochEnd,
+            syncProgress: syncProgress
+        )
     }
 
     // MARK: - ChainContext: UTxOs
@@ -586,6 +637,87 @@ public final class NodeSocketChainContext: ChainContext, @unchecked Sendable {
         case .blockPoint(let slot, _):
             return Int(slot)
         }
+    }
+
+    /// Take the first ChainSync event off `connection.follow(from: [])` and return
+    /// the `Tip` it carries. The stream is cancelled on return so we receive exactly
+    /// one Byron block per call.
+    static func fetchTip(via connection: NodeToClientConnection) async throws -> Tip {
+        for try await event in connection.follow(from: []) {
+            switch event {
+            case .rollForward(_, let tip):
+                return tip
+            case .rollBackward(_, let tip):
+                return tip
+            }
+        }
+        throw CardanoChainError.operationError(
+            "ChainSync stream ended without yielding a tip")
+    }
+
+    /// Byron→Shelley transition epoch per network. After this many Byron-era epochs
+    /// the chain switched to Shelley slot timings.
+    static func byronTransitionEpoch(for network: Network) -> Int {
+        switch network {
+        case .mainnet: return 208
+        case .preprod: return 4
+        default:       return 0
+        }
+    }
+
+    /// Byron-era constants (fixed across all networks).
+    static let byronEpochLength: Int = 21600
+    static let byronSlotLengthSeconds: Int = 20
+
+    /// Compute (slotInEpoch, slotsToEpochEnd) for an absolute slot, accounting for
+    /// the Byron→Shelley transition. Returns `(nil, nil)` when `shelleyEpochLength`
+    /// is missing or non-positive.
+    static func epochSlotPosition(
+        absoluteSlot: Int,
+        network: Network,
+        shelleyEpochLength: Int?
+    ) -> (Int?, Int?) {
+        let byronTotalSlots = byronTransitionEpoch(for: network) * byronEpochLength
+        if absoluteSlot < byronTotalSlots {
+            let inEpoch = absoluteSlot % byronEpochLength
+            return (inEpoch, byronEpochLength - inEpoch)
+        }
+        guard let epochLength = shelleyEpochLength, epochLength > 0 else {
+            return (nil, nil)
+        }
+        let slotsSinceShelley = absoluteSlot - byronTotalSlots
+        let inEpoch = slotsSinceShelley % epochLength
+        return (inEpoch, epochLength - inEpoch)
+    }
+
+    /// Format `syncProgress` as a percentage string (e.g. `"99.87"`) by dividing the
+    /// wall-clock time of the tip slot by the wall-clock time elapsed since
+    /// `systemStart`. Returns `nil` if any required genesis field is missing.
+    static func syncProgressString(
+        absoluteSlot: Int,
+        network: Network,
+        systemStart: Date?,
+        shelleySlotLengthSeconds: Int?
+    ) -> String? {
+        guard let systemStart,
+              let shelleySlotLengthSeconds,
+              shelleySlotLengthSeconds > 0
+        else { return nil }
+
+        let byronTotalSlots = byronTransitionEpoch(for: network) * byronEpochLength
+        let tipSecondsSinceStart: Double
+        if absoluteSlot < byronTotalSlots {
+            tipSecondsSinceStart = Double(absoluteSlot * byronSlotLengthSeconds)
+        } else {
+            let byronSeconds = Double(byronTotalSlots * byronSlotLengthSeconds)
+            let shelleySeconds = Double((absoluteSlot - byronTotalSlots) * shelleySlotLengthSeconds)
+            tipSecondsSinceStart = byronSeconds + shelleySeconds
+        }
+
+        let wallClockSeconds = Date().timeIntervalSince(systemStart)
+        guard wallClockSeconds > 0 else { return "0.00" }
+        let pct = max(0.0, min(100.0, (tipSecondsSinceStart / wallClockSeconds) * 100.0))
+        return String(format: "%.2f", pct)
     }
 
     // MARK: - Private: scoped connection helper
