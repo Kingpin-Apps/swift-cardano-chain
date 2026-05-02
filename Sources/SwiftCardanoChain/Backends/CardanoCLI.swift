@@ -228,7 +228,7 @@ public class CardanoCliChainContext: ChainContext {
     ///
     /// - Returns: The chain tip as a dictionary
     /// - Throws: CardanoChainError if the query fails
-    public func queryChainTip() async throws -> ChainTip {
+    public func chainTip() async throws -> ChainTip {
         let result = try await cli.query.tip()
 
         self.lastChainTipFetch = Date().timeIntervalSince1970
@@ -499,14 +499,48 @@ public class CardanoCliChainContext: ChainContext {
         return try await cli.version()
     }
 
-    /// Evaluate execution units of a transaction
+    /// Evaluate execution units of a transaction by running every Plutus script
+    /// through the local CEK machine (via `swift-cardano-uplc`).
     ///
-    /// - Parameter cbor: The serialized transaction to be evaluated
-    /// - Returns: A dictionary mapping redeemer strings to execution units
-    /// - Throws: CardanoChainError if the evaluation fails
+    /// Resolves all transaction inputs (regular and reference) via `cardano-cli` and
+    /// fetches the current protocol parameters, then delegates to the shared
+    /// `evaluateTx(tx:resolvedInputs:protocolParameters:)` helper for the actual
+    /// PhaseTwo evaluation.
+    ///
+    /// - Parameter cbor: The serialized transaction to be evaluated.
+    /// - Returns: A dictionary mapping redeemer strings to execution units.
+    /// - Throws: `CardanoChainError.invalidArgument` if the CBOR cannot be decoded.
+    /// - Throws: `CardanoChainError.valueError` if any input cannot be resolved.
     public func evaluateTxCBOR(cbor: Data) async throws -> [String: ExecutionUnits] {
-        // TODO: Implement transaction evaluation
-        throw CardanoChainError.notImplemented("Transaction evaluation not implemented yet")
+        let tx: Transaction
+        do {
+            tx = try Transaction.fromCBOR(data: cbor)
+        } catch {
+            throw CardanoChainError.invalidArgument(
+                "Failed to decode transaction CBOR: \(error)")
+        }
+
+        let regularInputs = tx.transactionBody.inputs.asArray
+        let referenceInputs = tx.transactionBody.referenceInputs?.asList ?? []
+        let allInputs = regularInputs + referenceInputs
+
+        var resolved: [UTxO] = []
+        for input in allInputs {
+            guard let (utxo, _) = try await self.utxo(input: input) else {
+                throw CardanoChainError.valueError(
+                    "Cannot evaluate transaction: input \(input) not found in live UTxO set"
+                )
+            }
+            resolved.append(utxo)
+        }
+
+        let pp = try await self.protocolParameters()
+
+        return try await evaluateTx(
+            tx: tx,
+            resolvedInputs: resolved,
+            protocolParameters: pp
+        )
     }
 
     /// Get the KES period information for a stake pool using cardano-cli.

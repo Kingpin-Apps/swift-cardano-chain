@@ -239,7 +239,7 @@ public class KoiosChainContext: ChainContext {
     ///
     /// - Returns: The chain tip as a dictionary
     /// - Throws: CardanoChainError if the query fails
-    public func queryChainTip() async throws -> ChainTip {
+    public func chainTip() async throws -> ChainTip {
         do {
             let response = try await api.client.tip()
             let json = try response.ok.body.json

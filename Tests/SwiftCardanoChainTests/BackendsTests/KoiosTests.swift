@@ -232,8 +232,8 @@ struct KoiosChainContextTests {
             }))
     }
 
-    @Test("Test queryChainTip")
-    func testQueryChainTip() async throws {
+    @Test("Test chainTip")
+    func testChainTip() async throws {
         let chainContext = try await KoiosChainContext(
             network: .preview,
             client: Client(
@@ -242,7 +242,7 @@ struct KoiosChainContextTests {
             )
         )
 
-        let tip = try await chainContext.queryChainTip()
+        let tip = try await chainContext.chainTip()
 
         #expect(tip.block == 123456)
         #expect(tip.epoch == 500)

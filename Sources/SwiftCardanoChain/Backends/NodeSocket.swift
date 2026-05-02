@@ -1,7 +1,6 @@
 import Foundation
 import SwiftCardanoCore
 import SwiftCardanoNetwork
-import SwiftCardanoUPLC
 import SwiftCardanoUtils
 import SystemPackage
 
@@ -178,6 +177,49 @@ public final class NodeSocketChainContext: ChainContext, @unchecked Sendable {
         self._networkConfig = merged
     }
 
+    // MARK: - ChainContext: Chain tip
+
+    /// Query the current chain tip via NtC `LocalStateQuery`.
+    ///
+    /// The local node only exposes the ledger tip's slot and block hash, plus the
+    /// current epoch number; `block` (height), `slotInEpoch`, `slotsToEpochEnd`, and
+    /// `syncProgress` are not available over NtC and are returned as `nil`.
+    public func chainTip() async throws -> ChainTip {
+        let (point, epochNo) = try await withClient { connection in
+            async let tip = connection.queryLedgerTip()
+            async let epoch = connection.queryEpochNo()
+            return try await (tip, epoch)
+        }
+
+        let currentEpoch = Int(epochNo)
+        let era = Era.fromEpoch(epoch: epochNo).rawValue
+
+        switch point {
+        case .origin:
+            return ChainTip(
+                block: nil,
+                epoch: currentEpoch,
+                era: era,
+                hash: nil,
+                slot: 0,
+                slotInEpoch: nil,
+                slotsToEpochEnd: nil,
+                syncProgress: nil
+            )
+        case .blockPoint(let slot, let hash):
+            return ChainTip(
+                block: nil,
+                epoch: currentEpoch,
+                era: era,
+                hash: hash.map { String(format: "%02x", $0) }.joined(),
+                slot: Int(slot),
+                slotInEpoch: nil,
+                slotsToEpochEnd: nil,
+                syncProgress: nil
+            )
+        }
+    }
+
     // MARK: - ChainContext: UTxOs
 
     public func utxos(address: Address) async throws -> [UTxO] {
@@ -245,25 +287,11 @@ public final class NodeSocketChainContext: ChainContext, @unchecked Sendable {
             return (utxos, pp)
         }
 
-        let phaseTwo = try PhaseTwo(protocolParameters: pp)
-        let result = try await phaseTwo.evaluate(transaction: tx, resolvedInputs: resolved)
-
-        let redeemers: [Redeemer] = Self.extractRedeemers(from: tx)
-
-        var out: [String: ExecutionUnits] = [:]
-        for r in result.redeemers {
-            guard r.passed, r.index < redeemers.count else { continue }
-            let original = redeemers[r.index]
-            let tag = original.tag.map { "\($0)" } ?? "unknown"
-            let key = "\(tag):\(original.index)"
-            let consumedMem = Int(ExBudget.restricted.mem - r.remainingBudget.mem)
-            let consumedSteps = Int(ExBudget.restricted.cpu - r.remainingBudget.cpu)
-            out[key] = ExecutionUnits(
-                mem: max(0, consumedMem),
-                steps: max(0, consumedSteps)
-            )
-        }
-        return out
+        return try await evaluateTx(
+            tx: tx,
+            resolvedInputs: resolved,
+            protocolParameters: pp
+        )
     }
 
     // MARK: - ChainContext: Stake addresses
@@ -557,18 +585,6 @@ public final class NodeSocketChainContext: ChainContext, @unchecked Sendable {
             return 0
         case .blockPoint(let slot, _):
             return Int(slot)
-        }
-    }
-
-    private static func extractRedeemers(from tx: Transaction) -> [Redeemer] {
-        guard let rs = tx.transactionWitnessSet.redeemers else { return [] }
-        switch rs {
-        case .list(let list):
-            return list.compactMap { $0 as? Redeemer }
-        case .map(let map):
-            return map.dictionary.values.compactMap { v in
-                Redeemer(tag: nil, index: 0, data: v.data, exUnits: v.exUnits)
-            }
         }
     }
 

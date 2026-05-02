@@ -156,6 +156,33 @@ public class OfflineTransferChainContext: ChainContext {
         self.offlineTransfer = try OfflineTransfer.load(from: filePath)
     }
 
+    // MARK: - Chain Tip
+
+    /// Approximate the chain tip from the cached genesis parameters and wall-clock time.
+    ///
+    /// An offline context cannot observe the live tip, so this returns a derived view:
+    /// `slot` and `epoch` are computed from genesis + the current time, and `era` is
+    /// taken from the saved protocol metadata. `block`, `hash`, `slotInEpoch`,
+    /// `slotsToEpochEnd`, and `syncProgress` are not derivable here and returned as `nil`.
+    ///
+    /// - Throws: `CardanoChainError.offlineTransferError` if genesis parameters are missing
+    ///   the fields required for the calculation.
+    public func chainTip() async throws -> ChainTip {
+        let currentEpoch = try await self.epoch()
+        let currentSlot = try await self.lastBlockSlot()
+
+        return ChainTip(
+            block: nil,
+            epoch: currentEpoch,
+            era: offlineTransfer.protocol.era?.rawValue,
+            hash: nil,
+            slot: currentSlot,
+            slotInEpoch: nil,
+            slotsToEpochEnd: nil,
+            syncProgress: nil
+        )
+    }
+
     // MARK: - UTxO Queries
 
     public func utxos(address: Address) async throws -> [UTxO] {

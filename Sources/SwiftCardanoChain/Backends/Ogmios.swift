@@ -253,34 +253,48 @@ public class OgmiosChainContext: ChainContext {
 
     /// Queries the current chain tip.
     ///
+    /// Combines the canonical `ledgerStateQuery/tip` (slot + hash) with the server's
+    /// `/health` endpoint to fill in `era`, `block` (height), `epoch`, `slotInEpoch`,
+    /// and `syncProgress`. If the health probe fails the tip portion is still returned
+    /// with the remaining fields left `nil`.
+    ///
     /// - Returns: A `ChainTip` object containing block height, slot, epoch, and other tip information.
-    /// - Throws: `CardanoChainError.operationError` if the query fails.
-    public func queryChainTip() async throws -> ChainTip {
-        let response = try await client.ledgerStateQuery.tip.result()
+    /// - Throws: `CardanoChainError.operationError` if the tip query fails.
+    public func chainTip() async throws -> ChainTip {
+        let tipResponse = try await client.ledgerStateQuery.tip.result()
 
-        switch response {
+        let health = try? await client.getServerHealth()
+
+        let syncProgress = health.map { String(format: "%.2f", $0.networkSynchronization * 100) }
+
+        switch tipResponse {
         case .origin:
             return ChainTip(
                 block: 0,
-                epoch: 0,
-                era: nil,
+                epoch: health?.currentEpoch ?? 0,
+                era: health?.currentEra,
                 hash: nil,
                 slot: 0,
-                slotInEpoch: nil,
+                slotInEpoch: health?.slotInEpoch,
                 slotsToEpochEnd: nil,
-                syncProgress: nil
+                syncProgress: syncProgress
             )
         case .point(let point):
-            let currentEpoch = try await epoch()
+            let resolvedEpoch: Int
+            if let healthEpoch = health?.currentEpoch {
+                resolvedEpoch = healthEpoch
+            } else {
+                resolvedEpoch = try await epoch()
+            }
             return ChainTip(
-                block: nil,
-                epoch: currentEpoch,
-                era: nil,
+                block: health?.lastKnownTip.height,
+                epoch: resolvedEpoch,
+                era: health?.currentEra,
                 hash: point.id.description,
                 slot: Int(point.slot),
-                slotInEpoch: nil,
+                slotInEpoch: health?.slotInEpoch,
                 slotsToEpochEnd: nil,
-                syncProgress: nil
+                syncProgress: syncProgress
             )
         }
     }

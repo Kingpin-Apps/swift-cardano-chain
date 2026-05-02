@@ -1,5 +1,6 @@
 import Foundation
 import SwiftCardanoCore
+import SwiftCardanoUPLC
 
 /// Enum representing transaction data input types.
 public enum TransactionData {
@@ -40,6 +41,10 @@ public protocol ChainContext: CustomStringConvertible, CustomDebugStringConverti
 
     /// Slot number of last block
     var lastBlockSlot: () async throws -> Int { get }
+    
+    /// Get the current chain tip information, including the slot number, block hash, and block number.
+    /// - Returns: A `ChainTip` object containing the current chain tip information.
+    func chainTip() async throws -> ChainTip
 
     /// Get all UTxOs associated with an address.
     ///
@@ -143,7 +148,64 @@ public extension ChainContext {
     func evaluateTx(tx: Transaction) async throws -> [String: ExecutionUnits] {
         return try await evaluateTxCBOR(cbor: tx.toCBORData())
     }
+
+    /// Evaluate execution units of a transaction locally via the UPLC CEK machine.
+    ///
+    /// This is a backend-agnostic helper for chain contexts that don't expose a remote
+    /// `evaluateTransaction` RPC (CardanoCLI, NodeSocket). Callers fetch the resolved
+    /// UTxOs for `tx.transactionBody.inputs + referenceInputs` and the current protocol
+    /// parameters using whatever transport they have available, then hand them off here.
+    ///
+    /// - Parameters:
+    ///   - tx: The transaction to evaluate.
+    ///   - resolvedInputs: UTxOs corresponding to every regular and reference input
+    ///     consumed by the transaction.
+    ///   - protocolParameters: Current protocol parameters, used to seed `PhaseTwo`.
+    /// - Returns: A dictionary mapping `"<tag>:<index>"` redeemer keys to consumed
+    ///   `ExecutionUnits`. Failed redeemers are omitted.
+    func evaluateTx(
+        tx: Transaction,
+        resolvedInputs: [UTxO],
+        protocolParameters: ProtocolParameters
+    ) async throws -> [String: ExecutionUnits] {
+        let phaseTwo = try PhaseTwo(protocolParameters: protocolParameters)
+        let result = try await phaseTwo.evaluate(transaction: tx, resolvedInputs: resolvedInputs)
+
+        let redeemers: [Redeemer] = Self.extractRedeemers(from: tx)
+
+        var out: [String: ExecutionUnits] = [:]
+        for r in result.redeemers {
+            guard r.passed, r.index < redeemers.count else { continue }
+            let original = redeemers[r.index]
+            let tag = original.tag.map { "\($0)" } ?? "unknown"
+            let key = "\(tag):\(original.index)"
+            let consumedMem = Int(ExBudget.restricted.mem - r.remainingBudget.mem)
+            let consumedSteps = Int(ExBudget.restricted.cpu - r.remainingBudget.cpu)
+            out[key] = ExecutionUnits(
+                mem: max(0, consumedMem),
+                steps: max(0, consumedSteps)
+            )
+        }
+        return out
+    }
+
+    /// Extract the redeemer list from a transaction's witness set in canonical order.
+    static func extractRedeemers(from tx: Transaction) -> [Redeemer] {
+        guard let rs = tx.transactionWitnessSet.redeemers else { return [] }
+        switch rs {
+        case .list(let list):
+            return list.compactMap { $0 as? Redeemer }
+        case .map(let map):
+            return map.dictionary.values.compactMap { v in
+                Redeemer(tag: nil, index: 0, data: v.data, exUnits: v.exUnits)
+            }
+        }
+    }
     
+    func chainTip() async throws -> ChainTip {
+        throw CardanoChainError.notImplemented("chainTip() is not implemented for \(Self.self).")
+    }
+
     func utxos(address: Address) async throws -> [UTxO] {
         throw CardanoChainError.notImplemented("utxos(address:) is not implemented for \(Self.self).")
     }

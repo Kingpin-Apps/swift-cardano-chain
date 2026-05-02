@@ -228,10 +228,10 @@ struct OgmiosChainContextTests {
         #expect(slot == 90_918_798)
     }
 
-    @Test("Test queryChainTip via mock client")
-    func testQueryChainTipViaMockClient() async throws {
+    @Test("Test chainTip via mock client")
+    func testChainTipViaMockClient() async throws {
         let context = try await createMockOgmiosChainContext()
-        let tip = try await context.queryChainTip()
+        let tip = try await context.chainTip()
         #expect(tip.slot == 90_918_798)
         #expect(tip.epoch == 1052)
         #expect(tip.hash == "4dc5188a99ce636e624ab72104f6f18031dcd849c151ce1c8ef4871b7c3913b9")
