@@ -9,9 +9,9 @@ import SwiftBlockfrostAPI
 @Suite("Blockfrost Chain Context Tests",)
 struct BlockfrostChainContextTests {
     @Test("Test Initialization", arguments: [
-        (Network.mainnet, NetworkId.mainnet),
-        (Network.preprod, NetworkId.testnet),
-        (Network.preview, NetworkId.testnet),
+        (SwiftCardanoCore.Network.mainnet, NetworkId.mainnet),
+        (SwiftCardanoCore.Network.preprod, NetworkId.testnet),
+        (SwiftCardanoCore.Network.preview, NetworkId.testnet),
         
     ])
     func testInit(_ networks: (SwiftCardanoCore.Network, NetworkId)) async throws {

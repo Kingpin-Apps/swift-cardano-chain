@@ -50,54 +50,81 @@ import SwiftKoios
 /// ### Transaction Operations
 /// - ``submitTxCBOR(cbor:)``
 /// - ``evaluateTxCBOR(cbor:)``
-public class KoiosChainContext: ChainContext {
+public actor KoiosChainContext: ChainContext {
 
     // MARK: - Properties
 
-    public var name: String { "Koios" }
-    public var type: ContextType { .online }
+    nonisolated public var name: String { "Koios" }
+    nonisolated public var type: ContextType { .online }
 
-    public var api: Koios
+    public let api: Koios
     private var epochInfo: Components.Schemas.EpochInfoPayload?
-    private var _epoch: Int?
+    private var _epochInfoFetch: Task<Components.Schemas.EpochInfoPayload, Error>?
     private var _genesisParameters: GenesisParameters?
+    private var _genesisParametersFetch: Task<GenesisParameters, Error>?
     private var _protocolParameters: ProtocolParameters?
+    private var _protocolParametersEpoch: Int?
+    private var _protocolParametersFetch: Task<ProtocolParameters, Error>?
     private let _network: SwiftCardanoCore.Network
 
-    public var networkId: NetworkId {
-        self._network.networkId
+    nonisolated public var networkId: NetworkId {
+        _network.networkId
     }
 
-    public lazy var era: () async throws -> Era? = { [weak self] in
-        guard var self = self else {
-            throw CardanoChainError.valueError("Self is nil")
-        }
-
-        return Era.fromEpoch(epoch: EpochNumber(try await self.epoch()))
+    public func era() async throws -> Era? {
+        Era.fromEpoch(epoch: EpochNumber(try await epoch()))
     }
 
-    public lazy var epoch: () async throws -> Int = { [weak self] in
-        guard let self = self else {
-            throw CardanoChainError.koiosError("Self is nil")
-        }
+    public func epoch() async throws -> Int {
+        let info = try await currentEpochInfo()
+        return Int(info.epochNo ?? 0)
+    }
 
-        if try await self.checkEpochAndUpdate() || self._epoch == nil {
+    /// Master cache for the latest Koios epoch metadata.
+    ///
+    /// `endTime` is the wall-clock instant the current epoch ends. While that's in the
+    /// future the cache is fresh; otherwise we refresh, deduplicating concurrent callers
+    /// through `_epochInfoFetch` so the network round-trip happens at most once at a time.
+    /// Cache writes happen inside the Task body so the result lands in the cache even if
+    /// the launching caller is cancelled mid-flight.
+    private func currentEpochInfo() async throws -> Components.Schemas.EpochInfoPayload {
+        if let cached = epochInfo,
+           let endTime = cached.endTime,
+           Date().timeIntervalSince1970 < endTime {
+            return cached
+        }
+        if let inFlight = _epochInfoFetch { return try await inFlight.value }
+
+        let task = Task<Components.Schemas.EpochInfoPayload, Error> {
             do {
-                let response = try await api.client.epochInfo()
-                self.epochInfo = try response.ok.body.json.first
-                self._epoch = Int(self.epochInfo?.epochNo ?? 0)
+                let value = try await self.fetchEpochInfoFromAPI()
+                self.epochInfo = value
+                self._epochInfoFetch = nil
+                return value
             } catch {
-                throw CardanoChainError.koiosError("Failed to get epoch info: \(error)")
+                self._epochInfoFetch = nil
+                throw error
             }
         }
-        return self._epoch ?? 0
+        _epochInfoFetch = task
+        return try await task.value
     }
 
-    public lazy var lastBlockSlot: () async throws -> Int = { [weak self] in
-        guard let self = self else {
-            throw CardanoChainError.koiosError("Self is nil")
+    private func fetchEpochInfoFromAPI() async throws -> Components.Schemas.EpochInfoPayload {
+        do {
+            let response = try await api.client.epochInfo()
+            guard let info = try response.ok.body.json.first else {
+                throw CardanoChainError.koiosError("Empty epoch info response")
+            }
+            return info
+        } catch let error as CardanoChainError {
+            throw error
+        } catch {
+            throw CardanoChainError.koiosError("Failed to get epoch info: \(error)")
         }
+    }
 
+    public func lastBlockSlot() async throws -> Int {
         do {
             let response = try await api.client.tip()
             return try response.ok.body.json.first?.absSlot?.value as? Int ?? 0
@@ -106,84 +133,108 @@ public class KoiosChainContext: ChainContext {
         }
     }
 
-    public lazy var genesisParameters: () async throws -> GenesisParameters = { [weak self] in
-        guard let self = self else {
-            throw CardanoChainError.koiosError("Self is nil")
-        }
+    public func genesisParameters() async throws -> GenesisParameters {
+        if let cached = _genesisParameters { return cached }
+        if let inFlight = _genesisParametersFetch { return try await inFlight.value }
 
-        if try await self.checkEpochAndUpdate() || self._genesisParameters == nil {
-            let response = try await api.client.genesis()
+        let task = Task<GenesisParameters, Error> {
             do {
-                let payloads = try response.ok.body.json
-                guard let genesis = payloads.first else {
-                    throw CardanoChainError.koiosError("Genesis response was empty")
-                }
-
-                // Safely convert and unwrap expected fields. Many Koios fields are strings.
-                // Provide meaningful errors if any required field is missing.
-                func requireDouble(_ value: String?, name: String) throws -> Double {
-                    guard let s = value, let d = Double(s) else {
-                        throw CardanoChainError.koiosError("Missing/invalid Double for \(name)")
-                    }
-                    return d
-                }
-                func requireInt(_ value: String?, name: String) throws -> Int {
-                    guard let s = value, let i = Int(s) else {
-                        throw CardanoChainError.koiosError("Missing/invalid Int for \(name)")
-                    }
-                    return i
-                }
-                func requireUInt64(_ value: String?, name: String) throws -> UInt64 {
-                    guard let s = value, let i = UInt64(s) else {
-                        throw CardanoChainError.koiosError("Missing/invalid UInt64 for \(name)")
-                    }
-                    return i
-                }
-
-                let activeSlotsCoefficient = try requireDouble(
-                    genesis.activeslotcoeff, name: "activeslotcoeff")
-                let epochLength = try requireInt(genesis.epochlength, name: "epochlength")
-                let maxKesEvolutions = try requireInt(
-                    genesis.maxkesrevolutions, name: "maxkesrevolutions")
-                let maxLovelaceSupply = try requireInt(
-                    genesis.maxlovelacesupply, name: "maxlovelacesupply")
-                let networkMagic = try requireInt(genesis.networkmagic, name: "networkmagic")
-                let securityParam = try requireInt(genesis.securityparam, name: "securityparam")
-                let slotLength = try requireInt(genesis.slotlength, name: "slotlength")
-                let slotsPerKesPeriod = try requireInt(
-                    genesis.slotsperkesperiod, name: "slotsperkesperiod")
-                let updateQuorum = try requireInt(genesis.updatequorum, name: "updatequorum")
-
-                self._genesisParameters = GenesisParameters(
-                    activeSlotsCoefficient: activeSlotsCoefficient,
-                    epochLength: epochLength,
-                    maxKesEvolutions: maxKesEvolutions,
-                    maxLovelaceSupply: maxLovelaceSupply,
-                    networkId: genesis.networkid!,
-                    networkMagic: networkMagic,
-                    securityParam: securityParam,
-                    slotLength: slotLength,
-                    slotsPerKesPeriod: slotsPerKesPeriod,
-                    systemStart: Date(timeIntervalSince1970: TimeInterval(genesis.systemstart!)),
-                    updateQuorum: updateQuorum
-                )
+                let value = try await self.fetchGenesisFromAPI()
+                self._genesisParameters = value
+                self._genesisParametersFetch = nil
+                return value
             } catch {
-                throw CardanoChainError.koiosError("Failed to decode Genesis parameters: \(error)")
+                self._genesisParametersFetch = nil
+                throw error
             }
         }
-        return self._genesisParameters!
+        _genesisParametersFetch = task
+        return try await task.value
     }
 
-    public lazy var protocolParameters: () async throws -> ProtocolParameters = { [weak self] in
-        guard let self = self else {
-            throw CardanoChainError.koiosError("Self is nil")
-        }
+    private func fetchGenesisFromAPI() async throws -> GenesisParameters {
+        let response = try await api.client.genesis()
+        do {
+            let payloads = try response.ok.body.json
+            guard let genesis = payloads.first else {
+                throw CardanoChainError.koiosError("Genesis response was empty")
+            }
 
-        if try await self.checkEpochAndUpdate() || self._protocolParameters == nil {
-            self._protocolParameters = try await self.queryCurrentProtocolParams()
-        }
+            // Safely convert and unwrap expected fields. Many Koios fields are strings.
+            // Provide meaningful errors if any required field is missing.
+            func requireDouble(_ value: String?, name: String) throws -> Double {
+                guard let s = value, let d = Double(s) else {
+                    throw CardanoChainError.koiosError("Missing/invalid Double for \(name)")
+                }
+                return d
+            }
+            func requireInt(_ value: String?, name: String) throws -> Int {
+                guard let s = value, let i = Int(s) else {
+                    throw CardanoChainError.koiosError("Missing/invalid Int for \(name)")
+                }
+                return i
+            }
+            func requireUInt64(_ value: String?, name: String) throws -> UInt64 {
+                guard let s = value, let i = UInt64(s) else {
+                    throw CardanoChainError.koiosError("Missing/invalid UInt64 for \(name)")
+                }
+                return i
+            }
 
-        return self._protocolParameters!
+            let activeSlotsCoefficient = try requireDouble(
+                genesis.activeslotcoeff, name: "activeslotcoeff")
+            let epochLength = try requireInt(genesis.epochlength, name: "epochlength")
+            let maxKesEvolutions = try requireInt(
+                genesis.maxkesrevolutions, name: "maxkesrevolutions")
+            let maxLovelaceSupply = try requireInt(
+                genesis.maxlovelacesupply, name: "maxlovelacesupply")
+            let networkMagic = try requireInt(genesis.networkmagic, name: "networkmagic")
+            let securityParam = try requireInt(genesis.securityparam, name: "securityparam")
+            let slotLength = try requireInt(genesis.slotlength, name: "slotlength")
+            let slotsPerKesPeriod = try requireInt(
+                genesis.slotsperkesperiod, name: "slotsperkesperiod")
+            let updateQuorum = try requireInt(genesis.updatequorum, name: "updatequorum")
+
+            return GenesisParameters(
+                activeSlotsCoefficient: activeSlotsCoefficient,
+                epochLength: epochLength,
+                maxKesEvolutions: maxKesEvolutions,
+                maxLovelaceSupply: maxLovelaceSupply,
+                networkId: genesis.networkid!,
+                networkMagic: networkMagic,
+                securityParam: securityParam,
+                slotLength: slotLength,
+                slotsPerKesPeriod: slotsPerKesPeriod,
+                systemStart: Date(timeIntervalSince1970: TimeInterval(genesis.systemstart!)),
+                updateQuorum: updateQuorum
+            )
+        } catch {
+            throw CardanoChainError.koiosError("Failed to decode Genesis parameters: \(error)")
+        }
+    }
+
+    public func protocolParameters() async throws -> ProtocolParameters {
+        let currentEpoch = try await epoch()
+        if let cached = _protocolParameters,
+           _protocolParametersEpoch == currentEpoch {
+            return cached
+        }
+        if let inFlight = _protocolParametersFetch { return try await inFlight.value }
+
+        let task = Task<ProtocolParameters, Error> {
+            do {
+                let value = try await self.queryCurrentProtocolParams()
+                self._protocolParameters = value
+                self._protocolParametersEpoch = currentEpoch
+                self._protocolParametersFetch = nil
+                return value
+            } catch {
+                self._protocolParametersFetch = nil
+                throw error
+            }
+        }
+        _protocolParametersFetch = task
+        return try await task.value
     }
 
     // MARK: - Initializers
@@ -290,22 +341,6 @@ public class KoiosChainContext: ChainContext {
     }
 
     // MARK: - Private methods
-
-    private func checkEpochAndUpdate() async throws -> Bool {
-        if let epochTime = self.epochInfo?.endTime, Date().timeIntervalSince1970 < epochTime {
-            return false
-        }
-
-        do {
-            let response = try await api.client.epochInfo()
-            self.epochInfo = try response.ok.body.json.first
-        } catch {
-            throw
-                CardanoChainError
-                .koiosError("Failed to get epoch info: \(error)")
-        }
-        return true
-    }
 
     // MARK: - Private Helper Methods
 

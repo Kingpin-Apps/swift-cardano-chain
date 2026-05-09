@@ -20,7 +20,7 @@ import Foundation
 ///     }
 /// }
 /// ```
-public struct KESPeriodInfo: Codable {
+public struct KESPeriodInfo: Codable, Sendable {
     /// The operational certificate counter currently registered on-chain.
     /// A value of -1 indicates the pool has never minted a block.
     public var onChainOpCertCount: Int?

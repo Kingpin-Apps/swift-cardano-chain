@@ -58,11 +58,11 @@ import SystemPackage
 /// ### Transaction Operations
 /// - ``submitTxCBOR(cbor:)``
 /// - ``evaluateTxCBOR(cbor:)``
-public class CardanoCliChainContext: ChainContext {
+public actor CardanoCliChainContext: ChainContext {
     // MARK: - Properties
 
-    public var name: String { "Cardano-CLI" }
-    public var type: ContextType { .online }
+    nonisolated public var name: String { "Cardano-CLI" }
+    nonisolated public var type: ContextType { .online }
 
     public let cli: CardanoCLI
     private var lastKnownBlockSlot: Int = 0
@@ -73,87 +73,122 @@ public class CardanoCliChainContext: ChainContext {
     private let cache = Cache<String, Int>()
     private let cacheTTL: TimeInterval = 1.0  // 1 second TTL
     private let _network: Network
+    private var _epochFetch: Task<Int, Error>?
+    private var _lastBlockSlotFetch: Task<Int, Error>?
     private var _genesisParameters: GenesisParameters?
+    private var _genesisParametersFetch: Task<GenesisParameters, Error>?
     private var _protocolParameters: ProtocolParameters?
+    private var _protocolParametersFetch: Task<ProtocolParameters, Error>?
 
     // MARK: - ChainContext Protocol Properties
 
-    public var networkId: NetworkId {
+    nonisolated public var networkId: NetworkId {
         self._network.networkId
     }
 
-    public lazy var era: () async throws -> Era? = { [weak self] in
-        guard var self = self else {
-            throw CardanoChainError.valueError("Self is nil")
-        }
-
-        let era = try await cli.getEra()
-        return era
+    public func era() async throws -> Era? {
+        return try await cli.getEra()
     }
 
-    public lazy var epoch: () async throws -> Int = { [weak self] in
-        guard var self = self else {
-            throw CardanoChainError.valueError("Self is nil")
-        }
+    public func epoch() async throws -> Int {
+        if let inFlight = _epochFetch { return try await inFlight.value }
 
-        let epoch = try await cli.getEpoch()
-        return epoch
+        // CLI calls fork a subprocess. Dedup concurrent callers via an in-flight
+        // Task so we don't fork multiple `cardano-cli` processes for the same query.
+        // No long-lived cache here — each fresh call invokes the CLI again.
+        let task = Task<Int, Error> {
+            do {
+                let value = try await self.cli.getEpoch()
+                self._epochFetch = nil
+                return value
+            } catch {
+                self._epochFetch = nil
+                throw error
+            }
+        }
+        _epochFetch = task
+        return try await task.value
     }
 
-    public lazy var lastBlockSlot: () async throws -> Int = { [weak self] in
-        guard var self = self else {
-            throw CardanoChainError.valueError("Self is nil")
-        }
-
+    public func lastBlockSlot() async throws -> Int {
         let cacheKey = "lastBlockSlot"
 
         if let cachedValue = self.cache.value(forKey: cacheKey) {
             return cachedValue
         }
+        if let inFlight = _lastBlockSlotFetch { return try await inFlight.value }
 
-        let slot = try await cli.getTip()
-
-        // Update cache
-        self.cache.insert(slot, forKey: cacheKey)
-
-        return slot
+        let task = Task<Int, Error> {
+            do {
+                let value = try await self.cli.getTip()
+                self.cache.insert(value, forKey: cacheKey)
+                self._lastBlockSlotFetch = nil
+                return value
+            } catch {
+                self._lastBlockSlotFetch = nil
+                throw error
+            }
+        }
+        _lastBlockSlotFetch = task
+        return try await task.value
     }
 
-    public lazy var genesisParameters: () async throws -> GenesisParameters = { [weak self] in
-        guard var self = self else {
-            throw CardanoChainError.valueError("Self is nil")
-        }
+    public func genesisParameters() async throws -> GenesisParameters {
+        if let cached = _genesisParameters { return cached }
+        if let inFlight = _genesisParametersFetch { return try await inFlight.value }
 
+        let task = Task<GenesisParameters, Error> {
+            do {
+                let value = try await self.fetchGenesisParametersFromCLI()
+                self._genesisParameters = value
+                self._genesisParametersFetch = nil
+                return value
+            } catch {
+                self._genesisParametersFetch = nil
+                throw error
+            }
+        }
+        _genesisParametersFetch = task
+        return try await task.value
+    }
+
+    private func fetchGenesisParametersFromCLI() async throws -> GenesisParameters {
         guard let nodeConfig = self.cli.cardanoConfig.config else {
             throw CardanoChainError.valueError("Cardano node config is nil")
         }
 
-        if self._genesisParameters == nil {
-            self._genesisParameters = try GenesisParameters(
-                nodeConfigFilePath: nodeConfig.string
-            )
+        let genesis = try GenesisParameters(
+            nodeConfigFilePath: nodeConfig.string
+        )
 
-            // Set the refetch chain tip interval if not provided
-            if self.refetchChainTipInterval == 0 {
-                self.refetchChainTipInterval =
-                    Double((self._genesisParameters?.slotLength!)!)
-                    / (self._genesisParameters?.activeSlotsCoefficient!)!
-            }
+        // Set the refetch chain tip interval if not provided
+        if self.refetchChainTipInterval == 0 {
+            self.refetchChainTipInterval =
+                Double((genesis.slotLength!))
+                / (genesis.activeSlotsCoefficient!)
         }
 
-        return self._genesisParameters!
+        return genesis
     }
 
-    public lazy var protocolParameters: () async throws -> ProtocolParameters = { [weak self] in
-        guard var self = self else {
-            throw CardanoChainError.valueError("Self is nil")
-        }
+    public func protocolParameters() async throws -> ProtocolParameters {
+        let chainTipUpdated = try await self.isChainTipUpdated()
+        if !chainTipUpdated, let cached = _protocolParameters { return cached }
+        if let inFlight = _protocolParametersFetch { return try await inFlight.value }
 
-        if try await self.isChainTipUpdated() || self._protocolParameters == nil {
-            self._protocolParameters = try await self.queryCurrentProtocolParams()
+        let task = Task<ProtocolParameters, Error> {
+            do {
+                let value = try await self.queryCurrentProtocolParams()
+                self._protocolParameters = value
+                self._protocolParametersFetch = nil
+                return value
+            } catch {
+                self._protocolParametersFetch = nil
+                throw error
+            }
         }
-
-        return self._protocolParameters!
+        _protocolParametersFetch = task
+        return try await task.value
     }
 
     // MARK: - Initialization

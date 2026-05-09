@@ -36,84 +36,124 @@ import SystemPackage
 ///     network: .preview
 /// )
 /// ```
-public final class NodeSocketChainContext: ChainContext, @unchecked Sendable {
+public actor NodeSocketChainContext: ChainContext {
 
     // MARK: - Identity
 
-    public var name: String { "NodeSocket" }
-    public var type: ContextType { .online }
+    nonisolated public var name: String { "NodeSocket" }
+    nonisolated public var type: ContextType { .online }
 
     // MARK: - State
 
     private let _networkConfig: CardanoNetworkConfiguration
     private let _network: Network
     private var _genesisParameters: GenesisParameters?
+    private var _genesisParametersFetch: Task<GenesisParameters, Error>?
     private var _protocolParameters: ProtocolParameters?
+    private var _protocolParametersEpoch: Int?
+    private var _protocolParametersFetch: Task<ProtocolParameters, Error>?
     private var _epoch: Int?
     private var lastEpochFetch: TimeInterval = 0
+    private var _epochFetch: Task<Int, Error>?
     private let epochCacheTTL: TimeInterval = 60
 
-    public var networkId: NetworkId { _network.networkId }
+    nonisolated public var networkId: NetworkId { _network.networkId }
 
-    // MARK: - Lazy Async Properties
+    // MARK: - Async Properties
 
-    public lazy var era: () async throws -> Era? = { [weak self] in
-        guard let self else {
-            throw CardanoChainError.operationError("Self is nil")
-        }
-        return Era.fromEpoch(epoch: EpochNumber(try await self.epoch()))
+    public func era() async throws -> Era? {
+        Era.fromEpoch(epoch: EpochNumber(try await epoch()))
     }
 
-    public lazy var epoch: () async throws -> Int = { [weak self] in
-        guard let self else {
-            throw CardanoChainError.operationError("Self is nil")
+    public func epoch() async throws -> Int {
+        if let cached = _epoch,
+           (Date().timeIntervalSince1970 - lastEpochFetch) <= epochCacheTTL {
+            return cached
         }
-        if self._epoch == nil
-            || (Date().timeIntervalSince1970 - self.lastEpochFetch) > self.epochCacheTTL
-        {
-            let response = try await self.withClient { try await $0.queryEpochNo() }
-            self._epoch = Int(response)
-            self.lastEpochFetch = Date().timeIntervalSince1970
+        if let inFlight = _epochFetch { return try await inFlight.value }
+
+        // Cache writes happen inside the Task body so the result lands in the
+        // cache even if the launching caller is cancelled mid-flight.
+        let task = Task<Int, Error> {
+            do {
+                let value = try await self.fetchEpochFromNode()
+                self._epoch = value
+                self.lastEpochFetch = Date().timeIntervalSince1970
+                self._epochFetch = nil
+                return value
+            } catch {
+                self._epochFetch = nil
+                throw error
+            }
         }
-        return self._epoch ?? 0
+        _epochFetch = task
+        return try await task.value
     }
 
-    public lazy var lastBlockSlot: () async throws -> Int = { [weak self] in
-        guard let self else {
-            throw CardanoChainError.operationError("Self is nil")
-        }
-        let tip = try await self.withClient { try await $0.queryLedgerTip() }
+    private func fetchEpochFromNode() async throws -> Int {
+        let response = try await withClient { try await $0.queryEpochNo() }
+        return Int(response)
+    }
+
+    public func lastBlockSlot() async throws -> Int {
+        let tip = try await withClient { try await $0.queryLedgerTip() }
         return Self.slot(from: tip)
     }
 
-    public lazy var genesisParameters: () async throws -> GenesisParameters = { [weak self] in
-        guard let self else {
-            throw CardanoChainError.operationError("Self is nil")
-        }
-        if self._genesisParameters == nil {
-            let config = try await self.withClient { try await $0.queryGenesisConfig() }
-            guard case .shelley(let shelley) = config else {
-                throw CardanoChainError.operationError(
-                    "Unexpected genesis configuration era; expected Shelley")
+    public func genesisParameters() async throws -> GenesisParameters {
+        if let cached = _genesisParameters { return cached }
+        if let inFlight = _genesisParametersFetch { return try await inFlight.value }
+
+        let task = Task<GenesisParameters, Error> {
+            do {
+                let value = try await self.fetchGenesisFromNode()
+                self._genesisParameters = value
+                self._genesisParametersFetch = nil
+                return value
+            } catch {
+                self._genesisParametersFetch = nil
+                throw error
             }
-            self._genesisParameters = try Self.convertShelleyGenesis(
-                shelley, network: self._network
-            )
         }
-        return self._genesisParameters!
+        _genesisParametersFetch = task
+        return try await task.value
     }
 
-    public lazy var protocolParameters: () async throws -> ProtocolParameters = { [weak self] in
-        guard let self else {
-            throw CardanoChainError.operationError("Self is nil")
+    private func fetchGenesisFromNode() async throws -> GenesisParameters {
+        let config = try await withClient { try await $0.queryGenesisConfig() }
+        guard case .shelley(let shelley) = config else {
+            throw CardanoChainError.operationError(
+                "Unexpected genesis configuration era; expected Shelley")
         }
-        let currentEpoch = try await self.epoch()
-        if self._protocolParameters == nil || self._epoch != currentEpoch {
-            self._protocolParameters = try await self.withClient {
-                try await $0.queryProtocolParameters()
+        return try Self.convertShelleyGenesis(shelley, network: _network)
+    }
+
+    public func protocolParameters() async throws -> ProtocolParameters {
+        let currentEpoch = try await epoch()
+        if let cached = _protocolParameters,
+           _protocolParametersEpoch == currentEpoch {
+            return cached
+        }
+        if let inFlight = _protocolParametersFetch { return try await inFlight.value }
+
+        let task = Task<ProtocolParameters, Error> {
+            do {
+                let value = try await self.fetchProtocolParametersFromNode()
+                self._protocolParameters = value
+                self._protocolParametersEpoch = currentEpoch
+                self._protocolParametersFetch = nil
+                return value
+            } catch {
+                self._protocolParametersFetch = nil
+                throw error
             }
         }
-        return self._protocolParameters!
+        _protocolParametersFetch = task
+        return try await task.value
+    }
+
+    private func fetchProtocolParametersFromNode() async throws -> ProtocolParameters {
+        try await withClient { try await $0.queryProtocolParameters() }
     }
 
     // MARK: - Initialization

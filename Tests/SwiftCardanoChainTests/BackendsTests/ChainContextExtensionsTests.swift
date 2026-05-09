@@ -16,7 +16,7 @@ struct ChainContextExtensionsTests {
         let tx = try Transaction.fromCBORHex(testCborHex)
 
         let txId = try await context.submitTx(tx: .transaction(tx))
-        let submittedCBOR = try #require(context.submittedCBOR)
+        let submittedCBOR = try #require(await context.submittedCBOR)
         let submittedTx = try Transaction.fromCBOR(data: submittedCBOR)
 
         #expect(txId == context.submitResult)
@@ -30,7 +30,7 @@ struct ChainContextExtensionsTests {
 
         let result = try await context.evaluateTx(tx: tx)
 
-        let evaluatedCBOR = try #require(context.evaluatedCBOR)
+        let evaluatedCBOR = try #require(await context.evaluatedCBOR)
         let evaluatedTx = try Transaction.fromCBOR(data: evaluatedCBOR)
         #expect(result == context.evaluateResult)
         #expect(evaluatedTx.id == tx.id)
@@ -108,32 +108,32 @@ struct ChainContextExtensionsTests {
     }
 }
 
-private final class RecordingChainContext: ChainContext {
-    let name = "RecordingContext"
-    let type: ContextType = .online
-    let networkId: NetworkId = .testnet
+private actor RecordingChainContext: ChainContext {
+    nonisolated let name = "RecordingContext"
+    nonisolated let type: ContextType = .online
+    nonisolated let networkId: NetworkId = .testnet
 
     var submittedCBOR: Data?
     var evaluatedCBOR: Data?
 
-    let submitResult = "mock-tx-hash"
-    let evaluateResult: [String: ExecutionUnits] = [
+    nonisolated let submitResult = "mock-tx-hash"
+    nonisolated let evaluateResult: [String: ExecutionUnits] = [
         "spend:0": ExecutionUnits(mem: 1, steps: 2)
     ]
 
-    var protocolParameters: () async throws -> ProtocolParameters {
-        { throw CardanoChainError.notImplemented("protocolParameters") }
+    func protocolParameters() async throws -> ProtocolParameters {
+        throw CardanoChainError.notImplemented("protocolParameters")
     }
 
-    var genesisParameters: () async throws -> GenesisParameters {
-        { throw CardanoChainError.notImplemented("genesisParameters") }
+    func genesisParameters() async throws -> GenesisParameters {
+        throw CardanoChainError.notImplemented("genesisParameters")
     }
 
-    var epoch: () async throws -> Int { { 0 } }
+    func epoch() async throws -> Int { 0 }
 
-    var era: () async throws -> Era? { { .conway } }
+    func era() async throws -> Era? { .conway }
 
-    var lastBlockSlot: () async throws -> Int { { 0 } }
+    func lastBlockSlot() async throws -> Int { 0 }
 
     func submitTxCBOR(cbor: Data) async throws -> String {
         submittedCBOR = cbor
@@ -151,17 +151,17 @@ private struct DefaultOnlyChainContext: ChainContext {
     let type: ContextType = .online
     let networkId: NetworkId = .testnet
 
-    var protocolParameters: () async throws -> ProtocolParameters {
-        { throw CardanoChainError.notImplemented("protocolParameters") }
+    func protocolParameters() async throws -> ProtocolParameters {
+        throw CardanoChainError.notImplemented("protocolParameters")
     }
 
-    var genesisParameters: () async throws -> GenesisParameters {
-        { throw CardanoChainError.notImplemented("genesisParameters") }
+    func genesisParameters() async throws -> GenesisParameters {
+        throw CardanoChainError.notImplemented("genesisParameters")
     }
 
-    var epoch: () async throws -> Int { { 0 } }
+    func epoch() async throws -> Int { 0 }
 
-    var era: () async throws -> Era? { { nil } }
+    func era() async throws -> Era? { nil }
 
-    var lastBlockSlot: () async throws -> Int { { 0 } }
+    func lastBlockSlot() async throws -> Int { 0 }
 }

@@ -44,52 +44,73 @@ import SwiftCardanoCore
 /// ### Transaction Operations
 /// - ``submitTxCBOR(cbor:)``
 /// - ``evaluateTxCBOR(cbor:)``
-public class BlockFrostChainContext: ChainContext {
+public actor BlockFrostChainContext: ChainContext {
 
     // MARK: - Properties
-    public var name: String { "Blockfrost" }
-    public var type: ContextType { .online }
+    nonisolated public var name: String { "Blockfrost" }
+    nonisolated public var type: ContextType { .online }
 
-    public var api: Blockfrost
+    public let api: Blockfrost
     private var epochInfo: Components.Schemas.EpochContent?
-    private var _epoch: Int?
+    private var _epochInfoFetch: Task<Components.Schemas.EpochContent, Error>?
     private var _genesisParameters: GenesisParameters?
+    private var _genesisParametersFetch: Task<GenesisParameters, Error>?
     private var _protocolParameters: ProtocolParameters?
+    private var _protocolParametersEpoch: Int?
+    private var _protocolParametersFetch: Task<ProtocolParameters, Error>?
     private let _network: SwiftCardanoCore.Network
 
-    public var networkId: NetworkId {
-        self._network.networkId
+    nonisolated public var networkId: NetworkId {
+        _network.networkId
     }
 
-    public lazy var era: () async throws -> Era? = { [weak self] in
-        guard var self = self else {
-            throw CardanoChainError.valueError("Self is nil")
-        }
-
-        return Era.fromEpoch(epoch: EpochNumber(try await self.epoch()))
+    public func era() async throws -> Era? {
+        Era.fromEpoch(epoch: EpochNumber(try await epoch()))
     }
 
-    public lazy var epoch: () async throws -> Int = { [weak self] in
-        guard let self = self else {
-            throw CardanoChainError.blockfrostError("Self is nil")
-        }
+    public func epoch() async throws -> Int {
+        try await currentEpochInfo().epoch
+    }
 
-        if try await self.checkEpochAndUpdate() || self._epoch == nil {
-            let response = try await api.client.getEpochsLatest()
+    /// Master cache for the latest Blockfrost epoch metadata.
+    ///
+    /// `endTime` is the wall-clock instant the current epoch ends. While that's in the
+    /// future the cache is fresh; otherwise we refresh, deduplicating concurrent callers
+    /// through `_epochInfoFetch` so the network round-trip happens at most once at a time.
+    /// Cache writes happen inside the Task body so the result lands in the cache even if
+    /// the launching caller is cancelled mid-flight.
+    private func currentEpochInfo() async throws -> Components.Schemas.EpochContent {
+        if let cached = epochInfo,
+           Int(Date().timeIntervalSince1970) < cached.endTime {
+            return cached
+        }
+        if let inFlight = _epochInfoFetch { return try await inFlight.value }
+
+        let task = Task<Components.Schemas.EpochContent, Error> {
             do {
-                self.epochInfo = try response.ok.body.json
-                self._epoch = self.epochInfo?.epoch
+                let value = try await self.fetchEpochInfoFromAPI()
+                self.epochInfo = value
+                self._epochInfoFetch = nil
+                return value
             } catch {
-                throw CardanoChainError.blockfrostError("Failed to get epoch info: \(response)")
+                self._epochInfoFetch = nil
+                throw error
             }
         }
-        return self._epoch ?? 0
+        _epochInfoFetch = task
+        return try await task.value
     }
 
-    public lazy var lastBlockSlot: () async throws -> Int = { [weak self] in
-        guard let self = self else {
-            throw CardanoChainError.blockfrostError("Self is nil")
+    private func fetchEpochInfoFromAPI() async throws -> Components.Schemas.EpochContent {
+        let response = try await api.client.getEpochsLatest()
+        do {
+            return try response.ok.body.json
+        } catch {
+            throw CardanoChainError.blockfrostError("Failed to get epoch info: \(response)")
         }
+    }
+
+    public func lastBlockSlot() async throws -> Int {
         let response = try await api.client.getBlocksLatest()
         do {
             return try response.ok.body.json.slot!
@@ -98,45 +119,69 @@ public class BlockFrostChainContext: ChainContext {
         }
     }
 
-    public lazy var genesisParameters: () async throws -> GenesisParameters = { [weak self] in
-        guard let self = self else {
-            throw CardanoChainError.blockfrostError("Self is nil")
-        }
+    public func genesisParameters() async throws -> GenesisParameters {
+        if let cached = _genesisParameters { return cached }
+        if let inFlight = _genesisParametersFetch { return try await inFlight.value }
 
-        if try await self.checkEpochAndUpdate() || self._genesisParameters == nil {
-            let response = try await api.client.getGenesis()
+        let task = Task<GenesisParameters, Error> {
             do {
-                let genesis = try response.ok.body.json
-                self._genesisParameters = GenesisParameters(
-                    activeSlotsCoefficient: genesis.activeSlotsCoefficient,
-                    epochLength: genesis.epochLength,
-                    maxKesEvolutions: genesis.maxKesEvolutions,
-                    maxLovelaceSupply: Int(genesis.maxLovelaceSupply)!,
-                    networkId: self._network.description,
-                    networkMagic: genesis.networkMagic,
-                    securityParam: genesis.securityParam,
-                    slotLength: genesis.slotLength,
-                    slotsPerKesPeriod: genesis.slotsPerKesPeriod,
-                    systemStart: Date(timeIntervalSince1970: TimeInterval(genesis.systemStart)),
-                    updateQuorum: genesis.updateQuorum
-                )
+                let value = try await self.fetchGenesisFromAPI()
+                self._genesisParameters = value
+                self._genesisParametersFetch = nil
+                return value
             } catch {
-                throw CardanoChainError.blockfrostError("Failed to get getGenesis: \(response)")
+                self._genesisParametersFetch = nil
+                throw error
             }
         }
-        return self._genesisParameters!
+        _genesisParametersFetch = task
+        return try await task.value
     }
 
-    public lazy var protocolParameters: () async throws -> ProtocolParameters = { [weak self] in
-        guard let self = self else {
-            throw CardanoChainError.blockfrostError("Self is nil")
+    private func fetchGenesisFromAPI() async throws -> GenesisParameters {
+        let response = try await api.client.getGenesis()
+        do {
+            let genesis = try response.ok.body.json
+            return GenesisParameters(
+                activeSlotsCoefficient: genesis.activeSlotsCoefficient,
+                epochLength: genesis.epochLength,
+                maxKesEvolutions: genesis.maxKesEvolutions,
+                maxLovelaceSupply: Int(genesis.maxLovelaceSupply)!,
+                networkId: _network.description,
+                networkMagic: genesis.networkMagic,
+                securityParam: genesis.securityParam,
+                slotLength: genesis.slotLength,
+                slotsPerKesPeriod: genesis.slotsPerKesPeriod,
+                systemStart: Date(timeIntervalSince1970: TimeInterval(genesis.systemStart)),
+                updateQuorum: genesis.updateQuorum
+            )
+        } catch {
+            throw CardanoChainError.blockfrostError("Failed to get getGenesis: \(response)")
         }
+    }
 
-        if try await self.checkEpochAndUpdate() || self._protocolParameters == nil {
-            self._protocolParameters = try await self.queryCurrentProtocolParams()
+    public func protocolParameters() async throws -> ProtocolParameters {
+        let currentEpoch = try await epoch()
+        if let cached = _protocolParameters,
+           _protocolParametersEpoch == currentEpoch {
+            return cached
         }
+        if let inFlight = _protocolParametersFetch { return try await inFlight.value }
 
-        return self._protocolParameters!
+        let task = Task<ProtocolParameters, Error> {
+            do {
+                let value = try await self.queryCurrentProtocolParams()
+                self._protocolParameters = value
+                self._protocolParametersEpoch = currentEpoch
+                self._protocolParametersFetch = nil
+                return value
+            } catch {
+                self._protocolParametersFetch = nil
+                throw error
+            }
+        }
+        _protocolParametersFetch = task
+        return try await task.value
     }
 
     // MARK: - Initialization
@@ -343,20 +388,6 @@ public class BlockFrostChainContext: ChainContext {
         }
     }
 
-    private func checkEpochAndUpdate() async throws -> Bool {
-        if let epochTime = self.epochInfo?.endTime, Int(Date().timeIntervalSince1970) < epochTime {
-            return false
-        }
-
-        let epochInfo = try await api.client.getEpochsLatest()
-        do {
-            self.epochInfo = try epochInfo.ok.body.json
-        } catch {
-            throw CardanoChainError.blockfrostError("Failed to get epoch info: \(epochInfo)")
-        }
-        return true
-    }
-
     private func getScript(scriptHash: String) async throws -> ScriptType {
         do {
             let scriptInfo = try await api.client.getScriptsScriptHash(
@@ -410,6 +441,25 @@ public class BlockFrostChainContext: ChainContext {
                     return try tryFixScript(
                         hash: scriptHash,
                         script: .plutusV2Script(v1script)
+                    ).toScriptType
+                } catch {
+                    throw CardanoChainError.blockfrostError(
+                        "Failed to get scriptCBOR: \(scriptCBOR)")
+                }
+            case .plutusV3:
+                let scriptCBOR = try await api.client.getScriptsScriptHashCbor(
+                    Operations.GetScriptsScriptHashCbor
+                        .Input(
+                            path: Operations.GetScriptsScriptHashCbor.Input
+                                .Path(scriptHash: scriptHash)
+                        )
+                )
+                do {
+                    let cbor = try scriptCBOR.ok.body.json.cbor!
+                    let v1script = PlutusV3Script(data: Data(hex: cbor))
+                    return try tryFixScript(
+                        hash: scriptHash,
+                        script: .plutusV3Script(v1script)
                     ).toScriptType
                 } catch {
                     throw CardanoChainError.blockfrostError(

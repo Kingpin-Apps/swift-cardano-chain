@@ -3,20 +3,20 @@ import SwiftCardanoCore
 import SwiftCardanoUPLC
 
 /// Enum representing transaction data input types.
-public enum TransactionData {
+public enum TransactionData: Sendable {
     case transaction(Transaction)
     case bytes(Data)
     case string(String)
 }
 
 /// Enum representing the type of chain context, either online or offline.
-public enum ContextType {
+public enum ContextType: Sendable {
     case online
     case offline
 }
 
 /// Interfaces through which the library interacts with the Cardano blockchain.
-public protocol ChainContext: CustomStringConvertible, CustomDebugStringConvertible {
+public protocol ChainContext: Sendable, CustomStringConvertible, CustomDebugStringConvertible {
 
     /// The name of the chain context
     var name: String { get }
@@ -24,23 +24,23 @@ public protocol ChainContext: CustomStringConvertible, CustomDebugStringConverti
     /// The type of the chain context
     var type: ContextType { get }
 
-    /// Get current protocol parameters
-    var protocolParameters: () async throws -> ProtocolParameters { get }
-
-    /// Get chain genesis parameters
-    var genesisParameters: () async throws -> GenesisParameters { get }
-
     /// Get current network id
     var networkId: NetworkId { get }
 
-    /// Current epoch number
-    var epoch: () async throws -> Int { get }
+    /// Get current protocol parameters.
+    func protocolParameters() async throws -> ProtocolParameters
 
-    /// Current era
-    var era: () async throws -> Era? { get }
+    /// Get chain genesis parameters.
+    func genesisParameters() async throws -> GenesisParameters
 
-    /// Slot number of last block
-    var lastBlockSlot: () async throws -> Int { get }
+    /// Current epoch number.
+    func epoch() async throws -> Int
+
+    /// Current era.
+    func era() async throws -> Era?
+
+    /// Slot number of last block.
+    func lastBlockSlot() async throws -> Int
     
     /// Get the current chain tip information, including the slot number, block hash, and block number.
     /// - Returns: A `ChainTip` object containing the current chain tip information.

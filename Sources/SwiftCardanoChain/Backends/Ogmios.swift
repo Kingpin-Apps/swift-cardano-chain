@@ -50,66 +50,79 @@ import SystemPackage
 /// ### Transaction Operations
 /// - ``submitTxCBOR(cbor:)``
 /// - ``evaluateTxCBOR(cbor:)``
-public class OgmiosChainContext: ChainContext {
+public actor OgmiosChainContext: ChainContext {
 
     // MARK: - Properties
 
     /// The name identifier for this chain context.
-    public var name: String { "Ogmios" }
+    nonisolated public var name: String { "Ogmios" }
 
-    public var type: ContextType { .online }
+    nonisolated public var type: ContextType { .online }
 
     /// The underlying Ogmios client used for all API calls.
-    public var client: OgmiosClient
+    public let client: OgmiosClient
 
     private var _epoch: Int?
+    private var _epochFetch: Task<Int, Error>?
     private var _genesisParameters: GenesisParameters?
+    private var _genesisParametersFetch: Task<GenesisParameters, Error>?
     private var _protocolParameters: SwiftCardanoCore.ProtocolParameters?
+    private var _protocolParametersEpoch: Int?
+    private var _protocolParametersFetch: Task<SwiftCardanoCore.ProtocolParameters, Error>?
     private var lastEpochFetch: TimeInterval = 0
     private let _network: SwiftCardanoCore.Network
 
     /// The network identifier for this context.
-    public var networkId: NetworkId {
+    nonisolated public var networkId: NetworkId {
         self._network.networkId
     }
 
     /// Returns the current era based on the current epoch.
     ///
     /// The era is derived from the epoch number using `Era.fromEpoch()`.
-    public lazy var era: () async throws -> SwiftCardanoCore.Era? = { [weak self] in
-        guard let self = self else {
-            throw CardanoChainError.valueError("Self is nil")
-        }
-
-        return SwiftCardanoCore.Era.fromEpoch(epoch: EpochNumber(try await self.epoch()))
+    public func era() async throws -> SwiftCardanoCore.Era? {
+        SwiftCardanoCore.Era.fromEpoch(epoch: EpochNumber(try await self.epoch()))
     }
 
     /// Returns the current epoch number.
     ///
     /// The epoch is cached and refreshed periodically to avoid unnecessary API calls.
-    public lazy var epoch: () async throws -> Int = { [weak self] in
-        guard let self = self else {
-            throw CardanoChainError.operationError("Self is nil")
-        }
-
+    public func epoch() async throws -> Int {
         // Refresh epoch if cache is stale (older than 60 seconds)
-        if self._epoch == nil || (Date().timeIntervalSince1970 - self.lastEpochFetch) > 60 {
-            let response = try await self.client.ledgerStateQuery.epoch.result()
-            self._epoch = Int(response)
-            self.lastEpochFetch = Date().timeIntervalSince1970
+        if let cached = _epoch,
+            (Date().timeIntervalSince1970 - lastEpochFetch) <= 60
+        {
+            return cached
         }
+        if let inFlight = _epochFetch { return try await inFlight.value }
 
-        return self._epoch ?? 0
+        // Cache writes happen inside the Task body so that the result lands in
+        // the cache even if the launching caller is cancelled mid-flight.
+        let task = Task<Int, Error> {
+            do {
+                let value = try await self.fetchEpochFromOgmios()
+                self._epoch = value
+                self.lastEpochFetch = Date().timeIntervalSince1970
+                self._epochFetch = nil
+                return value
+            } catch {
+                self._epochFetch = nil
+                throw error
+            }
+        }
+        _epochFetch = task
+        return try await task.value
+    }
+
+    private func fetchEpochFromOgmios() async throws -> Int {
+        let response = try await self.client.ledgerStateQuery.epoch.result()
+        return Int(response)
     }
 
     /// Returns the slot number of the most recent block.
     ///
     /// Queries the current tip of the ledger to get the latest slot.
-    public lazy var lastBlockSlot: () async throws -> Int = { [weak self] in
-        guard let self = self else {
-            throw CardanoChainError.operationError("Self is nil")
-        }
-
+    public func lastBlockSlot() async throws -> Int {
         let response = try await self.client.ledgerStateQuery.tip.result()
 
         switch response {
@@ -124,64 +137,87 @@ public class OgmiosChainContext: ChainContext {
     ///
     /// Genesis parameters are cached after the first fetch since they never change
     /// during the lifetime of the network.
-    public lazy var genesisParameters: () async throws -> GenesisParameters = { [weak self] in
-        guard let self = self else {
-            throw CardanoChainError.operationError("Self is nil")
-        }
+    public func genesisParameters() async throws -> GenesisParameters {
+        if let cached = _genesisParameters { return cached }
+        if let inFlight = _genesisParametersFetch { return try await inFlight.value }
 
-        if self._genesisParameters == nil {
-            let genesisParams = QueryNetworkGenesisConfiguration.Params(era: .shelley)
-            let response = try await self.client.networkQuery.genesisConfiguration.result(
-                params: genesisParams
-            )
-
-            switch response {
-            case .shelley(let genesis):
-                // Parse activeSlotsCoefficient string (e.g., "1/20") to Double
-                let activeSlots = self.parseRatioString(genesis.activeSlotsCoefficient) ?? 0.05
-
-                // Parse startTime string to Date
-                let formatter = ISO8601DateFormatter()
-                let systemStartDate = formatter.date(from: genesis.startTime) ?? Date()
-
-                self._genesisParameters = GenesisParameters(
-                    activeSlotsCoefficient: activeSlots,
-                    epochLength: Int(genesis.epochLength),
-                    maxKesEvolutions: Int(genesis.maxKesEvolutions),
-                    maxLovelaceSupply: Int(genesis.maxLovelaceSupply),
-                    networkId: self._network.description,
-                    networkMagic: Int(genesis.networkMagic),
-                    securityParam: Int(genesis.securityParameter),
-                    slotLength: Int(genesis.slotLength.milliseconds / 1000),
-                    slotsPerKesPeriod: Int(genesis.slotsPerKesPeriod),
-                    systemStart: systemStartDate,
-                    updateQuorum: Int(genesis.updateQuorum)
-                )
-            default:
-                throw CardanoChainError.operationError("Unexpected genesis configuration era")
+        let task = Task<GenesisParameters, Error> {
+            do {
+                let value = try await self.fetchGenesisFromOgmios()
+                self._genesisParameters = value
+                self._genesisParametersFetch = nil
+                return value
+            } catch {
+                self._genesisParametersFetch = nil
+                throw error
             }
         }
+        _genesisParametersFetch = task
+        return try await task.value
+    }
 
-        return self._genesisParameters!
+    private func fetchGenesisFromOgmios() async throws -> GenesisParameters {
+        let genesisParams = QueryNetworkGenesisConfiguration.Params(era: .shelley)
+        let response = try await self.client.networkQuery.genesisConfiguration.result(
+            params: genesisParams
+        )
+
+        switch response {
+        case .shelley(let genesis):
+            // Parse activeSlotsCoefficient string (e.g., "1/20") to Double
+            let activeSlots = self.parseRatioString(genesis.activeSlotsCoefficient) ?? 0.05
+
+            // Parse startTime string to Date
+            let formatter = ISO8601DateFormatter()
+            let systemStartDate = formatter.date(from: genesis.startTime) ?? Date()
+
+            return GenesisParameters(
+                activeSlotsCoefficient: activeSlots,
+                epochLength: Int(genesis.epochLength),
+                maxKesEvolutions: Int(genesis.maxKesEvolutions),
+                maxLovelaceSupply: Int(genesis.maxLovelaceSupply),
+                networkId: self._network.description,
+                networkMagic: Int(genesis.networkMagic),
+                securityParam: Int(genesis.securityParameter),
+                slotLength: Int(genesis.slotLength.milliseconds / 1000),
+                slotsPerKesPeriod: Int(genesis.slotsPerKesPeriod),
+                systemStart: systemStartDate,
+                updateQuorum: Int(genesis.updateQuorum)
+            )
+        default:
+            throw CardanoChainError.operationError("Unexpected genesis configuration era")
+        }
     }
 
     /// Returns the current protocol parameters.
     ///
     /// Protocol parameters are cached per epoch and automatically refreshed
     /// when the epoch changes.
-    public lazy var protocolParameters: () async throws -> SwiftCardanoCore.ProtocolParameters = {
-        [weak self] in
-        guard let self = self else {
-            throw CardanoChainError.operationError("Self is nil")
-        }
-
-        // Refresh if epoch changed or not cached
+    public func protocolParameters() async throws -> SwiftCardanoCore.ProtocolParameters {
+        // Refresh if epoch changed or not cached. Tracking the epoch the cached
+        // params were *fetched for* (rather than comparing against `_epoch`,
+        // which `epoch()` just updated) makes the invalidation actually fire.
         let currentEpoch = try await self.epoch()
-        if self._protocolParameters == nil || self._epoch != currentEpoch {
-            self._protocolParameters = try await self.queryCurrentProtocolParams()
+        if let cached = _protocolParameters,
+           _protocolParametersEpoch == currentEpoch {
+            return cached
         }
+        if let inFlight = _protocolParametersFetch { return try await inFlight.value }
 
-        return self._protocolParameters!
+        let task = Task<SwiftCardanoCore.ProtocolParameters, Error> {
+            do {
+                let value = try await self.queryCurrentProtocolParams()
+                self._protocolParameters = value
+                self._protocolParametersEpoch = currentEpoch
+                self._protocolParametersFetch = nil
+                return value
+            } catch {
+                self._protocolParametersFetch = nil
+                throw error
+            }
+        }
+        _protocolParametersFetch = task
+        return try await task.value
     }
 
     // MARK: - Initialization

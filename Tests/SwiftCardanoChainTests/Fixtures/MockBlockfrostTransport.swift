@@ -841,6 +841,7 @@ struct MockTransport: ClientTransport {
                         .AccountContent(
                             stakeAddress: "stake_test1upyz3gk6mw5he20apnwfn96cn9rscgvmmsxc9r86dh0k66gswf59n",
                             active: true,
+                            registered: true,
                             controlledAmount: "619154618165",
                             rewardsSum: "319154618165",
                             withdrawalsSum: "12125369253",
@@ -921,6 +922,7 @@ struct MockTransport: ClientTransport {
             case "get/governance/proposals/{tx_hash}/{cert_index}":
                 body = try JSONEncoder().encode(
                     Components.Schemas.Proposal(
+                        id: "gov_action1qkm52uwlnw0gtcyh9259sjuwsyrnjdfd3hg7tjzrl463xtv4wfxysqqqqqfd6vw0",
                         txHash: "2dd15e0ef6e6a17841cb9541c27724072ce4d4b79b91e58432fbaa32d9572531",
                         certIndex: 1,
                         governanceType: .treasuryWithdrawals,
@@ -937,6 +939,7 @@ struct MockTransport: ClientTransport {
             case "get/governance/proposals/{tx_hash}/{cert_index}/parameters":
                 body = try JSONEncoder().encode(
                     Components.Schemas.ProposalParameters(
+                        id: "gov_action1qkm52uwlnw0gtcyh9259sjuwsyrnjdfd3hg7tjzrl463xtv4wfxysqqqqqfd6vw0",
                         txHash: "2dd15e0ef6e6a17841cb9541c27724072ce4d4b79b91e58432fbaa32d9572531",
                         certIndex: 1,
                         parameters: Components.Schemas.ProposalParameters.ParametersPayload(

@@ -13,71 +13,49 @@ import SystemPackage
 ///    it to build and sign transactions without any network access.
 /// 4. **Return**: The signed transaction CBOR is written back into the same JSON file
 ///    (via `submitTxCBOR`). Transfer the file back and submit the tx online.
-public class OfflineTransferChainContext: ChainContext {
+public actor OfflineTransferChainContext: ChainContext {
 
     // MARK: - ChainContext Identity
 
-    public var name: String { "OfflineTransfer" }
-    public var type: ContextType { .offline }
+    nonisolated public var name: String { "OfflineTransfer" }
+    nonisolated public var type: ContextType { .offline }
 
     // MARK: - Private State
 
     private let filePath: FilePath
     private var offlineTransfer: OfflineTransfer
-    private let _network: Network
-    private var _protocolParameters: ProtocolParameters?
-    private var _genesisParameters: GenesisParameters?
+    private let resolvedNetwork: Network
 
     // MARK: - networkId
 
-    public var networkId: NetworkId {
-        (offlineTransfer.protocol.network ?? _network).networkId
+    nonisolated public let networkId: NetworkId
+
+    // MARK: - Async Properties
+
+    public func protocolParameters() async throws -> ProtocolParameters {
+        guard let params = offlineTransfer.protocol.protocolParameters else {
+            throw CardanoChainError.offlineTransferError(
+                "Protocol parameters not found in offline transfer file."
+            )
+        }
+        return params
     }
 
-    // MARK: - Lazy Async Properties
-
-    public lazy var protocolParameters: () async throws -> ProtocolParameters = { [weak self] in
-        guard let self else {
-            throw CardanoChainError.offlineTransferError("Self is nil")
+    public func genesisParameters() async throws -> GenesisParameters {
+        guard let params = offlineTransfer.protocol.genesisParameters else {
+            throw CardanoChainError.offlineTransferError(
+                "Genesis parameters not found in offline transfer file."
+            )
         }
-        if self._protocolParameters == nil {
-            guard let params = self.offlineTransfer.protocol.protocolParameters else {
-                throw CardanoChainError.offlineTransferError(
-                    "Protocol parameters not found in offline transfer file."
-                )
-            }
-            self._protocolParameters = params
-        }
-        return self._protocolParameters!
+        return params
     }
 
-    public lazy var genesisParameters: () async throws -> GenesisParameters = { [weak self] in
-        guard let self else {
-            throw CardanoChainError.offlineTransferError("Self is nil")
-        }
-        if self._genesisParameters == nil {
-            guard let params = self.offlineTransfer.protocol.genesisParameters else {
-                throw CardanoChainError.offlineTransferError(
-                    "Genesis parameters not found in offline transfer file."
-                )
-            }
-            self._genesisParameters = params
-        }
-        return self._genesisParameters!
+    public func era() async throws -> Era? {
+        offlineTransfer.protocol.era
     }
 
-    public lazy var era: () async throws -> Era? = { [weak self] in
-        guard let self else {
-            throw CardanoChainError.offlineTransferError("Self is nil")
-        }
-        return self.offlineTransfer.protocol.era
-    }
-
-    public lazy var epoch: () async throws -> Int = { [weak self] in
-        guard let self else {
-            throw CardanoChainError.offlineTransferError("Self is nil")
-        }
-        let genesis = try await self.genesisParameters()
+    public func epoch() async throws -> Int {
+        let genesis = try await genesisParameters()
         guard let systemStart = genesis.systemStart,
               let epochLength = genesis.epochLength,
               let slotLength = genesis.slotLength else {
@@ -95,12 +73,9 @@ public class OfflineTransferChainContext: ChainContext {
         return Int(elapsed / epochDurationSeconds)
     }
 
-    public lazy var lastBlockSlot: () async throws -> Int = { [weak self] in
-        guard let self else {
-            throw CardanoChainError.offlineTransferError("Self is nil")
-        }
-        let genesis = try await self.genesisParameters()
-        let currentEpoch = try await self.epoch()
+    public func lastBlockSlot() async throws -> Int {
+        let genesis = try await genesisParameters()
+        let currentEpoch = try await epoch()
 
         guard let systemStart = genesis.systemStart,
               let epochLength = genesis.epochLength,
@@ -112,7 +87,7 @@ public class OfflineTransferChainContext: ChainContext {
 
         // Byron→Shelley hard fork transition epoch per network.
         // mainnet=208, preprod=4, preview=0, everything else=0.
-        let network = self.offlineTransfer.protocol.network ?? self._network
+        let network = offlineTransfer.protocol.network ?? resolvedNetwork
         let byronTransitionEpoch: Int
         switch network {
         case .mainnet:
@@ -151,9 +126,12 @@ public class OfflineTransferChainContext: ChainContext {
     ///   - filePath: Path to the offline transfer JSON file.
     ///   - network: Fallback network used when the file does not specify one.
     public init(filePath: FilePath, network: Network = .mainnet) throws {
+        let loaded = try OfflineTransfer.load(from: filePath)
+        let resolved = loaded.protocol.network ?? network
         self.filePath = filePath
-        self._network = network
-        self.offlineTransfer = try OfflineTransfer.load(from: filePath)
+        self.resolvedNetwork = resolved
+        self.networkId = resolved.networkId
+        self.offlineTransfer = loaded
     }
 
     // MARK: - Chain Tip
