@@ -1,3 +1,9 @@
+## 0.4.0 (2026-05-09)
+
+### Feat
+
+- add Sendable conformance
+
 ## 0.3.4 (2026-05-02)
 
 ### Fix
