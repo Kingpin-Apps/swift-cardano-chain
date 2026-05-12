@@ -1,3 +1,8 @@
+// `Mockable` / `MockCommandRunning` are macOS-only: tuist/Command's `@Mockable`
+// annotation on `CommandRunning` is wrapped in `#if os(macOS)` because Mockable
+// historically depended on Combine. Skip these fixtures on non-Apple platforms.
+#if canImport(Darwin)
+
 import Command
 import Foundation
 import Mockable
@@ -1421,3 +1426,5 @@ public struct MockCardanoCLIClient {
         return String(data: jsonData, encoding: .utf8)!
     }
 }
+
+#endif // canImport(Darwin)

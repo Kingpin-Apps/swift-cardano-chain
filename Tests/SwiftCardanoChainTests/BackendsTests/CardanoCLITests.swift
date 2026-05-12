@@ -1,3 +1,8 @@
+// Depends on `MockCommandRunning` from Mockable's `@Mockable` macro, which
+// tuist/Command only applies on macOS (Combine dependency). See
+// `MockCardanoCLIClient.swift` for the same gate.
+#if canImport(Darwin)
+
 import Command
 import Foundation
 import Mockable
@@ -765,3 +770,5 @@ struct CardanoCLIContextTests {
         #expect(memberInfo.status == .active)
     }
 }
+
+#endif // canImport(Darwin)
