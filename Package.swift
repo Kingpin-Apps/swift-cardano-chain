@@ -8,8 +8,9 @@ let package = Package(
     platforms: [
       .iOS(.v17),
       .macOS(.v15),
-      .watchOS(.v7),
-      .tvOS(.v14),
+      .watchOS(.v9),
+      .tvOS(.v16),
+      .visionOS(.v1),
     ],
     products: [
         // Products define the executables and libraries a package produces, making them visible to other packages.
@@ -18,15 +19,14 @@ let package = Package(
             targets: ["SwiftCardanoChain"]),
     ],
     dependencies: [
-        .package(url: "https://github.com/Kingpin-Apps/swift-cardano-core.git", from: "0.3.21"),
-        .package(url: "https://github.com/Kingpin-Apps/swift-cardano-utils.git", from: "0.4.6"),
+        .package(url: "https://github.com/Kingpin-Apps/swift-cardano-core.git", from: "0.4.0"),
+        .package(url: "https://github.com/Kingpin-Apps/swift-cardano-utils.git", from: "0.5.0"),
         .package(url: "https://github.com/Kingpin-Apps/swift-blockfrost-api.git", from: "0.2.0"),
         .package(url: "https://github.com/Kingpin-Apps/swift-handles-api.git", from: "0.1.1"),
         .package(url: "https://github.com/Kingpin-Apps/swift-koios.git", from: "0.2.1"),
-        .package(url: "https://github.com/Kingpin-Apps/swift-ogmios.git", from: "0.2.2"),
-        .package(url: "https://github.com/Kingpin-Apps/swift-cardano-network.git", from: "1.0.10"),
-        .package(url: "https://github.com/Kingpin-Apps/swift-cardano-uplc.git", from: "0.1.6"),
-        .package(url: "https://github.com/KINGH242/PotentCodables.git", .upToNextMinor(from: "3.6.0")),
+        .package(url: "https://github.com/Kingpin-Apps/swift-ogmios.git", from: "0.3.0"),
+        .package(url: "https://github.com/Kingpin-Apps/swift-cardano-network.git", from: "1.1.0"),
+        .package(url: "https://github.com/Kingpin-Apps/swift-cardano-uplc.git", from: "0.2.0"),
     ],
     targets: [
         // Targets are the basic building blocks of a package, defining a module or a test suite.
@@ -34,7 +34,6 @@ let package = Package(
         .target(
             name: "SwiftCardanoChain",
             dependencies: [
-                "PotentCodables",
                 .product(name: "SwiftCardanoCore", package: "swift-cardano-core"),
                 .product(name: "SwiftCardanoUtils", package: "swift-cardano-utils"),
                 .product(name: "SwiftBlockfrostAPI", package: "swift-blockfrost-api"),

@@ -1,5 +1,4 @@
 import Foundation
-import PotentCBOR
 import SwiftCardanoCore
 import SwiftCardanoUtils
 import SwiftOgmios
@@ -307,11 +306,11 @@ public actor OgmiosChainContext: ChainContext {
         case .origin:
             return ChainTip(
                 block: 0,
-                epoch: health?.currentEpoch ?? 0,
+                epoch: EpochNumber(health?.currentEpoch ?? 0),
                 era: health?.currentEra,
                 hash: nil,
                 slot: 0,
-                slotInEpoch: health?.slotInEpoch,
+                slotInEpoch: (health?.slotInEpoch).map { SlotNumber($0) },
                 slotsToEpochEnd: nil,
                 syncProgress: syncProgress
             )
@@ -323,12 +322,12 @@ public actor OgmiosChainContext: ChainContext {
                 resolvedEpoch = try await epoch()
             }
             return ChainTip(
-                block: health?.lastKnownTip.height,
-                epoch: resolvedEpoch,
+                block: (health?.lastKnownTip.height).map { BlockNumber($0) },
+                epoch: EpochNumber(resolvedEpoch),
                 era: health?.currentEra,
                 hash: point.id.description,
-                slot: Int(point.slot),
-                slotInEpoch: health?.slotInEpoch,
+                slot: SlotNumber(exactly: point.slot),
+                slotInEpoch: (health?.slotInEpoch).map { SlotNumber($0) },
                 slotsToEpochEnd: nil,
                 syncProgress: syncProgress
             )
@@ -450,8 +449,8 @@ public actor OgmiosChainContext: ChainContext {
         for evalResult in response {
             let key = "\(evalResult.validator.purpose.rawValue):\(evalResult.validator.index)"
             result[key] = SwiftCardanoCore.ExecutionUnits(
-                mem: Int(evalResult.budget.memory),
-                steps: Int(evalResult.budget.cpu)
+                mem: Int64(evalResult.budget.memory),
+                steps: Int64(evalResult.budget.cpu)
             )
         }
 
@@ -523,7 +522,7 @@ public actor OgmiosChainContext: ChainContext {
             return StakeAddressInfo(
                 active: true,  // If we get a summary, the account is active
                 address: try address.toBech32(),
-                rewardAccountBalance: Int(summary.rewards.ada.lovelace),
+                rewardAccountBalance: Int64(summary.rewards.ada.lovelace),
                 stakeDelegation: stakeDelegation,
                 voteDelegation: voteDelegation
             )
@@ -632,7 +631,7 @@ public actor OgmiosChainContext: ChainContext {
 
                 for (assetNameHex, quantity) in assetMap {
                     let assetName = try AssetName(payload: Data(hex: assetNameHex))
-                    asset[assetName] = Int(quantity)
+                    asset[assetName] = Int64(quantity)
                 }
 
                 multiAssets[policyId] = asset
@@ -640,7 +639,7 @@ public actor OgmiosChainContext: ChainContext {
         }
 
         let amount = Value(
-            coin: Int(lovelaceAmount),
+            coin: Int64(lovelaceAmount),
             multiAsset: multiAssets
         )
 
@@ -708,9 +707,9 @@ public actor OgmiosChainContext: ChainContext {
         let costModels: ProtocolParametersCostModels
         if let plutusCostModels = params.plutusCostModels {
             costModels = ProtocolParametersCostModels(
-                PlutusV1: plutusCostModels.plutusV1?.compactMap { Int($0) } ?? [],
-                PlutusV2: plutusCostModels.plutusV2?.compactMap { Int($0) } ?? [],
-                PlutusV3: plutusCostModels.plutusV3?.compactMap { Int($0) } ?? []
+                PlutusV1: plutusCostModels.plutusV1?.compactMap { Int64($0) } ?? [],
+                PlutusV2: plutusCostModels.plutusV2?.compactMap { Int64($0) } ?? [],
+                PlutusV3: plutusCostModels.plutusV3?.compactMap { Int64($0) } ?? []
             )
         } else {
             costModels = ProtocolParametersCostModels(PlutusV1: [], PlutusV2: [], PlutusV3: [])
@@ -772,7 +771,7 @@ public actor OgmiosChainContext: ChainContext {
         let maxBlockExUnits: ProtocolParametersExecutionUnits
         if let units = params.maxExecutionUnitsPerBlock {
             maxBlockExUnits = ProtocolParametersExecutionUnits(
-                memory: Int(units.memory),
+                memory: Int64(units.memory),
                 steps: Int64(units.cpu)
             )
         } else {
@@ -782,7 +781,7 @@ public actor OgmiosChainContext: ChainContext {
         let maxTxExUnits: ProtocolParametersExecutionUnits
         if let units = params.maxExecutionUnitsPerTransaction {
             maxTxExUnits = ProtocolParametersExecutionUnits(
-                memory: Int(units.memory),
+                memory: Int64(units.memory),
                 steps: Int64(units.cpu)
             )
         } else {
@@ -791,49 +790,49 @@ public actor OgmiosChainContext: ChainContext {
 
         return SwiftCardanoCore.ProtocolParameters(
             collateralPercentage: params.collateralPercentage != nil
-                ? Int(params.collateralPercentage!) : 150,
+                ? Int64(params.collateralPercentage!) : 150,
             committeeMaxTermLength: params.constitutionalCommitteeMaxTermLength != nil
-                ? Int(params.constitutionalCommitteeMaxTermLength!) : 0,
+                ? Int64(params.constitutionalCommitteeMaxTermLength!) : 0,
             committeeMinSize: params.constitutionalCommitteeMinSize != nil
-                ? Int(params.constitutionalCommitteeMinSize!) : 0,
+                ? Int64(params.constitutionalCommitteeMinSize!) : 0,
             costModels: costModels,
             dRepActivity: params.delegateRepresentativeMaxIdleTime != nil
-                ? Int(params.delegateRepresentativeMaxIdleTime!) : 0,
+                ? Int64(params.delegateRepresentativeMaxIdleTime!) : 0,
             dRepDeposit: params.delegateRepresentativeDeposit != nil
-                ? Int(params.delegateRepresentativeDeposit!.ada.lovelace) : 0,
+                ? Int64(params.delegateRepresentativeDeposit!.ada.lovelace) : 0,
             dRepVotingThresholds: dRepVotingThresholds,
             executionUnitPrices: executionPrices,
             govActionDeposit: params.governanceActionDeposit != nil
-                ? Int(params.governanceActionDeposit!.ada.lovelace) : 0,
+                ? Int64(params.governanceActionDeposit!.ada.lovelace) : 0,
             govActionLifetime: params.governanceActionLifetime != nil
-                ? Int(params.governanceActionLifetime!) : 0,
-            maxBlockBodySize: Int(params.maxBlockBodySize.bytes),
+                ? Int64(params.governanceActionLifetime!) : 0,
+            maxBlockBodySize: Int64(params.maxBlockBodySize.bytes),
             maxBlockExecutionUnits: maxBlockExUnits,
-            maxBlockHeaderSize: Int(params.maxBlockHeaderSize.bytes),
+            maxBlockHeaderSize: Int64(params.maxBlockHeaderSize.bytes),
             maxCollateralInputs: params.maxCollateralInputs != nil
-                ? Int(params.maxCollateralInputs!) : 3,
+                ? Int64(params.maxCollateralInputs!) : 3,
             maxTxExecutionUnits: maxTxExUnits,
             maxTxSize: params.maxTransactionSize != nil
-                ? Int(params.maxTransactionSize!.bytes) : 16384,
-            maxValueSize: params.maxValueSize != nil ? Int(params.maxValueSize!.bytes) : 5000,
+                ? Int64(params.maxTransactionSize!.bytes) : 16384,
+            maxValueSize: params.maxValueSize != nil ? Int64(params.maxValueSize!.bytes) : 5000,
             minFeeRefScriptCostPerByte: params.minFeeReferenceScripts != nil
-                ? Int(params.minFeeReferenceScripts!.base) : nil,
-            minPoolCost: Int(params.minStakePoolCost.ada.lovelace),
+                ? Int64(params.minFeeReferenceScripts!.base) : nil,
+            minPoolCost: Int64(params.minStakePoolCost.ada.lovelace),
             monetaryExpansion: parseRatio(params.monetaryExpansion) ?? 0,
             poolPledgeInfluence: parseRatio(params.stakePoolPledgeInfluence) ?? 0,
-            poolRetireMaxEpoch: Int(params.stakePoolRetirementEpochBound),
+            poolRetireMaxEpoch: Int64(params.stakePoolRetirementEpochBound),
             poolVotingThresholds: poolVotingThresholds,
             protocolVersion: ProtocolParametersProtocolVersion(
                 major: Int(params.version.major),
                 minor: Int(params.version.minor)
             ),
-            stakeAddressDeposit: Int(params.stakeCredentialDeposit.ada.lovelace),
-            stakePoolDeposit: Int(params.stakePoolDeposit.ada.lovelace),
-            stakePoolTargetNum: Int(params.desiredNumberOfStakePools),
+            stakeAddressDeposit: Int64(params.stakeCredentialDeposit.ada.lovelace),
+            stakePoolDeposit: Int64(params.stakePoolDeposit.ada.lovelace),
+            stakePoolTargetNum: Int64(params.desiredNumberOfStakePools),
             treasuryCut: parseRatio(params.treasuryExpansion) ?? 0,
-            txFeeFixed: Int(params.minFeeConstant.ada.lovelace),
-            txFeePerByte: Int(params.minFeeCoefficient),
-            utxoCostPerByte: Int(params.minUtxoDepositCoefficient)
+            txFeeFixed: Int64(params.minFeeConstant.ada.lovelace),
+            txFeePerByte: Int64(params.minFeeCoefficient),
+            utxoCostPerByte: Int64(params.minUtxoDepositCoefficient)
         )
     }
 

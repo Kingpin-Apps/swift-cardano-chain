@@ -179,8 +179,8 @@ public extension ChainContext {
             let original = redeemers[r.index]
             let tag = original.tag.map { "\($0)" } ?? "unknown"
             let key = "\(tag):\(original.index)"
-            let consumedMem = Int(ExBudget.restricted.mem - r.remainingBudget.mem)
-            let consumedSteps = Int(ExBudget.restricted.cpu - r.remainingBudget.cpu)
+            let consumedMem = Int64(ExBudget.restricted.mem - r.remainingBudget.mem)
+            let consumedSteps = Int64(ExBudget.restricted.cpu - r.remainingBudget.cpu)
             out[key] = ExecutionUnits(
                 mem: max(0, consumedMem),
                 steps: max(0, consumedSteps)

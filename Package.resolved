@@ -1,5 +1,5 @@
 {
-  "originHash" : "8a60c18560bd900adf86bba1cb71411f2d804b259131ce13ca6a8792675bf91a",
+  "originHash" : "ae33aa2a1c65a73527cdd60eedbe859873933647498fad645220b9fce7dcf2f0",
   "pins" : [
     {
       "identity" : "base32",
@@ -38,15 +38,6 @@
       }
     },
     {
-      "identity" : "float16",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/SusanDoggie/Float16.git",
-      "state" : {
-        "revision" : "936ae66adccf1c91bcaeeb9c0cddde78a13695c3",
-        "version" : "1.1.1"
-      }
-    },
-    {
       "identity" : "mockable",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/Kolos65/Mockable",
@@ -71,24 +62,6 @@
       "state" : {
         "revision" : "7c74ac435e03a927c3a73134c48b61e60221abcb",
         "version" : "0.3.8"
-      }
-    },
-    {
-      "identity" : "potentcodables",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/KINGH242/PotentCodables.git",
-      "state" : {
-        "revision" : "1b3880253008d76dc16e48d6140a81d061214324",
-        "version" : "3.6.0"
-      }
-    },
-    {
-      "identity" : "regex",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/sharplet/Regex.git",
-      "state" : {
-        "revision" : "76c2b73d4281d77fc3118391877efd1bf972f515",
-        "version" : "2.1.1"
       }
     },
     {
@@ -168,8 +141,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/Kingpin-Apps/swift-cardano-core.git",
       "state" : {
-        "revision" : "a67a74d7baea1d6bd518228f958ad9c086cc9948",
-        "version" : "0.3.21"
+        "revision" : "d7c28ca946094d5246dc6df1bde4d99a227108ee",
+        "version" : "0.4.0"
       }
     },
     {
@@ -177,8 +150,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/Kingpin-Apps/swift-cardano-network.git",
       "state" : {
-        "revision" : "99ffdbf74f9a97a82bbadce784a129de6f27ffd1",
-        "version" : "1.0.10"
+        "revision" : "9aae95fbb9766df16abac50076a50757a9768c77",
+        "version" : "1.1.0"
       }
     },
     {
@@ -186,8 +159,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/Kingpin-Apps/swift-cardano-uplc.git",
       "state" : {
-        "revision" : "742990c443e661cd9d975b72b275bd40b5ca15ea",
-        "version" : "0.1.6"
+        "revision" : "a9750e56cd8d02c71883658b046eb1b70f3a8086",
+        "version" : "0.2.0"
       }
     },
     {
@@ -195,8 +168,17 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/Kingpin-Apps/swift-cardano-utils.git",
       "state" : {
-        "revision" : "28ba22b6c8f94677b23b1ea010f2f564254b2238",
-        "version" : "0.4.6"
+        "revision" : "5ccaa3517ea174d5137ef020889722cf3efaeedb",
+        "version" : "0.5.0"
+      }
+    },
+    {
+      "identity" : "swift-cbor-codable",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/Kingpin-Apps/swift-cbor-codable.git",
+      "state" : {
+        "revision" : "82025e789e64527d6e5927232afa52391d6b7995",
+        "version" : "0.3.0"
       }
     },
     {
@@ -285,8 +267,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/Kingpin-Apps/swift-kes.git",
       "state" : {
-        "revision" : "248c28ab0fabf011b162a60d5f9b298bd4ee3ad2",
-        "version" : "0.1.2"
+        "revision" : "38e282d16e4c1145a885d8c25c0d43115194766f",
+        "version" : "0.2.0"
       }
     },
     {
@@ -330,8 +312,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/Kingpin-Apps/swift-ncal.git",
       "state" : {
-        "revision" : "20612ca55a3977c8e77cd1bee1e0d363df133e3b",
-        "version" : "0.2.3"
+        "revision" : "d7ea3dcd60911affa52e52a7a69b7b86f01db3ed",
+        "version" : "0.3.0"
       }
     },
     {
@@ -393,8 +375,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/Kingpin-Apps/swift-ogmios.git",
       "state" : {
-        "revision" : "0da86e3efd46a3953e7193d79d8525fcc0af3814",
-        "version" : "0.2.2"
+        "revision" : "6207583ffe7af9000db547ae95cef00ec959a5c2",
+        "version" : "0.3.0"
       }
     },
     {

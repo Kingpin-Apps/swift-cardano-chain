@@ -1,6 +1,5 @@
 import Foundation
 import OpenAPIRuntime
-import PotentCBOR
 import SwiftCardanoCore
 import SwiftKoios
 
@@ -300,12 +299,12 @@ public actor KoiosChainContext: ChainContext {
             }
 
             return ChainTip(
-                block: Int(tip.blockNo ?? 0),
-                epoch: tip.epochNo?.value as? Int,
+                block: BlockNumber(exactly: tip.blockNo ?? 0),
+                epoch: (tip.epochNo?.value as? Int).map { EpochNumber($0) },
                 era: nil,
                 hash: tip.hash?.value as? String,
-                slot: tip.absSlot?.value as? Int,
-                slotInEpoch: tip.epochSlot?.value as? Int,
+                slot: (tip.absSlot?.value as? Int).map { SlotNumber($0) },
+                slotInEpoch: (tip.epochSlot?.value as? Int).map { SlotNumber($0) },
                 slotsToEpochEnd: nil,
                 syncProgress: nil
             )
@@ -440,14 +439,14 @@ public actor KoiosChainContext: ChainContext {
                                 if multiAssets[policyId] == nil {
                                     multiAssets[policyId] = Asset([:])
                                 }
-                                multiAssets[policyId]?[assetName] = Int(quantity) ?? 0
+                                multiAssets[policyId]?[assetName] = Int64(quantity) ?? 0
                             }
                         }
                     }
                 }
 
                 let amount = Value(
-                    coin: Int(lovelaceAmount),
+                    coin: Int64(lovelaceAmount) ?? 0,
                     multiAsset: multiAssets
                 )
 
@@ -558,11 +557,11 @@ public actor KoiosChainContext: ChainContext {
                     if multiAssets[policyId] == nil {
                         multiAssets[policyId] = Asset([:])
                     }
-                    multiAssets[policyId]?[assetName] = Int(quantityStr) ?? 0
+                    multiAssets[policyId]?[assetName] = Int64(quantityStr) ?? 0
                 }
             }
 
-            let amount = Value(coin: Int(lovelaceAmount), multiAsset: multiAssets)
+            let amount = Value(coin: Int64(lovelaceAmount) ?? 0, multiAsset: multiAssets)
 
             var datumHash: DatumHash? = nil
             var datumOption: DatumOption? = nil
@@ -672,8 +671,8 @@ public actor KoiosChainContext: ChainContext {
                             let key = "\(normalizedPurpose):\(index)"
 
                             returnVal[key] = ExecutionUnits(
-                                mem: memory,
-                                steps: cpu
+                                mem: Int64(memory),
+                                steps: Int64(cpu)
                             )
                         }
                     }
@@ -707,7 +706,7 @@ public actor KoiosChainContext: ChainContext {
                 let info = StakeAddressInfo(
                     active: stakeInfo.status == .registered,
                     address: (stakeInfo.stakeAddress?.value as? String) ?? "",
-                    rewardAccountBalance: Int(stakeInfo.rewardsAvailable ?? "0") ?? 0,
+                    rewardAccountBalance: Int64(stakeInfo.rewardsAvailable ?? "0") ?? 0,
                     stakeDelegation: try PoolOperator(
                         from: stakeInfo.delegatedPool ?? ""
                     ),

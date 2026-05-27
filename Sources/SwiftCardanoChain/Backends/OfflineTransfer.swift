@@ -151,10 +151,10 @@ public actor OfflineTransferChainContext: ChainContext {
 
         return ChainTip(
             block: nil,
-            epoch: currentEpoch,
+            epoch: EpochNumber(currentEpoch),
             era: offlineTransfer.protocol.era?.rawValue,
             hash: nil,
-            slot: currentSlot,
+            slot: SlotNumber(currentSlot),
             slotInEpoch: nil,
             slotsToEpochEnd: nil,
             syncProgress: nil

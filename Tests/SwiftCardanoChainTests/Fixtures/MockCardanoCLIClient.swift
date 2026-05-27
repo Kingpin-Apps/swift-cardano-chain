@@ -6,7 +6,6 @@
 import Command
 import Foundation
 import Mockable
-import PotentCodables
 import SwiftCardanoCore
 import SwiftCardanoUtils
 import SystemPackage

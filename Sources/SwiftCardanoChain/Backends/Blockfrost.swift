@@ -1,6 +1,5 @@
 import Foundation
 import OpenAPIRuntime
-import PotentCBOR
 import SwiftBlockfrostAPI
 import SwiftCardanoCore
 
@@ -242,12 +241,12 @@ public actor BlockFrostChainContext: ChainContext {
             let json = try response.ok.body.json
 
             return ChainTip(
-                block: json.height,
-                epoch: json.epoch,
+                block: json.height.map { BlockNumber($0) },
+                epoch: json.epoch.map { EpochNumber($0) },
                 era: nil,
                 hash: json.hash,
-                slot: json.slot,
-                slotInEpoch: json.epochSlot,
+                slot: json.slot.map { SlotNumber($0) },
+                slotInEpoch: json.epochSlot.map { SlotNumber($0) },
                 slotsToEpochEnd: nil,
                 syncProgress: nil
             )
@@ -268,19 +267,19 @@ public actor BlockFrostChainContext: ChainContext {
             let costModels = protocolParams.costModels.unsafelyUnwrapped.additionalProperties.value
 
             return ProtocolParameters(
-                collateralPercentage: protocolParams.collateralPercent!,
-                committeeMaxTermLength: Int(protocolParams.committeeMaxTermLength!)!,
-                committeeMinSize: Int(protocolParams.committeeMinSize!)!,
+                collateralPercentage: Int64(protocolParams.collateralPercent!),
+                committeeMaxTermLength: Int64(protocolParams.committeeMaxTermLength!)!,
+                committeeMinSize: Int64(protocolParams.committeeMinSize!)!,
                 costModels: ProtocolParametersCostModels(
                     PlutusV1: (costModels["PlutusV1"] as! [String: Int])
-                        .sorted { $0.key < $1.key }.map { $0.value },
+                        .sorted { $0.key < $1.key }.map { Int64($0.value) },
                     PlutusV2: (costModels["PlutusV2"] as! [String: Int])
-                        .sorted { $0.key < $1.key }.map { $0.value },
+                        .sorted { $0.key < $1.key }.map { Int64($0.value) },
                     PlutusV3: (costModels["PlutusV3"] as! [String: Int])
-                        .sorted { $0.key < $1.key }.map { $0.value }
+                        .sorted { $0.key < $1.key }.map { Int64($0.value) }
                 ),
-                dRepActivity: Int(protocolParams.drepActivity!)!,
-                dRepDeposit: Int(protocolParams.drepDeposit!)!,
+                dRepActivity: Int64(protocolParams.drepActivity!)!,
+                dRepDeposit: Int64(protocolParams.drepDeposit!)!,
                 dRepVotingThresholds: DRepVotingThresholds(
                     committeeNoConfidence: protocolParams.dvtCommitteeNoConfidence!,
                     committeeNormal: protocolParams.dvtCommitteeNormal!,
@@ -297,30 +296,28 @@ public actor BlockFrostChainContext: ChainContext {
                     priceMemory: protocolParams.priceMem!,
                     priceSteps: protocolParams.priceStep!
                 ),
-                govActionDeposit: Int(protocolParams.govActionDeposit!)!,
-                govActionLifetime: Int(protocolParams.govActionLifetime!)!,
-                maxBlockBodySize: Int(
-                    exactly: protocolParams.maxBlockSize
-                )!,
+                govActionDeposit: Int64(protocolParams.govActionDeposit!)!,
+                govActionLifetime: Int64(protocolParams.govActionLifetime!)!,
+                maxBlockBodySize: Int64(protocolParams.maxBlockSize),
                 maxBlockExecutionUnits: ProtocolParametersExecutionUnits(
-                    memory: Int(protocolParams.maxBlockExMem!)!,
+                    memory: Int64(protocolParams.maxBlockExMem!)!,
                     steps: Int64(protocolParams.maxBlockExSteps!)!
                 ),
-                maxBlockHeaderSize: Int(protocolParams.maxBlockHeaderSize),
-                maxCollateralInputs: protocolParams.maxCollateralInputs!,
+                maxBlockHeaderSize: Int64(protocolParams.maxBlockHeaderSize),
+                maxCollateralInputs: Int64(protocolParams.maxCollateralInputs!),
                 maxTxExecutionUnits: ProtocolParametersExecutionUnits(
-                    memory: Int(protocolParams.maxTxExMem!)!,
+                    memory: Int64(protocolParams.maxTxExMem!)!,
                     steps: Int64(protocolParams.maxTxExSteps!)!
                 ),
-                maxTxSize: protocolParams.maxTxSize,
-                maxValueSize: Int(protocolParams.maxValSize!)!,
-                minFeeRefScriptCostPerByte: Int(
+                maxTxSize: Int64(protocolParams.maxTxSize),
+                maxValueSize: Int64(protocolParams.maxValSize!)!,
+                minFeeRefScriptCostPerByte: Int64(
                     protocolParams.minFeeRefScriptCostPerByte!
                 ),
-                minPoolCost: Int(protocolParams.minPoolCost)!,
+                minPoolCost: Int64(protocolParams.minPoolCost)!,
                 monetaryExpansion: protocolParams.rho,
                 poolPledgeInfluence: protocolParams.a0,
-                poolRetireMaxEpoch: protocolParams.eMax,
+                poolRetireMaxEpoch: Int64(protocolParams.eMax),
                 poolVotingThresholds: ProtocolParametersPoolVotingThresholds(
                     committeeNoConfidence: protocolParams.pvtMotionNoConfidence!,
                     committeeNormal: protocolParams.pvtCommitteeNormal!,
@@ -332,13 +329,13 @@ public actor BlockFrostChainContext: ChainContext {
                     major: protocolParams.protocolMajorVer,
                     minor: protocolParams.protocolMinorVer
                 ),
-                stakeAddressDeposit: Int(protocolParams.keyDeposit)!,
-                stakePoolDeposit: Int(protocolParams.poolDeposit)!,
-                stakePoolTargetNum: protocolParams.nOpt,
+                stakeAddressDeposit: Int64(protocolParams.keyDeposit)!,
+                stakePoolDeposit: Int64(protocolParams.poolDeposit)!,
+                stakePoolTargetNum: Int64(protocolParams.nOpt),
                 treasuryCut: protocolParams.tau,
-                txFeeFixed: protocolParams.minFeeB,
-                txFeePerByte: protocolParams.minFeeA,
-                utxoCostPerByte: Int(protocolParams.coinsPerUtxoSize!)!
+                txFeeFixed: Int64(protocolParams.minFeeB),
+                txFeePerByte: Int64(protocolParams.minFeeA),
+                utxoCostPerByte: Int64(protocolParams.coinsPerUtxoSize!)!
             )
 
         } catch {
@@ -536,12 +533,12 @@ public actor BlockFrostChainContext: ChainContext {
                         if multiAssets[policyId] == nil {
                             multiAssets[policyId] = Asset([:])
                         }
-                        multiAssets[policyId]?[assetName] = Int(item.quantity)
+                        multiAssets[policyId]?[assetName] = Int64(item.quantity) ?? 0
                     }
                 }
 
                 let amount = Value(
-                    coin: Int(lovelaceAmount),
+                    coin: Int64(lovelaceAmount) ?? 0,
                     multiAsset: multiAssets
                 )
 
@@ -633,11 +630,11 @@ public actor BlockFrostChainContext: ChainContext {
                     if multiAssets[policyId] == nil {
                         multiAssets[policyId] = Asset([:])
                     }
-                    multiAssets[policyId]?[assetName] = Int(item.quantity)
+                    multiAssets[policyId]?[assetName] = Int64(item.quantity) ?? 0
                 }
             }
 
-            let amount = Value(coin: Int(lovelaceAmount), multiAsset: multiAssets)
+            let amount = Value(coin: Int64(lovelaceAmount) ?? 0, multiAsset: multiAssets)
 
             var datumHash: DatumHash? = nil
             var datumOption: DatumOption? = nil
@@ -718,8 +715,8 @@ public actor BlockFrostChainContext: ChainContext {
             {
                 for (key, value) in evaluationResult {
                     returnVal[key] = ExecutionUnits(
-                        mem: Int(value["memory"] ?? 0),
-                        steps: Int(value["steps"] ?? 0)
+                        mem: Int64(value["memory"] ?? 0),
+                        steps: Int64(value["steps"] ?? 0)
                     )
                 }
             }
@@ -746,9 +743,9 @@ public actor BlockFrostChainContext: ChainContext {
             return [
                 StakeAddressInfo(
                     active: stakeInfo.active,
-                    activeEpoch: stakeInfo.activeEpoch,
+                    activeEpoch: stakeInfo.activeEpoch.map { EpochNumber($0) },
                     address: stakeInfo.stakeAddress,
-                    rewardAccountBalance: Int(
+                    rewardAccountBalance: Int64(
                         stakeInfo.withdrawableAmount
                     )!,
                     stakeDelegation: stakeInfo.poolId != nil
@@ -1172,12 +1169,12 @@ public actor BlockFrostChainContext: ChainContext {
                 decentralizationConstant: params.decentralisationParam != nil ? try? UnitInterval(from: .float(params.decentralisationParam!)) : nil,
                 extraEntropy: params.extraEntropy != nil ? 0 : nil, // Placeholder as extraEntropy in ProtocolParamUpdate is UInt32
                 protocolVersion: (params.protocolMajorVer != nil && params.protocolMinorVer != nil) ? ProtocolVersion(major: params.protocolMajorVer!, minor: params.protocolMinorVer!) : nil,
-                minPoolCost: params.minPoolCost != nil ? Coin(Int(params.minPoolCost!)!) : nil,
-                adaPerUtxoByte: params.coinsPerUtxoSize != nil ? Coin(Int(params.coinsPerUtxoSize!)!) : nil,
+                minPoolCost: params.minPoolCost != nil ? Coin(Int64(params.minPoolCost!)!) : nil,
+                adaPerUtxoByte: params.coinsPerUtxoSize != nil ? Coin(Int64(params.coinsPerUtxoSize!)!) : nil,
                 costModels: nil, // Mapping cost models is complex due to different versions
                 executionCosts: (params.priceMem != nil && params.priceStep != nil) ? try? ExUnitPrices(from: .list([.float(params.priceMem!), .float(params.priceStep!)])) : nil,
-                maxTxExUnits: (params.maxTxExMem != nil && params.maxTxExSteps != nil) ? try? ExUnits(from: .list([.uint(UInt(params.maxTxExMem!)!), .uint(UInt(params.maxTxExSteps!)!)])) : nil,
-                maxBlockExUnits: (params.maxBlockExMem != nil && params.maxBlockExSteps != nil) ? try? ExUnits(from: .list([.uint(UInt(params.maxBlockExMem!)!), .uint(UInt(params.maxBlockExSteps!)!)])) : nil,
+                maxTxExUnits: (params.maxTxExMem != nil && params.maxTxExSteps != nil) ? try? ExUnits(from: .list([.uint(UInt64(params.maxTxExMem!)!), .uint(UInt64(params.maxTxExSteps!)!)])) : nil,
+                maxBlockExUnits: (params.maxBlockExMem != nil && params.maxBlockExSteps != nil) ? try? ExUnits(from: .list([.uint(UInt64(params.maxBlockExMem!)!), .uint(UInt64(params.maxBlockExSteps!)!)])) : nil,
                 maxValueSize: params.maxValSize != nil ? UInt32(params.maxValSize!) : nil,
                 collateralPercentage: params.collateralPercent != nil ? UInt16(params.collateralPercent!) : nil,
                 maxCollateralInputs: params.maxCollateralInputs != nil ? UInt16(params.maxCollateralInputs!) : nil

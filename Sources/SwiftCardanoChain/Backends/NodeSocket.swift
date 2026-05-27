@@ -300,13 +300,13 @@ public actor NodeSocketChainContext: ChainContext {
         )
 
         return ChainTip(
-            block: Int(tip.blockNo),
-            epoch: currentEpoch,
+            block: BlockNumber(exactly: tip.blockNo),
+            epoch: EpochNumber(currentEpoch),
             era: era,
             hash: hashHex,
-            slot: slotInt,
-            slotInEpoch: slotInEpoch,
-            slotsToEpochEnd: slotsToEpochEnd,
+            slot: SlotNumber(slotInt),
+            slotInEpoch: slotInEpoch.map { SlotNumber($0) },
+            slotsToEpochEnd: slotsToEpochEnd.map { SlotNumber($0) },
             syncProgress: syncProgress
         )
     }
@@ -420,7 +420,7 @@ public actor NodeSocketChainContext: ChainContext {
             StakeAddressInfo(
                 active: true,
                 address: bech32,
-                rewardAccountBalance: Int(rewards.lovelace),
+                rewardAccountBalance: Int64(rewards.lovelace),
                 stakeDelegation: delegation?.poolOperator,
                 voteDelegation: nil
             )

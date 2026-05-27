@@ -1,6 +1,4 @@
 import Foundation
-import PotentCBOR
-import PotentCodables
 import SwiftCardanoCore
 import SwiftCardanoUtils
 import SystemPackage
@@ -100,7 +98,7 @@ public actor CardanoCliChainContext: ChainContext {
             do {
                 let value = try await self.cli.getEpoch()
                 self._epochFetch = nil
-                return value
+                return Int(value)
             } catch {
                 self._epochFetch = nil
                 throw error
@@ -120,7 +118,7 @@ public actor CardanoCliChainContext: ChainContext {
 
         let task = Task<Int, Error> {
             do {
-                let value = try await self.cli.getTip()
+                let value = Int(try await self.cli.getTip())
                 self.cache.insert(value, forKey: cacheKey)
                 self._lastBlockSlotFetch = nil
                 return value
@@ -408,7 +406,7 @@ public actor CardanoCliChainContext: ChainContext {
         for (asset, amount) in utxoValue {
             if asset == "lovelace" {
                 if let lovelace = amount as? Int {
-                    value.coin = Int(lovelace)
+                    value.coin = Int64(lovelace)
                 }
             } else {
                 let policyId = asset
@@ -419,7 +417,7 @@ public actor CardanoCliChainContext: ChainContext {
                     if multiAsset[policy] == nil {
                         multiAsset[policy] = Asset([:])
                     }
-                    multiAsset[policy]?[assetName] = assetAmount
+                    multiAsset[policy]?[assetName] = Int64(assetAmount)
                 }
             }
         }
