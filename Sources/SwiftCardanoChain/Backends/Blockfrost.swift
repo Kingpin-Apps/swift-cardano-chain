@@ -538,7 +538,7 @@ public actor BlockFrostChainContext: ChainContext {
                 }
 
                 let amount = Value(
-                    coin: Int64(lovelaceAmount) ?? 0,
+                    coin: Int64(lovelaceAmount),
                     multiAsset: multiAssets
                 )
 
@@ -634,7 +634,10 @@ public actor BlockFrostChainContext: ChainContext {
                 }
             }
 
-            let amount = Value(coin: Int64(lovelaceAmount) ?? 0, multiAsset: multiAssets)
+            let amount = Value(
+                coin: Int64(lovelaceAmount),
+                multiAsset: multiAssets
+            )
 
             var datumHash: DatumHash? = nil
             var datumOption: DatumOption? = nil
