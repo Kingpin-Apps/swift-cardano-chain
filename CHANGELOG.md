@@ -1,3 +1,14 @@
+## 0.5.0 (2026-05-29)
+
+### Feat
+
+- migrate to CBORCodable
+
+### Fix
+
+- cleanup file
+- update packages
+
 ## 0.4.2 (2026-05-15)
 
 ### Fix
