@@ -1,3 +1,9 @@
+## 0.5.1 (2026-06-02)
+
+### Fix
+
+- add spacing around info print
+
 ## 0.5.0 (2026-05-29)
 
 ### Feat
