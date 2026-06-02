@@ -317,7 +317,7 @@ public func resolveRootHandle(
         assetNameHex: assetNameHex,
         koios: koios
     ) {
-        print("Found $adahandle '\(handle)' on Address: \(address)")
+        print("\nFound $adahandle '\(handle)' on Address: \(address)\n")
         return try Address(from: .string(address))
     }
     
@@ -328,7 +328,7 @@ public func resolveRootHandle(
         assetNameHex: cip68AssetNameHex,
         koios: koios
     ) {
-        print("Found $adahandle '\(handle)' (CIP-68) on Address: \(address)")
+        print("\nFound $adahandle '\(handle)' (CIP-68) on Address: \(address)\n")
         return try Address(from: .string(address))
     }
     
