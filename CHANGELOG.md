@@ -1,3 +1,9 @@
+## 0.5.3 (2026-06-02)
+
+### Fix
+
+- add committeeMemberInfo
+
 ## 0.5.2 (2026-06-02)
 
 ### Fix
