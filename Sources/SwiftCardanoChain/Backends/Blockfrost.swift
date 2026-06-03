@@ -1219,9 +1219,136 @@ public actor BlockFrostChainContext: ChainContext {
     }
     
     /// Get the committee member information for a given committee member credential.
-    /// - Parameter committeeMember: The `CommitteeColdCredential` object representing the committee member.
+    /// - Parameter cold: The `CommitteeColdCredential` object representing the committee member.
     /// - Returns: The `CommitteeMemberInfo` object containing information about the committee member.
-    public func committeeMemberInfo(committeeMember: CommitteeColdCredential) async throws -> CommitteeMemberInfo {
-        throw CardanoChainError.notImplemented("committeeMemberInfo is not implemented in Blockfrost backend")
+    public func committeeMemberInfo(cold: CommitteeColdCredential) async throws -> CommitteeMemberInfo {
+        let coldHex = cold.credential.payload.toHex.lowercased()
+        let coldIsScript: Bool
+        switch cold.credential {
+        case .scriptHash:          coldIsScript = true
+        case .verificationKeyHash: coldIsScript = false
+        }
+
+        let members = try await fetchGovernanceCommitteeMembers()
+        guard let member = members.first(where: {
+            $0.ccColdHex.lowercased() == coldHex && $0.ccColdHasScript == coldIsScript
+        }) else {
+            throw CardanoChainError.valueError(
+                "Committee member not found for credential: \(cold)"
+            )
+        }
+
+        return try await buildCommitteeMemberInfo(
+            from: member,
+            preferredCold: cold,
+            preferredHot: nil
+        )
+    }
+
+    /// Get the committee member information identified by an authorized hot credential.
+    /// - Parameter hot: The `CommitteeHotCredential` the member has authorized.
+    /// - Returns: The `CommitteeMemberInfo` object containing information about the committee member.
+    public func committeeMemberInfo(hot: CommitteeHotCredential) async throws -> CommitteeMemberInfo {
+        let hotHex = hot.credential.payload.toHex.lowercased()
+        let hotIsScript: Bool
+        switch hot.credential {
+        case .scriptHash:          hotIsScript = true
+        case .verificationKeyHash: hotIsScript = false
+        }
+
+        let members = try await fetchGovernanceCommitteeMembers()
+        guard let member = members.first(where: {
+            $0.ccHotHex?.lowercased() == hotHex
+                && ($0.ccHotHasScript ?? false) == hotIsScript
+        }) else {
+            throw CardanoChainError.valueError(
+                "Committee member not found for hot credential: \(hot)"
+            )
+        }
+
+        return try await buildCommitteeMemberInfo(
+            from: member,
+            preferredCold: nil,
+            preferredHot: hot
+        )
+    }
+
+    // MARK: - Internal helpers
+
+    private typealias GeneratedCommitteeMember =
+        Components.Schemas.Committee.MembersPayloadPayload
+
+    /// Fetch all committee members via the generated `/governance/committee` operation.
+    private func fetchGovernanceCommitteeMembers() async throws -> [GeneratedCommitteeMember] {
+        do {
+            let response = try await api.client.getGovernanceCommittee()
+            return try response.ok.body.json.members
+        } catch let error as CardanoChainError {
+            throw error
+        } catch {
+            throw CardanoChainError.blockfrostError(
+                "Failed to fetch committee state: \(error)"
+            )
+        }
+    }
+
+    /// Build a `CommitteeMemberInfo` from a generated committee-member row.
+    ///
+    /// `preferredCold` / `preferredHot` let the caller pass through the original credential
+    /// (preserves byte-for-byte identity) when the lookup originated from one side; either
+    /// can be `nil` and we'll reconstruct from the row's hex fields.
+    private func buildCommitteeMemberInfo(
+        from member: GeneratedCommitteeMember,
+        preferredCold: CommitteeColdCredential?,
+        preferredHot: CommitteeHotCredential?
+    ) async throws -> CommitteeMemberInfo {
+        let coldCredential: CommitteeColdCredential
+        if let preferredCold = preferredCold {
+            coldCredential = preferredCold
+        } else if member.ccColdHasScript {
+            coldCredential = CommitteeColdCredential(
+                credential: .scriptHash(
+                    ScriptHash(payload: Data(hex: member.ccColdHex)))
+            )
+        } else {
+            coldCredential = CommitteeColdCredential(
+                credential: .verificationKeyHash(
+                    VerificationKeyHash(payload: Data(hex: member.ccColdHex)))
+            )
+        }
+
+        let hotCredential: CommitteeHotCredential?
+        if let preferredHot = preferredHot {
+            hotCredential = preferredHot
+        } else if let hotHex = member.ccHotHex {
+            if member.ccHotHasScript ?? false {
+                hotCredential = CommitteeHotCredential(
+                    credential: .scriptHash(ScriptHash(payload: Data(hex: hotHex)))
+                )
+            } else {
+                hotCredential = CommitteeHotCredential(
+                    credential: .verificationKeyHash(
+                        VerificationKeyHash(payload: Data(hex: hotHex)))
+                )
+            }
+        } else {
+            hotCredential = nil
+        }
+
+        let currentEpoch = try await epoch()
+        let status: CommitteeMemberStatus
+        switch member.status {
+        case .authorized:
+            status = member.expirationEpoch >= currentEpoch ? .active : .expired
+        case .notAuthorized, .resigned:
+            status = .expired
+        }
+
+        return CommitteeMemberInfo(
+            coldCredential: coldCredential,
+            hotCredential: hotCredential,
+            expiration: EpochNumber(member.expirationEpoch),
+            status: status
+        )
     }
 }

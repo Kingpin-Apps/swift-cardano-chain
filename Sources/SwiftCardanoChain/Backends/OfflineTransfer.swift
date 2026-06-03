@@ -297,10 +297,19 @@ public actor OfflineTransferChainContext: ChainContext {
         return info
     }
 
-    public func committeeMemberInfo(committeeMember: CommitteeColdCredential) async throws -> CommitteeMemberInfo {
-        guard let info = offlineTransfer.committeeMemberInfos.first(where: { $0.coldCredential == committeeMember }) else {
+    public func committeeMemberInfo(cold: CommitteeColdCredential) async throws -> CommitteeMemberInfo {
+        guard let info = offlineTransfer.committeeMemberInfos.first(where: { $0.coldCredential == cold }) else {
             throw CardanoChainError.offlineTransferError(
                 "Committee member info not found in offline transfer file."
+            )
+        }
+        return info
+    }
+
+    public func committeeMemberInfo(hot: CommitteeHotCredential) async throws -> CommitteeMemberInfo {
+        guard let info = offlineTransfer.committeeMemberInfos.first(where: { $0.hotCredential == hot }) else {
+            throw CardanoChainError.offlineTransferError(
+                "Committee member info not found in offline transfer file for hot credential."
             )
         }
         return info

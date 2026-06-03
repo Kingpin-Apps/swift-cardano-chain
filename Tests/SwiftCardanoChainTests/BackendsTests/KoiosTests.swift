@@ -409,7 +409,7 @@ struct KoiosChainContextTests {
             )
         )
 
-        let memberInfo = try await chainContext.committeeMemberInfo(committeeMember: coldCredential)
+        let memberInfo = try await chainContext.committeeMemberInfo(cold: coldCredential)
 
         #expect(memberInfo.coldCredential == coldCredential)
         #expect(memberInfo.hotCredential == expectedHotCredential)
@@ -436,7 +436,7 @@ struct KoiosChainContextTests {
         )
 
         await #expect(throws: CardanoChainError.self) {
-            _ = try await chainContext.committeeMemberInfo(committeeMember: missingCredential)
+            _ = try await chainContext.committeeMemberInfo(cold: missingCredential)
         }
     }
 }

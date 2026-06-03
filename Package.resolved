@@ -1,5 +1,5 @@
 {
-  "originHash" : "fa209d94007ef8f35a5d43f638e972ad5db705a131abd2915b45106d28be0b2a",
+  "originHash" : "2a316d4f308280b66dd3d28f59661fd3e120d1915ad566e714e7358617b25e2b",
   "pins" : [
     {
       "identity" : "base32",
@@ -132,8 +132,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/Kingpin-Apps/swift-blockfrost-api.git",
       "state" : {
-        "revision" : "1e4db8c4e4af8c59085e06f18c4185c47fac1a19",
-        "version" : "0.2.0"
+        "revision" : "b7ade6420034b41606c8a55753588cf0a765f67a",
+        "version" : "0.2.1"
       }
     },
     {
@@ -177,8 +177,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/Kingpin-Apps/swift-cardano-utils.git",
       "state" : {
-        "revision" : "131019429e2d918891928944997799ee060f4113",
-        "version" : "0.5.1"
+        "revision" : "5396251b61ed2b786caa394f7fa2b2349e4b7444",
+        "version" : "0.5.2"
       }
     },
     {

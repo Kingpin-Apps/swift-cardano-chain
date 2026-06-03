@@ -118,9 +118,14 @@ public protocol ChainContext: Sendable, CustomStringConvertible, CustomDebugStri
     func govActionInfo(govActionID: GovActionID) async throws -> GovActionInfo
     
     /// Get the committee member information for a given committee member credential.
-    /// - Parameter committeeMember: The `CommitteeColdCredential` object representing the committee member.
+    /// - Parameter cold: The `CommitteeColdCredential` object representing the committee member.
     /// - Returns: The `CommitteeMemberInfo` object containing information about the committee member.
-    func committeeMemberInfo(committeeMember: CommitteeColdCredential) async throws -> CommitteeMemberInfo
+    func committeeMemberInfo(cold: CommitteeColdCredential) async throws -> CommitteeMemberInfo
+
+    /// Get the committee member information identified by an authorized hot credential.
+    /// - Parameter hot: The `CommitteeHotCredential` the member has authorized.
+    /// - Returns: The `CommitteeMemberInfo` object containing information about the committee member.
+    func committeeMemberInfo(hot: CommitteeHotCredential) async throws -> CommitteeMemberInfo
 }
 
 // MARK: - Default Implementation
@@ -250,8 +255,12 @@ public extension ChainContext {
         throw CardanoChainError.notImplemented("govActionInfo(govActionID:) is not implemented for \(Self.self).")
     }
     
-    func committeeMemberInfo(committeeMember: CommitteeColdCredential) async throws -> CommitteeMemberInfo {
-        throw CardanoChainError.notImplemented("committeeMemberInfo(committeeMember:) is not implemented for \(Self.self).")
+    func committeeMemberInfo(cold: CommitteeColdCredential) async throws -> CommitteeMemberInfo {
+        throw CardanoChainError.notImplemented("committeeMemberInfo(cold:) is not implemented for \(Self.self).")
+    }
+
+    func committeeMemberInfo(hot: CommitteeHotCredential) async throws -> CommitteeMemberInfo {
+        throw CardanoChainError.notImplemented("committeeMemberInfo(hot:) is not implemented for \(Self.self).")
     }
 }
 

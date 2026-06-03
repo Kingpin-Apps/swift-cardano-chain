@@ -758,7 +758,7 @@ struct CardanoCLIContextTests {
             credential: .scriptHash(coldKeyHash)
         )
 
-        let memberInfo = try await chainContext.committeeMemberInfo(committeeMember: coldCredential)
+        let memberInfo = try await chainContext.committeeMemberInfo(cold: coldCredential)
 
         // Verify cold credential matches
         #expect(memberInfo.coldCredential == coldCredential)

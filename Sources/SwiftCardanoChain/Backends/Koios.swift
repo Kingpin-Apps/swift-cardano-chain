@@ -1173,18 +1173,18 @@ public actor KoiosChainContext: ChainContext {
     }
 
     /// Get the committee member information for a given committee member credential.
-    /// - Parameter committeeMember: The `CommitteeColdCredential` object representing the committee member.
+    /// - Parameter cold: The `CommitteeColdCredential` object representing the committee member.
     /// - Returns: The `CommitteeMemberInfo` object containing information about the committee member.
-    public func committeeMemberInfo(committeeMember: CommitteeColdCredential) async throws
+    public func committeeMemberInfo(cold: CommitteeColdCredential) async throws
         -> CommitteeMemberInfo
     {
         do {
             let response = try await api.client.committeeInfo()
             let committeeInfo = try response.ok.body.json
 
-            let coldCredentialHex = committeeMember.credential.payload.toHex.lowercased()
+            let coldCredentialHex = cold.credential.payload.toHex.lowercased()
             let coldCredentialIsScript: Bool
-            switch committeeMember.credential {
+            switch cold.credential {
             case .scriptHash:
                 coldCredentialIsScript = true
             case .verificationKeyHash:
@@ -1198,19 +1198,19 @@ public actor KoiosChainContext: ChainContext {
                 })
             else {
                 throw CardanoChainError.valueError(
-                    "Committee member not found for credential: \(committeeMember)"
+                    "Committee member not found for credential: \(cold)"
                 )
             }
 
             guard let expirationEpoch = member.expirationEpoch.map(Int.init) else {
                 throw CardanoChainError.valueError(
-                    "Missing expiration epoch for committee member: \(committeeMember)"
+                    "Missing expiration epoch for committee member: \(cold)"
                 )
             }
 
             guard let hotHex = member.ccHotHex, let hotHasScript = member.ccHotHasScript else {
                 throw CardanoChainError.valueError(
-                    "Committee member does not have an authorized hot credential: \(committeeMember)"
+                    "Committee member does not have an authorized hot credential: \(cold)"
                 )
             }
 
@@ -1239,7 +1239,7 @@ public actor KoiosChainContext: ChainContext {
             }
 
             return CommitteeMemberInfo(
-                coldCredential: committeeMember,
+                coldCredential: cold,
                 hotCredential: hotCredential,
                 expiration: EpochNumber(expirationEpoch),
                 status: status
@@ -1248,6 +1248,86 @@ public actor KoiosChainContext: ChainContext {
             throw error
         } catch {
             throw CardanoChainError.koiosError("Failed to get committee member info: \(error)")
+        }
+    }
+
+    /// Get the committee member information identified by an authorized hot credential.
+    /// - Parameter hot: The `CommitteeHotCredential` the member has authorized.
+    /// - Returns: The `CommitteeMemberInfo` object containing information about the committee member.
+    public func committeeMemberInfo(hot: CommitteeHotCredential) async throws
+        -> CommitteeMemberInfo
+    {
+        do {
+            let response = try await api.client.committeeInfo()
+            let committeeInfo = try response.ok.body.json
+
+            let hotHexLower = hot.credential.payload.toHex.lowercased()
+            let hotIsScript: Bool
+            switch hot.credential {
+            case .scriptHash:
+                hotIsScript = true
+            case .verificationKeyHash:
+                hotIsScript = false
+            }
+
+            guard
+                let member = committeeInfo.members?.first(where: {
+                    $0.ccHotHex?.lowercased() == hotHexLower
+                        && ($0.ccHotHasScript ?? false) == hotIsScript
+                })
+            else {
+                throw CardanoChainError.valueError(
+                    "Committee member not found for hot credential: \(hot)"
+                )
+            }
+
+            guard let coldHex = member.ccColdHex else {
+                throw CardanoChainError.valueError(
+                    "Committee entry is missing cold credential hex for hot: \(hot)"
+                )
+            }
+            let coldIsScript = member.ccColdHasScript ?? false
+            let coldCredential: CommitteeColdCredential
+            if coldIsScript {
+                coldCredential = CommitteeColdCredential(
+                    credential: .scriptHash(ScriptHash(payload: Data(hex: coldHex)))
+                )
+            } else {
+                coldCredential = CommitteeColdCredential(
+                    credential: .verificationKeyHash(
+                        VerificationKeyHash(payload: Data(hex: coldHex))
+                    )
+                )
+            }
+
+            guard let expirationEpoch = member.expirationEpoch.map(Int.init) else {
+                throw CardanoChainError.valueError(
+                    "Missing expiration epoch for committee member: \(coldCredential)"
+                )
+            }
+
+            let currentEpoch = try await epoch()
+            let status: CommitteeMemberStatus
+            switch member.status {
+                case .authorized:
+                    status = expirationEpoch >= currentEpoch ? .active : .expired
+                case .notAuthorized, .resigned:
+                    status = .expired
+                case nil:
+                    status = expirationEpoch >= currentEpoch ? .unrecognized : .expired
+            }
+
+            return CommitteeMemberInfo(
+                coldCredential: coldCredential,
+                hotCredential: hot,
+                expiration: EpochNumber(expirationEpoch),
+                status: status
+            )
+        } catch let error as CardanoChainError {
+            throw error
+        } catch {
+            throw CardanoChainError.koiosError(
+                "Failed to get committee member info by hot credential: \(error)")
         }
     }
 }

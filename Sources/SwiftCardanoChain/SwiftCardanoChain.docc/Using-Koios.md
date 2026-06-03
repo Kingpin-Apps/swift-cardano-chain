@@ -156,7 +156,7 @@ let pool = try await context.stakePoolInfo(poolId: "pool1...")
 ```swift
 let drepInfo = try await context.drepInfo(drep: someDRep)
 let govInfo  = try await context.govActionInfo(govActionID: someActionId)
-let cmInfo   = try await context.committeeMemberInfo(committeeMember: cred)
+let cmInfo   = try await context.committeeMemberInfo(cold: cred)
 ```
 
 ## Error Handling

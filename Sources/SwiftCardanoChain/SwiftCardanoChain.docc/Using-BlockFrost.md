@@ -151,7 +151,7 @@ let drepInfo = try await context.drepInfo(drep: someDRep)
 let govInfo = try await context.govActionInfo(govActionID: someActionId)
 
 // Committee member state
-let cmInfo = try await context.committeeMemberInfo(committeeMember: cred)
+let cmInfo = try await context.committeeMemberInfo(cold: cred)
 ```
 
 ## Error Handling

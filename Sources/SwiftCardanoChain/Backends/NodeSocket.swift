@@ -586,16 +586,16 @@ public actor NodeSocketChainContext: ChainContext {
     }
 
     public func committeeMemberInfo(
-        committeeMember: CommitteeColdCredential
+        cold: CommitteeColdCredential
     ) async throws -> CommitteeMemberInfo {
-        let filter = CommitteeMembersFilter(coldCredentials: [committeeMember])
+        let filter = CommitteeMembersFilter(coldCredentials: [cold])
         let state = try await withClient { try await $0.queryCommitteeMembersState(filter) }
 
         guard let entry = state.members.first(where: {
-            (try? $0.coldCredential.toPrimitive()) == (try? committeeMember.toPrimitive())
+            (try? $0.coldCredential.toPrimitive()) == (try? cold.toPrimitive())
         }) else {
             throw CardanoChainError.valueError(
-                "Committee member not found for credential: \(committeeMember)")
+                "Committee member not found for credential: \(cold)")
         }
 
         let hotCredential: CommitteeHotCredential?
@@ -614,7 +614,41 @@ public actor NodeSocketChainContext: ChainContext {
         }
 
         return CommitteeMemberInfo(
-            coldCredential: committeeMember,
+            coldCredential: cold,
+            hotCredential: hotCredential,
+            expiration: entry.state.termExpiry.map { EpochNumber($0) },
+            status: status
+        )
+    }
+
+    public func committeeMemberInfo(
+        hot: CommitteeHotCredential
+    ) async throws -> CommitteeMemberInfo {
+        let filter = CommitteeMembersFilter(hotCredentials: [hot])
+        let state = try await withClient { try await $0.queryCommitteeMembersState(filter) }
+
+        guard let entry = state.members.first else {
+            throw CardanoChainError.valueError(
+                "Committee member not found for hot credential: \(hot)")
+        }
+
+        let hotCredential: CommitteeHotCredential?
+        switch entry.state.hotCredentialStatus {
+        case .authorised(let cred), .resigned(let cred):
+            hotCredential = cred
+        case .notAuthorised:
+            hotCredential = nil
+        }
+
+        let status: CommitteeMemberStatus
+        switch entry.state.memberStatus {
+        case .active:        status = .active
+        case .expired:       status = .expired
+        case .unrecognised:  status = .unrecognized
+        }
+
+        return CommitteeMemberInfo(
+            coldCredential: entry.coldCredential,
             hotCredential: hotCredential,
             expiration: entry.state.termExpiry.map { EpochNumber($0) },
             status: status

@@ -568,7 +568,7 @@ struct OfflineTransferChainContextTests {
             transfer.committeeMemberInfos = [expectedInfo]
         }
 
-        let result = try await context.committeeMemberInfo(committeeMember: credential)
+        let result = try await context.committeeMemberInfo(cold: credential)
         #expect(result == expectedInfo)
         #expect(result.expiration == EpochNumber(300))
     }
@@ -582,7 +582,7 @@ struct OfflineTransferChainContextTests {
             )
         )
         await #expect(throws: CardanoChainError.self) {
-            _ = try await context.committeeMemberInfo(committeeMember: credential)
+            _ = try await context.committeeMemberInfo(cold: credential)
         }
     }
 

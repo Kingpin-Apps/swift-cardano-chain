@@ -1208,21 +1208,21 @@ public actor OgmiosChainContext: ChainContext {
     }
 
     /// Get the committee member information for a given committee member credential.
-    /// - Parameter committeeMember: The `CommitteeColdCredential` object representing the committee member.
+    /// - Parameter cold: The `CommitteeColdCredential` object representing the committee member.
     /// - Returns: The `CommitteeMemberInfo` object containing information about the committee member.
-    public func committeeMemberInfo(committeeMember: CommitteeColdCredential) async throws
+    public func committeeMemberInfo(cold: CommitteeColdCredential) async throws
         -> CommitteeMemberInfo
     {
         let constitutionalCommittee = try await client.ledgerStateQuery.constitutionalCommittee
             .result()
 
-        let coldCredentialHex = committeeMember.credential.payload.toHex.lowercased()
+        let coldCredentialHex = cold.credential.payload.toHex.lowercased()
         let member = constitutionalCommittee.members.first { member in
             guard member.id.description.lowercased() == coldCredentialHex else {
                 return false
             }
 
-            switch (committeeMember.credential, member.from) {
+            switch (cold.credential, member.from) {
             case (.scriptHash, .script), (.verificationKeyHash, .verificationKey):
                 return true
             default:
@@ -1232,13 +1232,13 @@ public actor OgmiosChainContext: ChainContext {
 
         guard let member else {
             throw CardanoChainError.valueError(
-                "Committee member not found for credential: \(committeeMember)"
+                "Committee member not found for credential: \(cold)"
             )
         }
 
         guard let expirationEpoch = member.mandate.map({ Int($0.epoch) }) else {
             throw CardanoChainError.valueError(
-                "Missing expiration epoch for committee member: \(committeeMember)"
+                "Missing expiration epoch for committee member: \(cold)"
             )
         }
 
@@ -1272,8 +1272,74 @@ public actor OgmiosChainContext: ChainContext {
         }
 
         return CommitteeMemberInfo(
-            coldCredential: committeeMember,
+            coldCredential: cold,
             hotCredential: hotCredential,
+            expiration: EpochNumber(expirationEpoch),
+            status: status
+        )
+    }
+
+    /// Get the committee member information identified by an authorized hot credential.
+    /// - Parameter hot: The `CommitteeHotCredential` the member has authorized.
+    /// - Returns: The `CommitteeMemberInfo` object containing information about the committee member.
+    public func committeeMemberInfo(hot: CommitteeHotCredential) async throws
+        -> CommitteeMemberInfo
+    {
+        let constitutionalCommittee = try await client.ledgerStateQuery.constitutionalCommittee
+            .result()
+
+        let hotHexLower = hot.credential.payload.toHex.lowercased()
+
+        let member = constitutionalCommittee.members.first { member in
+            guard case .authorized(let delegate) = member.delegate else { return false }
+            guard delegate.id.description.lowercased() == hotHexLower else { return false }
+            switch (hot.credential, delegate.from) {
+            case (.scriptHash, .script), (.verificationKeyHash, .verificationKey):
+                return true
+            default:
+                return false
+            }
+        }
+
+        guard let member else {
+            throw CardanoChainError.valueError(
+                "Committee member not found for hot credential: \(hot)"
+            )
+        }
+
+        let coldCredential: CommitteeColdCredential
+        switch member.from {
+        case .script:
+            coldCredential = CommitteeColdCredential(
+                credential: .scriptHash(ScriptHash(payload: Data(hex: member.id.description)))
+            )
+        case .verificationKey:
+            coldCredential = CommitteeColdCredential(
+                credential: .verificationKeyHash(
+                    VerificationKeyHash(payload: Data(hex: member.id.description))
+                )
+            )
+        }
+
+        guard let expirationEpoch = member.mandate.map({ Int($0.epoch) }) else {
+            throw CardanoChainError.valueError(
+                "Missing expiration epoch for committee member: \(coldCredential)"
+            )
+        }
+
+        let status: CommitteeMemberStatus
+        switch member.status {
+            case .active:
+                status = .active
+            case .expired:
+                status = .expired
+            case .unrecognized:
+                status = .unrecognized
+        }
+
+        return CommitteeMemberInfo(
+            coldCredential: coldCredential,
+            hotCredential: hot,
             expiration: EpochNumber(expirationEpoch),
             status: status
         )
