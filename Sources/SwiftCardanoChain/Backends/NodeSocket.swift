@@ -655,6 +655,96 @@ public actor NodeSocketChainContext: ChainContext {
         )
     }
 
+    // MARK: - Votes / Governance State
+
+    public func govActionVotes(govActionID: GovActionID) async throws -> GovActionVotes {
+        let proposals = try await withClient { try await $0.queryProposals([govActionID]) }
+
+        guard let proposal = proposals.proposals.first(where: {
+            $0.govActionId.transactionID == govActionID.transactionID
+                && $0.govActionId.govActionIndex == govActionID.govActionIndex
+        }) else {
+            throw CardanoChainError.valueError("Governance action not found: \(govActionID)")
+        }
+
+        return Self.mapProposal(proposal, currentEpoch: nil)
+    }
+
+    public func govActionsAll() async throws -> [GovActionVotes] {
+        let govState = try await withClient { try await $0.queryGovernanceState() }
+        return govState.proposals.proposals.map {
+            Self.mapProposal($0, currentEpoch: nil)
+        }
+    }
+
+    public func drepStakeDistribution() async throws -> [SwiftCardanoNetwork.DRepStakeEntry] {
+        let distr = try await withClient { try await $0.queryDRepStakeDistr([]) }
+        return distr.entries
+    }
+
+    public func spoStakeDistribution() async throws -> [SwiftCardanoNetwork.SPOStakeEntry] {
+        let distr = try await withClient { try await $0.querySPOStakeDistr(nil) }
+        return distr.entries
+    }
+
+    public func committeeState() async throws -> CommitteeStateInfo {
+        let state = try await withClient { try await $0.queryCommitteeMembersState(.all) }
+
+        let members: [CommitteeStateInfo.Member] = state.members.map { entry in
+            let hot: CommitteeHotCredential?
+            switch entry.state.hotCredentialStatus {
+            case .authorised(let cred), .resigned(let cred):
+                hot = cred
+            case .notAuthorised:
+                hot = nil
+            }
+
+            let status: CommitteeMemberStatus
+            switch entry.state.memberStatus {
+            case .active:        status = .active
+            case .expired:       status = .expired
+            case .unrecognised:  status = .unrecognized
+            }
+
+            return CommitteeStateInfo.Member(
+                coldCredential: entry.coldCredential,
+                hotCredential: hot,
+                expiration: entry.state.termExpiry.map { EpochNumber($0) },
+                status: status
+            )
+        }
+
+        let threshold = state.threshold?.quotient ?? 0.0
+        return CommitteeStateInfo(members: members, threshold: threshold)
+    }
+
+    private static func mapProposal(
+        _ proposal: SwiftCardanoNetwork.GovernanceProposal,
+        currentEpoch: UInt64?
+    ) -> GovActionVotes {
+        let pp = proposal.proposalProcedure
+        let expiredEpoch: UInt64? = currentEpoch.map {
+            $0 > proposal.expiresAfter ? $0 : nil
+        } ?? nil
+
+        return GovActionVotes(
+            govActionId: proposal.govActionId,
+            govAction: pp.govAction,
+            committeeVotes: proposal.committeeVotes,
+            dRepVotes: proposal.dRepVotes,
+            stakePoolVotes: proposal.stakePoolVotes,
+            deposit: pp.deposit,
+            depositReturnAddr: pp.rewardAccount,
+            anchor: pp.anchor,
+            proposedIn: proposal.proposedIn,
+            expiresAfter: proposal.expiresAfter,
+            ratifiedEpoch: nil,
+            enactedEpoch: nil,
+            droppedEpoch: nil,
+            expiredEpoch: expiredEpoch
+        )
+    }
+
     // MARK: - Internal helpers (exposed for testing via @testable import)
 
     /// Build a `CardanoNetworkConfiguration` for the given socket and network,

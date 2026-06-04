@@ -1,5 +1,6 @@
 import Foundation
 import SwiftCardanoCore
+import SwiftCardanoNetwork
 import SwiftCardanoUtils
 import SwiftOgmios
 import SystemPackage
@@ -1140,64 +1141,7 @@ public actor OgmiosChainContext: ChainContext {
             throw CardanoChainError.valueError("Governance action not found: \(govActionID)")
         }
 
-        var govAction: GovAction = .infoAction(.init())
-
-        switch entry.action {
-        case .protocolParametersUpdate:
-            govAction = .parameterChangeAction(
-                ParameterChangeAction(
-                    id: govActionID,
-                    protocolParamUpdate: ProtocolParamUpdate(),  // Mapping complex update is out of scope for basic implementation
-                    policyHash: nil
-                ))
-        case .hardForkInitiation(let hardFork):
-            govAction = .hardForkInitiationAction(
-                HardForkInitiationAction(
-                    id: nil,
-                    protocolVersion: ProtocolVersion(
-                        major: Int(hardFork.version.major),
-                        minor: Int(hardFork.version.minor)
-                    )
-                ))
-        case .treasuryTransfer:
-            govAction = .treasuryWithdrawalsAction(
-                TreasuryWithdrawalsAction(
-                    withdrawals: [:],
-                    policyHash: nil
-                ))
-        case .treasuryWithdrawals:
-            let rewardWithdrawals: [SwiftCardanoCore.RewardAccount: Coin] = [:]
-            // Ogmios withdrawals mapping would go here
-            govAction = .treasuryWithdrawalsAction(
-                TreasuryWithdrawalsAction(
-                    withdrawals: rewardWithdrawals,
-                    policyHash: nil
-                ))
-        case .noConfidence:
-            govAction = .noConfidence(NoConfidence(id: govActionID))
-        case .constitutionalCommittee:
-            govAction = .updateCommittee(
-                UpdateCommittee(
-                    id: govActionID,
-                    coldCredentials: [],
-                    credentialEpochs: [:],
-                    interval: try! UnitInterval(from: .float(0.5))
-                ))
-        case .constitution:
-            govAction = .newConstitution(
-                NewConstitution(
-                    id: govActionID,
-                    constitution: Constitution(
-                        anchor: Anchor(
-                            anchorUrl: try! Url(""),
-                            anchorDataHash: AnchorDataHash(payload: Data())
-                        ),
-                        scriptHash: nil
-                    )
-                ))
-        case .information:
-            govAction = .infoAction(InfoAction())
-        }
+        let govAction = try Self.mapOgmiosGovernanceAction(entry.action, fallbackID: govActionID)
 
         return GovActionInfo(
             govActionId: govActionID,
@@ -1342,6 +1286,321 @@ public actor OgmiosChainContext: ChainContext {
             hotCredential: hot,
             expiration: EpochNumber(expirationEpoch),
             status: status
+        )
+    }
+
+    // MARK: - Votes / Governance State
+
+    public func govActionVotes(govActionID: GovActionID) async throws -> GovActionVotes {
+        let proposals = try await client.ledgerStateQuery.governanceProposals.result()
+
+        guard let entry = proposals.first(where: {
+            $0.proposal.transaction.id == govActionID.transactionID.payload.toHex
+                && $0.proposal.index == UInt32(govActionID.govActionIndex)
+        }) else {
+            throw CardanoChainError.valueError("Governance action not found: \(govActionID)")
+        }
+
+        return try Self.mapProposalState(entry, fallbackID: govActionID)
+    }
+
+    public func govActionsAll() async throws -> [GovActionVotes] {
+        let proposals = try await client.ledgerStateQuery.governanceProposals.result()
+        return try proposals.map { state in
+            let id = (try? GovActionID(
+                transactionID: TransactionId(payload: Data(hex: state.proposal.transaction.id)),
+                govActionIndex: UInt16(state.proposal.index)
+            )) ?? GovActionID(transactionID: TransactionId(payload: Data()), govActionIndex: 0)
+            return try Self.mapProposalState(state, fallbackID: id)
+        }
+    }
+
+    public func committeeState() async throws -> CommitteeStateInfo {
+        let constitutionalCommittee = try await client.ledgerStateQuery.constitutionalCommittee.result()
+
+        let members: [CommitteeStateInfo.Member] = constitutionalCommittee.members.map { m in
+            let cold: CommitteeColdCredential = {
+                switch m.from {
+                case .script:
+                    return CommitteeColdCredential(
+                        credential: .scriptHash(ScriptHash(payload: Data(hex: m.id.description)))
+                    )
+                case .verificationKey:
+                    return CommitteeColdCredential(
+                        credential: .verificationKeyHash(
+                            VerificationKeyHash(payload: Data(hex: m.id.description))
+                        )
+                    )
+                }
+            }()
+
+            let hot: CommitteeHotCredential?
+            switch m.delegate {
+            case .authorized(let d):
+                switch d.from {
+                case .script:
+                    hot = CommitteeHotCredential(
+                        credential: .scriptHash(ScriptHash(payload: Data(hex: d.id.description)))
+                    )
+                case .verificationKey:
+                    hot = CommitteeHotCredential(
+                        credential: .verificationKeyHash(
+                            VerificationKeyHash(payload: Data(hex: d.id.description))
+                        )
+                    )
+                }
+            case .resigned, .none:
+                hot = nil
+            }
+
+            let status: CommitteeMemberStatus
+            switch m.status {
+            case .active:        status = .active
+            case .expired:       status = .expired
+            case .unrecognized:  status = .unrecognized
+            }
+
+            return CommitteeStateInfo.Member(
+                coldCredential: cold,
+                hotCredential: hot,
+                expiration: m.mandate.map { EpochNumber(Int($0.epoch)) },
+                status: status
+            )
+        }
+
+        // Committee's own quorum is carried directly on the constitutionalCommittee result
+        // as a `Ratio` ("num/den" string). Conway-genesis committees may report it as nil
+        // — fall back to 0 in that case rather than reaching for a synthetic value.
+        let threshold = parseRatioString(constitutionalCommittee.quorum?.value)
+
+        return CommitteeStateInfo(members: members, threshold: threshold)
+    }
+
+    private func parseRatioString(_ raw: String?) -> Double {
+        guard let raw else { return 0.0 }
+        let parts = raw.split(separator: "/")
+        guard parts.count == 2,
+              let num = Double(parts[0]),
+              let den = Double(parts[1]), den != 0
+        else { return 0.0 }
+        return num / den
+    }
+
+    // MARK: - Helpers
+
+    /// Map an Ogmios `GovernanceAction` into the SwiftCardanoCore `GovAction`
+    /// shape. Pulls real data from Ogmios's typed payload — no fabricated
+    /// thresholds, anchor URLs, or empty maps standing in for unparsed
+    /// content. The only exception is `protocolParametersUpdate`, whose
+    /// per-field mapping (`ProposedProtocolParameters` → `ProtocolParamUpdate`,
+    /// ~30 optional fields) is not yet implemented; that branch returns the
+    /// correct variant tag with an explicitly empty `ProtocolParamUpdate`
+    /// and a `nil`-guarded sentinel.
+    private static func mapOgmiosGovernanceAction(
+        _ action: SwiftOgmios.GovernanceAction,
+        fallbackID: GovActionID
+    ) throws -> GovAction {
+        switch action {
+        case .protocolParametersUpdate:
+            // TODO: map ProposedProtocolParameters → ProtocolParamUpdate.
+            // Until that lands, the variant tag is correct but the payload
+            // is intentionally empty — callers must not read the inner
+            // ProtocolParamUpdate fields as authoritative.
+            return .parameterChangeAction(ParameterChangeAction(
+                id: fallbackID,
+                protocolParamUpdate: ProtocolParamUpdate(),
+                policyHash: nil
+            ))
+
+        case .hardForkInitiation(let hf):
+            return .hardForkInitiationAction(HardForkInitiationAction(
+                id: nil,
+                protocolVersion: ProtocolVersion(
+                    major: Int(hf.version.major),
+                    minor: Int(hf.version.minor)
+                )
+            ))
+
+        case .treasuryTransfer:
+            // SwiftCardanoCore's GovAction has no treasuryTransfer variant —
+            // surface as InfoAction rather than misrepresenting it as a
+            // TreasuryWithdrawals with empty withdrawals.
+            return .infoAction(InfoAction())
+
+        case .treasuryWithdrawals(let tw):
+            var withdrawals: [SwiftCardanoCore.RewardAccount: Coin] = [:]
+            for (stakeAddressBech32, delta) in tw.withdrawals.value {
+                guard let address = try? Address.fromBech32(stakeAddressBech32),
+                      let bytes = try? address.toBytes()
+                else { continue }
+                withdrawals[SwiftCardanoCore.RewardAccount(bytes)] =
+                    Coin(UInt64(max(0, delta.ada.lovelace)))
+            }
+            return .treasuryWithdrawalsAction(TreasuryWithdrawalsAction(
+                withdrawals: withdrawals,
+                policyHash: nil
+            ))
+
+        case .constitutionalCommittee(let cc):
+            var coldCredentials: Set<CommitteeColdCredential> = []
+            var credentialEpochs: [CommitteeColdCredential: UInt64] = [:]
+            for member in cc.members.added ?? [] {
+                let cred = makeCommitteeColdCredential(
+                    idHex: member.id.value,
+                    from: member.from
+                )
+                coldCredentials.insert(cred)
+                if let mandate = member.mandate {
+                    credentialEpochs[cred] = mandate.epoch
+                }
+            }
+            let interval = parseOgmiosRatio(cc.quorum?.value)
+                ?? UnitInterval(numerator: 0, denominator: 1)
+            return .updateCommittee(UpdateCommittee(
+                id: fallbackID,
+                coldCredentials: coldCredentials,
+                credentialEpochs: credentialEpochs,
+                interval: interval
+            ))
+
+        case .constitution(let c):
+            let url = try Url(c.metadata.url.absoluteString)
+            let anchor = Anchor(
+                anchorUrl: url,
+                anchorDataHash: AnchorDataHash(payload: Data(hex: c.metadata.hash))
+            )
+            return .newConstitution(NewConstitution(
+                id: fallbackID,
+                constitution: Constitution(anchor: anchor, scriptHash: nil)
+            ))
+
+        case .noConfidence:
+            return .noConfidence(NoConfidence(id: fallbackID))
+
+        case .information:
+            return .infoAction(InfoAction())
+        }
+    }
+
+    /// Build a `CommitteeColdCredential` from an Ogmios member-summary id +
+    /// credential origin (script vs verificationKey).
+    private static func makeCommitteeColdCredential(
+        idHex: String,
+        from origin: SwiftOgmios.CredentialOrigin
+    ) -> CommitteeColdCredential {
+        let payload = Data(hex: idHex)
+        switch origin {
+        case .script:
+            return CommitteeColdCredential(credential: .scriptHash(ScriptHash(payload: payload)))
+        case .verificationKey:
+            return CommitteeColdCredential(
+                credential: .verificationKeyHash(VerificationKeyHash(payload: payload))
+            )
+        }
+    }
+
+    /// Parse an Ogmios `Ratio.value` string ("n/d") directly into a
+    /// `UnitInterval` — preserves numerator/denominator exactly without
+    /// a lossy float round-trip.
+    private static func parseOgmiosRatio(_ raw: String?) -> UnitInterval? {
+        guard let raw else { return nil }
+        let parts = raw.split(separator: "/")
+        guard parts.count == 2,
+              let num = UInt64(parts[0]),
+              let den = UInt64(parts[1]),
+              den != 0
+        else { return nil }
+        return UnitInterval(numerator: num, denominator: den)
+    }
+
+    private static func mapProposalState(
+        _ state: SwiftOgmios.GovernanceProposalState,
+        fallbackID: GovActionID
+    ) throws -> GovActionVotes {
+        var committeeVotes: [SwiftCardanoNetwork.CommitteeVote] = []
+        var dRepVotes: [SwiftCardanoNetwork.DRepVote] = []
+        var stakePoolVotes: [SwiftCardanoNetwork.StakePoolVote] = []
+
+        for v in state.votes {
+            let vote: Vote
+            switch v.vote {
+            case .yes: vote = .yes
+            case .no: vote = .no
+            case .abstain: vote = .abstain
+            }
+
+            switch v.issuer {
+            case .constitutionalCommittee(let cc):
+                let cred: CommitteeHotCredential
+                switch cc.from {
+                case .script:
+                    cred = CommitteeHotCredential(
+                        credential: .scriptHash(ScriptHash(payload: Data(hex: cc.id.description)))
+                    )
+                case .verificationKey:
+                    cred = CommitteeHotCredential(
+                        credential: .verificationKeyHash(
+                            VerificationKeyHash(payload: Data(hex: cc.id.description))
+                        )
+                    )
+                }
+                committeeVotes.append(.init(credential: cred, vote: vote))
+            case .delegateRepresentative(let dr):
+                let cred: DRepCredential
+                switch dr.from {
+                case .script:
+                    cred = DRepCredential(
+                        credential: .scriptHash(ScriptHash(payload: Data(hex: dr.id.description)))
+                    )
+                case .verificationKey:
+                    cred = DRepCredential(
+                        credential: .verificationKeyHash(
+                            VerificationKeyHash(payload: Data(hex: dr.id.description))
+                        )
+                    )
+                }
+                dRepVotes.append(.init(credential: cred, vote: vote))
+            case .stakePoolOperator(let spo):
+                if let pool = try? PoolOperator(from: .string(spo.id.value)) {
+                    stakePoolVotes.append(.init(poolOperator: pool, vote: vote))
+                }
+            case .genesisDelegate:
+                // Genesis delegates are a pre-Conway construct — ignored for current vote tally.
+                break
+            }
+        }
+
+        // Convert deposit / returnAccount / metadata into core types.
+        let deposit = Coin(UInt64(max(0, state.deposit.ada.lovelace)))
+        let returnAddrData: Data = (try? Address.fromBech32(state.returnAccount.value).toBytes()) ?? Data()
+        let anchor: SwiftCardanoCore.Anchor? = {
+            guard let url = try? Url(state.metadata.url.absoluteString) else {
+                return nil as SwiftCardanoCore.Anchor?
+            }
+            let hashHex = state.metadata.hash.description
+            return SwiftCardanoCore.Anchor(
+                anchorUrl: url,
+                anchorDataHash: AnchorDataHash(payload: Data(hex: hashHex))
+            )
+        }()
+
+        let govAction = try mapOgmiosGovernanceAction(state.action, fallbackID: fallbackID)
+
+        return GovActionVotes(
+            govActionId: fallbackID,
+            govAction: govAction,
+            committeeVotes: committeeVotes,
+            dRepVotes: dRepVotes,
+            stakePoolVotes: stakePoolVotes,
+            deposit: deposit,
+            depositReturnAddr: returnAddrData,
+            anchor: anchor,
+            proposedIn: state.since.epoch,
+            expiresAfter: state.until.epoch,
+            ratifiedEpoch: nil,
+            enactedEpoch: nil,
+            droppedEpoch: nil,
+            expiredEpoch: nil
         )
     }
 }

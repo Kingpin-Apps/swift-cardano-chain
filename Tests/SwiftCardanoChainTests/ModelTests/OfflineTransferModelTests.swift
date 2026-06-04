@@ -1,5 +1,6 @@
 import Foundation
 import SwiftCardanoCore
+import SwiftCardanoNetwork
 import SystemPackage
 import Testing
 
@@ -240,7 +241,7 @@ struct OfflineTransferModelTests {
         defer { try? FileManager.default.removeItem(atPath: path.string) }
         let drep = try DRep.fromBech32("drep1kqhhkv66a0egfw7uyz7u8dv7fcvr4ck0c3ad9k9urx3yzhefup0")
 
-        let transfer = OfflineTransfer(
+        var transfer = OfflineTransfer(
             general: OfflineTransferGeneral(offlineVersion: "1.0.0", onlineVersion: "2.0.0"),
             protocol: OfflineTransferProtocolData(era: .conway, network: .preview),
             history: [OfflineTransferHistory(date: ISO8601DateFormatter().date(from: "2025-01-01T00:00:00Z"), action: .new)],
@@ -285,6 +286,75 @@ struct OfflineTransferModelTests {
                 )
             ]
         )
+        transfer.govActionVotesList = [
+            GovActionVotes(
+                govActionId: ModelTestFixtures.makeGovActionID(byte: 0x77),
+                govAction: GovAction.infoAction(InfoAction()),
+                committeeVotes: [
+                    SwiftCardanoNetwork.CommitteeVote(
+                        credential: CommitteeHotCredential(
+                            credential: .verificationKeyHash(
+                                VerificationKeyHash(payload: Data(repeating: 0x11, count: 28))
+                            )
+                        ),
+                        vote: .yes
+                    )
+                ],
+                dRepVotes: [
+                    SwiftCardanoNetwork.DRepVote(
+                        credential: DRepCredential(
+                            credential: .scriptHash(
+                                ScriptHash(payload: Data(repeating: 0x22, count: 28))
+                            )
+                        ),
+                        vote: .abstain
+                    )
+                ],
+                stakePoolVotes: [
+                    SwiftCardanoNetwork.StakePoolVote(
+                        poolOperator: PoolOperator(
+                            poolKeyHash: PoolKeyHash(payload: Data(repeating: 0x33, count: 28))
+                        ),
+                        vote: .no
+                    )
+                ],
+                deposit: Coin(100_000_000_000),
+                depositReturnAddr: RewardAccount(Data(repeating: 0xE0, count: 29)),
+                anchor: Anchor(
+                    anchorUrl: try Url("https://anchor.test"),
+                    anchorDataHash: AnchorDataHash(
+                        payload: Data(repeating: 0x44, count: 32)
+                    )
+                ),
+                proposedIn: 50,
+                expiresAfter: 70
+            )
+        ]
+        transfer.drepStakeEntries = [
+            SwiftCardanoNetwork.DRepStakeEntry(drep: drep, stake: 305_554_989_074)
+        ]
+        transfer.spoStakeEntries = [
+            SwiftCardanoNetwork.SPOStakeEntry(
+                poolOperator: PoolOperator(
+                    poolKeyHash: PoolKeyHash(payload: Data(repeating: 0x44, count: 28))
+                ),
+                stake: 1_234_567_890
+            )
+        ]
+        transfer.committeeStateSnapshot = CommitteeStateInfo(
+            members: [
+                CommitteeStateInfo.Member(
+                    coldCredential: CommitteeColdCredential(
+                        credential: .verificationKeyHash(
+                            VerificationKeyHash(payload: Data(repeating: 0x55, count: 28))
+                        )
+                    ),
+                    expiration: EpochNumber(800),
+                    status: .active
+                )
+            ],
+            threshold: 0.67
+        )
 
         try transfer.save(to: path)
         let loaded = try OfflineTransfer.load(from: path)
@@ -305,6 +375,42 @@ struct OfflineTransferModelTests {
         #expect(loaded.committeeMemberInfos.first?.expiration == EpochNumber(300))
         #expect(
             loaded.evaluations.first?.executionUnits["spend:0"] == ExecutionUnits(mem: 1, steps: 2))
+        #expect(loaded.govActionVotesList.count == 1)
+        let loadedVotes = try #require(loaded.govActionVotesList.first)
+        #expect(loadedVotes.proposedIn == 50)
+        #expect(loadedVotes.expiresAfter == 70)
+        #expect(loadedVotes.committeeVotes.count == 1)
+        #expect(loadedVotes.committeeVotes.first?.vote == .yes)
+        #expect(loadedVotes.dRepVotes.count == 1)
+        #expect(loadedVotes.dRepVotes.first?.vote == .abstain)
+        #expect(loadedVotes.stakePoolVotes.count == 1)
+        #expect(loadedVotes.stakePoolVotes.first?.vote == .no)
+        #expect(loadedVotes.anchor?.anchorUrl.absoluteString == "https://anchor.test")
+        #expect(loaded.drepStakeEntries.count == 1)
+        #expect(loaded.drepStakeEntries.first?.stake == 305_554_989_074)
+        #expect(loaded.spoStakeEntries.count == 1)
+        #expect(loaded.spoStakeEntries.first?.stake == 1_234_567_890)
+        #expect(loaded.committeeStateSnapshot?.threshold == 0.67)
+        #expect(loaded.committeeStateSnapshot?.members.count == 1)
+    }
+
+    @Test("root encoder uses snake_case keys for new vote and stake fields")
+    func rootEncoderUsesSnakeCaseForNewFields() throws {
+        let transfer = OfflineTransfer(
+            general: OfflineTransferGeneral(onlineVersion: "1.0.0"),
+            protocol: OfflineTransferProtocolData(era: .conway, network: .preview)
+        )
+        let object = try JSONObject.encode(transfer)
+
+        #expect(object.keys.contains("gov_action_votes"))
+        #expect(object.keys.contains("drep_stake_entries"))
+        #expect(object.keys.contains("spo_stake_entries"))
+        // committee_state is optional and nil here; encoder may omit it.
+        // Just verify no camelCase variants leaked through.
+        #expect(object.keys.contains("govActionVotesList") == false)
+        #expect(object.keys.contains("drepStakeEntries") == false)
+        #expect(object.keys.contains("spoStakeEntries") == false)
+        #expect(object.keys.contains("committeeStateSnapshot") == false)
     }
 
     @Test("new creates file with initial history entry")

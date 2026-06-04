@@ -1,5 +1,6 @@
 import Foundation
 import SwiftCardanoCore
+import SwiftCardanoNetwork
 import SwiftCardanoUtils
 import SystemPackage
 
@@ -868,107 +869,12 @@ public actor CardanoCliChainContext: ChainContext {
             return actionIdMatches(actionId)
         })
 
-        func parseGovAction(_ proposal: [String: Any]) throws -> GovAction {
-            guard let proposalProcedure = proposal["proposalProcedure"] as? [String: Any],
-                let actionDict = proposalProcedure["govAction"] as? [String: Any],
-                let tag = actionDict["tag"] as? String
+        func extractGovAction(_ proposal: [String: Any]) throws -> GovAction {
+            guard let proposalProcedure = proposal["proposalProcedure"] as? [String: Any]
             else {
-                throw CardanoChainError.valueError("Missing govAction in proposal procedure")
+                throw CardanoChainError.valueError("Missing proposalProcedure in proposal")
             }
-
-            let contents = actionDict["contents"] as? [Any] ?? []
-
-            switch tag {
-            case "ParameterChange":
-                // contents: [prevGovActionId, pParamUpdate, policyHash]
-                // For now, return a basic ParameterChangeAction as mapping pParamUpdate is complex
-                return .parameterChangeAction(
-                    ParameterChangeAction(
-                        id: govActionID,
-                        protocolParamUpdate: ProtocolParamUpdate(),
-                        policyHash: nil
-                    ))
-            case "HardForkInitiation":
-                // contents: [prevGovActionId, protocolVersion]
-                var protocolVersion = ProtocolVersion(major: 0, minor: 0)
-                if contents.count >= 2, let pvDict = contents[1] as? [String: Any] {
-                    protocolVersion = ProtocolVersion(
-                        major: pvDict["major"] as? Int ?? 0,
-                        minor: pvDict["minor"] as? Int ?? 0
-                    )
-                }
-                return .hardForkInitiationAction(
-                    HardForkInitiationAction(
-                        id: nil,
-                        protocolVersion: protocolVersion
-                    ))
-            case "TreasuryWithdrawals":
-                // contents: [[{credential info}, lovelace], ...], policyHash]
-                var withdrawals: [RewardAccount: Coin] = [:]
-                if let withdrawalsList = contents.first as? [[Any]] {
-                    for entry in withdrawalsList {
-                        if entry.count >= 2, let amount = entry[1] as? NSNumber {
-                            // Parse credential object to extract hash and build reward address
-                            if let credentialObj = entry[0] as? [String: Any] {
-                                var credentialHash: Data?
-                                var addressType: UInt8 = 0xE0  // mainnet reward account (keyHash)
-
-                                if let keyHashStr = credentialObj["keyHash"] as? String {
-                                    credentialHash = Data(hexString: keyHashStr)
-                                    addressType = 0xE0  // 224 = mainnet + keyHash credential
-                                } else if let scriptHashStr = credentialObj["scriptHash"] as? String
-                                {
-                                    credentialHash = Data(hexString: scriptHashStr)
-                                    addressType = 0xE1  // 225 = mainnet + scriptHash credential
-                                }
-
-                                if let credentialData = credentialHash {
-                                    // Prepend network + type byte to credential
-                                    var fullData = Data([addressType])
-                                    fullData.append(credentialData)
-                                    withdrawals[RewardAccount(fullData)] = Coin(amount.uint64Value)
-                                }
-                            }
-                        }
-                    }
-                }
-                // policyHash is ScriptHash type
-                var policyHash: ScriptHash? = nil
-                if contents.count > 1, let policyHashStr = contents[1] as? String {
-                    policyHash = try? ScriptHash(from: .string(policyHashStr))
-                }
-                return .treasuryWithdrawalsAction(
-                    TreasuryWithdrawalsAction(
-                        withdrawals: withdrawals,
-                        policyHash: policyHash
-                    ))
-            case "NoConfidence":
-                return .noConfidence(NoConfidence(id: govActionID))
-            case "UpdateCommittee":
-                return .updateCommittee(
-                    UpdateCommittee(
-                        id: govActionID,
-                        coldCredentials: [],
-                        credentialEpochs: [:],
-                        interval: try! UnitInterval(from: .float(0.5))
-                    ))
-            case "NewConstitution":
-                return .newConstitution(
-                    NewConstitution(
-                        id: govActionID,
-                        constitution: Constitution(
-                            anchor: Anchor(
-                                anchorUrl: try! Url(""),
-                                anchorDataHash: AnchorDataHash(payload: Data())
-                            ),
-                            scriptHash: nil
-                        )
-                    ))
-            case "InfoAction":
-                return .infoAction(InfoAction())
-            default:
-                return .infoAction(InfoAction())
-            }
+            return parseGovAction(actionDict: proposalProcedure["govAction"], id: govActionID)
         }
 
         let inEnactedSet = actionExists(in: enactedGovActions)
@@ -993,7 +899,7 @@ public actor CardanoCliChainContext: ChainContext {
 
         let parsedGovAction: GovAction
         if let proposal {
-            parsedGovAction = try parseGovAction(proposal)
+            parsedGovAction = try extractGovAction(proposal)
         } else {
             // When the proposal is no longer present, return a neutral placeholder action.
             parsedGovAction = .infoAction(InfoAction())
@@ -1163,5 +1069,856 @@ public actor CardanoCliChainContext: ChainContext {
             expiration: EpochNumber(expiration),
             status: status
         )
+    }
+
+    // MARK: - Votes / Governance State
+
+    public func govActionVotes(govActionID: GovActionID) async throws -> GovActionVotes {
+        let proposals = try await fetchProposalsFromGovState()
+        let currentEpoch = UInt64(try await self.epoch())
+
+        let txHash = govActionID.transactionID.payload.toHex.lowercased()
+        let index = Int(govActionID.govActionIndex)
+
+        guard let proposal = proposals.first(where: { proposalMatchesActionId($0, txHash: txHash, index: index) }) else {
+            throw CardanoChainError.valueError(
+                "Governance action not found in gov-state: \(txHash)#\(index)")
+        }
+
+        return try buildGovActionVotes(
+            proposal: proposal,
+            actionID: govActionID,
+            currentEpoch: currentEpoch
+        )
+    }
+
+    public func govActionsAll() async throws -> [GovActionVotes] {
+        let proposals = try await fetchProposalsFromGovState()
+        let currentEpoch = UInt64(try await self.epoch())
+
+        return try proposals.compactMap { proposal in
+            guard let actionId = try parseActionId(from: proposal) else { return nil }
+            return try buildGovActionVotes(
+                proposal: proposal,
+                actionID: actionId,
+                currentEpoch: currentEpoch
+            )
+        }
+    }
+
+    public func drepStakeDistribution() async throws -> [SwiftCardanoNetwork.DRepStakeEntry] {
+        let result = try await cli.query.drepStakeDistribution(
+            arguments: ["--all-dreps", "--output-json"]
+        )
+
+        guard let data = result.data(using: .utf8) else {
+            throw CardanoChainError.valueError("Failed to parse drep-stake-distribution as UTF-8")
+        }
+
+        // cardano-cli returns either a JSON array of pairs [[drepKey, lovelace], ...] or
+        // a JSON object keyed by drepKey. Handle both shapes.
+        let json = try? JSONSerialization.jsonObject(with: data)
+        var entries: [SwiftCardanoNetwork.DRepStakeEntry] = []
+
+        if let pairs = json as? [[Any]] {
+            for pair in pairs where pair.count >= 2 {
+                guard let drep = parseDRepKey(pair[0]),
+                      let stake = parseLovelaceUInt(pair[1]) else { continue }
+                entries.append(SwiftCardanoNetwork.DRepStakeEntry(drep: drep, stake: stake))
+            }
+        } else if let dict = json as? [String: Any] {
+            for (key, value) in dict {
+                guard let drep = parseDRepKey(key),
+                      let stake = parseLovelaceUInt(value) else { continue }
+                entries.append(SwiftCardanoNetwork.DRepStakeEntry(drep: drep, stake: stake))
+            }
+        } else {
+            throw CardanoChainError.valueError(
+                "Unexpected drep-stake-distribution JSON shape")
+        }
+
+        return entries
+    }
+
+    public func spoStakeDistribution() async throws -> [SwiftCardanoNetwork.SPOStakeEntry] {
+        let result = try await cli.query.spoStakeDistribution(
+            arguments: ["--all-spos", "--output-json"]
+        )
+
+        guard let data = result.data(using: .utf8) else {
+            throw CardanoChainError.valueError("Failed to parse spo-stake-distribution as UTF-8")
+        }
+
+        let json = try? JSONSerialization.jsonObject(with: data)
+        var entries: [SwiftCardanoNetwork.SPOStakeEntry] = []
+
+        if let pairs = json as? [[Any]] {
+            for pair in pairs where pair.count >= 2 {
+                guard let pool = parsePoolKey(pair[0]),
+                      let stake = parseLovelaceUInt(pair[1]) else { continue }
+                entries.append(SwiftCardanoNetwork.SPOStakeEntry(poolOperator: pool, stake: stake))
+            }
+        } else if let dict = json as? [String: Any] {
+            for (key, value) in dict {
+                guard let pool = parsePoolKey(key),
+                      let stake = parseLovelaceUInt(value) else { continue }
+                entries.append(SwiftCardanoNetwork.SPOStakeEntry(poolOperator: pool, stake: stake))
+            }
+        } else {
+            throw CardanoChainError.valueError(
+                "Unexpected spo-stake-distribution JSON shape")
+        }
+
+        return entries
+    }
+
+    public func committeeState() async throws -> CommitteeStateInfo {
+        let result = try await cli.query.committeeState(arguments: ["--output-json"])
+
+        guard let data = result.data(using: .utf8),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else {
+            throw CardanoChainError.valueError("Failed to parse committee-state JSON")
+        }
+
+        let committeeDict = root["committee"] as? [String: Any] ?? [:]
+        var members: [CommitteeStateInfo.Member] = []
+
+        for (coldKey, anyEntry) in committeeDict {
+            guard let entry = anyEntry as? [String: Any] else { continue }
+            guard let cold = parseCommitteeColdKey(coldKey) else { continue }
+
+            var hot: CommitteeHotCredential? = nil
+            if let hotKey = entry["hotCredsAuthStatus"] as? [String: Any] {
+                if let memberAuthorizedHotCredential = hotKey["contents"] as? [String: Any] {
+                    if let hexStr = memberAuthorizedHotCredential["keyHash"] as? String {
+                        hot = CommitteeHotCredential(
+                            credential: .verificationKeyHash(
+                                VerificationKeyHash(payload: hexStr.hexStringToData)
+                            )
+                        )
+                    } else if let hexStr = memberAuthorizedHotCredential["scriptHash"] as? String {
+                        hot = CommitteeHotCredential(
+                            credential: .scriptHash(
+                                ScriptHash(payload: hexStr.hexStringToData)
+                            )
+                        )
+                    }
+                }
+            }
+
+            let expiration: EpochNumber? = (entry["expiration"] as? Int).map { EpochNumber($0) }
+
+            let statusStr = entry["status"] as? String ?? ""
+            let status: CommitteeMemberStatus? = {
+                switch statusStr.lowercased() {
+                case "active": return .active
+                case "expired": return .expired
+                default: return nil
+                }
+            }()
+
+            members.append(CommitteeStateInfo.Member(
+                coldCredential: cold,
+                hotCredential: hot,
+                expiration: expiration,
+                status: status
+            ))
+        }
+
+        let threshold = GovernanceParsing.parseThreshold(root["threshold"])
+        return CommitteeStateInfo(members: members, threshold: threshold)
+    }
+
+    private func parseLovelaceUInt(_ any: Any) -> UInt64? {
+        GovernanceParsing.parseLovelace(any)
+    }
+
+    // MARK: - Vote-query helpers (private)
+
+    private func fetchProposalsFromGovState() async throws -> [[String: Any]] {
+        let result = try await cli.query.govState(arguments: ["--output-json"])
+        guard let data = result.data(using: .utf8),
+              let govState = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let proposals = govState["proposals"] as? [[String: Any]]
+        else {
+            throw CardanoChainError.valueError(
+                "Failed to parse gov-state JSON or missing proposals")
+        }
+        return proposals
+    }
+
+    private func proposalMatchesActionId(
+        _ proposal: [String: Any],
+        txHash: String,
+        index: Int
+    ) -> Bool {
+        guard let actionId = proposal["actionId"] as? [String: Any],
+              let pTxId = actionId["txId"] as? String else { return false }
+        let pIndex: Int
+        if let i = actionId["govActionIx"] as? Int {
+            pIndex = i
+        } else if let n = actionId["govActionIx"] as? NSNumber {
+            pIndex = n.intValue
+        } else {
+            return false
+        }
+        return pTxId.lowercased() == txHash && pIndex == index
+    }
+
+    private func parseActionId(from proposal: [String: Any]) throws -> GovActionID? {
+        guard let actionId = proposal["actionId"] as? [String: Any],
+              let txId = actionId["txId"] as? String else { return nil }
+        let idx: Int
+        if let i = actionId["govActionIx"] as? Int {
+            idx = i
+        } else if let n = actionId["govActionIx"] as? NSNumber {
+            idx = n.intValue
+        } else {
+            return nil
+        }
+        return GovActionID(
+            transactionID: TransactionId(payload: txId.hexStringToData),
+            govActionIndex: UInt16(idx)
+        )
+    }
+
+    private func buildGovActionVotes(
+        proposal: [String: Any],
+        actionID: GovActionID,
+        currentEpoch: UInt64
+    ) throws -> GovActionVotes {
+        let proposalProcedure = proposal["proposalProcedure"] as? [String: Any] ?? [:]
+
+        // Parse govAction fully from the proposal procedure.
+        let govAction = parseGovAction(actionDict: proposalProcedure["govAction"], id: actionID)
+
+        // Parse deposit + return address.
+        let depositNum = (proposalProcedure["deposit"] as? NSNumber)?.uint64Value
+            ?? UInt64((proposalProcedure["deposit"] as? Int) ?? 0)
+        let deposit = Coin(depositNum)
+
+        let returnAddr: RewardAccount = (try? parseRewardAccount(proposalProcedure["returnAddr"]))
+            ?? RewardAccount(Data())
+
+        // Parse anchor (optional).
+        let anchor = parseAnchor(proposalProcedure["anchor"])
+
+        // Parse vote arrays.
+        let committeeVotes = parseCommitteeVotes(proposal["committeeVotes"])
+        let dRepVotes = parseDRepVotes(proposal["dRepVotes"])
+        let stakePoolVotes = parseStakePoolVotes(proposal["stakePoolVotes"])
+
+        // Epochs.
+        let proposedIn = (proposal["proposedIn"] as? NSNumber)?.uint64Value
+            ?? (proposal["proposedIn"] as? Int).map(UInt64.init)
+        let expiresAfter = (proposal["expiresAfter"] as? NSNumber)?.uint64Value
+            ?? (proposal["expiresAfter"] as? Int).map(UInt64.init)
+        let expiredByEpoch = expiresAfter.map { currentEpoch > $0 } ?? false
+        let expiredEpoch: UInt64? = expiredByEpoch ? currentEpoch : nil
+
+        return GovActionVotes(
+            govActionId: actionID,
+            govAction: govAction,
+            committeeVotes: committeeVotes,
+            dRepVotes: dRepVotes,
+            stakePoolVotes: stakePoolVotes,
+            deposit: deposit,
+            depositReturnAddr: returnAddr,
+            anchor: anchor,
+            proposedIn: proposedIn,
+            expiresAfter: expiresAfter,
+            ratifiedEpoch: nil,
+            enactedEpoch: nil,
+            droppedEpoch: nil,
+            expiredEpoch: expiredEpoch
+        )
+    }
+
+    /// Parse a cardano-cli `proposalProcedure.govAction` dict into a real
+    /// `GovAction`. Unlike a tag-only stub, this walks the `contents` array
+    /// and extracts the on-chain payload for each variant. When a particular
+    /// field cannot be parsed (e.g. malformed JSON for that variant) the
+    /// fallback is to surface the variant tag with empty contents rather
+    /// than fabricated data — and where the tag itself is missing, we
+    /// return `.infoAction` so consumers can detect "unparseable" via the
+    /// variant tag.
+    private func parseGovAction(actionDict any: Any?, id: GovActionID) -> GovAction {
+        guard let dict = any as? [String: Any],
+              let tag = dict["tag"] as? String
+        else { return .infoAction(InfoAction()) }
+
+        let contents = dict["contents"] as? [Any] ?? []
+
+        switch tag {
+        case "ParameterChange":
+            // contents = [prevGovActionId, ProtocolParamUpdate, policyHash]
+            let policyHash: ScriptHash? = {
+                guard contents.count > 2,
+                      let hex = contents[2] as? String,
+                      !hex.isEmpty
+                else { return nil }
+                return try? ScriptHash(from: .string(hex))
+            }()
+            let update: ProtocolParamUpdate = {
+                guard contents.count >= 2,
+                      let dict = contents[1] as? [String: Any]
+                else { return ProtocolParamUpdate() }
+                return parseProtocolParamUpdate(dict)
+            }()
+            return .parameterChangeAction(ParameterChangeAction(
+                id: id,
+                protocolParamUpdate: update,
+                policyHash: policyHash
+            ))
+
+        case "HardForkInitiation":
+            // contents = [prevGovActionId, {major, minor}]
+            guard contents.count >= 2,
+                  let versionDict = contents[1] as? [String: Any],
+                  let major = versionDict["major"] as? Int,
+                  let minor = versionDict["minor"] as? Int
+            else { return .infoAction(InfoAction()) }
+            return .hardForkInitiationAction(HardForkInitiationAction(
+                id: nil,
+                protocolVersion: ProtocolVersion(major: major, minor: minor)
+            ))
+
+        case "TreasuryWithdrawals":
+            // contents = [[[credential, lovelace], ...], policyHash]
+            var withdrawals: [RewardAccount: Coin] = [:]
+            if let pairs = contents.first as? [[Any]] {
+                for entry in pairs where entry.count >= 2 {
+                    guard let credential = entry[0] as? [String: Any],
+                          let lovelace = GovernanceParsing.parseLovelace(entry[1])
+                    else { continue }
+                    guard let returnAddr = buildRewardAccountFromCredential(credential)
+                    else { continue }
+                    withdrawals[returnAddr] = Coin(lovelace)
+                }
+            }
+            let policyHash: ScriptHash? = {
+                guard contents.count > 1,
+                      let hex = contents[1] as? String,
+                      !hex.isEmpty
+                else { return nil }
+                return try? ScriptHash(from: .string(hex))
+            }()
+            return .treasuryWithdrawalsAction(TreasuryWithdrawalsAction(
+                withdrawals: withdrawals,
+                policyHash: policyHash
+            ))
+
+        case "NoConfidence":
+            return .noConfidence(NoConfidence(id: id))
+
+        case "UpdateCommittee":
+            // contents = [prevGovActionId, [removed cold credentials],
+            //             {added cold credential: expiry epoch}, quorum]
+            var coldCredentials: Set<CommitteeColdCredential> = []
+            var credentialEpochs: [CommitteeColdCredential: UInt64] = [:]
+            if contents.count >= 2, let removed = contents[1] as? [Any] {
+                for entry in removed {
+                    if let cred = parseColdCredential(entry) {
+                        coldCredentials.insert(cred)
+                    }
+                }
+            }
+            if contents.count >= 3, let added = contents[2] as? [String: Any] {
+                for (key, value) in added {
+                    guard let cred = parseCommitteeColdKey(key),
+                          let epoch = (value as? NSNumber)?.uint64Value
+                              ?? (value as? Int).map(UInt64.init)
+                    else { continue }
+                    coldCredentials.insert(cred)
+                    credentialEpochs[cred] = epoch
+                }
+            }
+            let interval: UnitInterval = {
+                guard contents.count >= 4 else {
+                    return UnitInterval(numerator: 0, denominator: 1)
+                }
+                if let dict = contents[3] as? [String: Any],
+                   let num = (dict["numerator"] as? NSNumber)?.uint64Value
+                       ?? (dict["numerator"] as? Int).map(UInt64.init),
+                   let den = (dict["denominator"] as? NSNumber)?.uint64Value
+                       ?? (dict["denominator"] as? Int).map(UInt64.init),
+                   den != 0 {
+                    return UnitInterval(numerator: num, denominator: den)
+                }
+                if let arr = contents[3] as? [Any], arr.count == 2,
+                   let num = (arr[0] as? NSNumber)?.uint64Value
+                       ?? (arr[0] as? Int).map(UInt64.init),
+                   let den = (arr[1] as? NSNumber)?.uint64Value
+                       ?? (arr[1] as? Int).map(UInt64.init),
+                   den != 0 {
+                    return UnitInterval(numerator: num, denominator: den)
+                }
+                // Quorum unparseable — return 0/1 as a documented "unknown"
+                // sentinel rather than a plausible-but-fake 1/2.
+                return UnitInterval(numerator: 0, denominator: 1)
+            }()
+            return .updateCommittee(UpdateCommittee(
+                id: id,
+                coldCredentials: coldCredentials,
+                credentialEpochs: credentialEpochs,
+                interval: interval
+            ))
+
+        case "NewConstitution":
+            // contents = [prevGovActionId, {anchor: {url, dataHash}, script: hash | null}]
+            guard contents.count >= 2,
+                  let constitution = contents[1] as? [String: Any],
+                  let anchorDict = constitution["anchor"] as? [String: Any],
+                  let urlString = anchorDict["url"] as? String,
+                  let url = try? Url(urlString)
+            else { return .infoAction(InfoAction()) }
+            let dataHashHex = (anchorDict["dataHash"] as? String)
+                ?? (anchorDict["anchorDataHash"] as? String)
+                ?? ""
+            let anchor = Anchor(
+                anchorUrl: url,
+                anchorDataHash: AnchorDataHash(payload: dataHashHex.hexStringToData)
+            )
+            let scriptHash: ScriptHash? = {
+                guard let hex = constitution["script"] as? String, !hex.isEmpty
+                else { return nil }
+                return try? ScriptHash(from: .string(hex))
+            }()
+            return .newConstitution(NewConstitution(
+                id: id,
+                constitution: Constitution(anchor: anchor, scriptHash: scriptHash)
+            ))
+
+        case "InfoAction":
+            return .infoAction(InfoAction())
+
+        default:
+            return .infoAction(InfoAction())
+        }
+    }
+
+    /// Decode a `ProtocolParamUpdate` from the cardano-cli JSON dict that appears
+    /// in the `contents[1]` slot of a ParameterChange governance-action.
+    ///
+    /// Only the fields actually present in the dict are populated; everything
+    /// else stays `nil`. Complex sub-objects (cost models, voting thresholds,
+    /// execution-unit prices) are decoded best-effort — if a sub-object can't
+    /// be parsed, the corresponding `ProtocolParamUpdate` field is left nil but
+    /// the rest of the update is still returned. Field-name keys mirror what
+    /// `cardano-cli conway query gov-state` emits.
+    private func parseProtocolParamUpdate(_ d: [String: Any]) -> ProtocolParamUpdate {
+        func coin(_ key: String) -> Coin? {
+            if let v = d[key] as? Int { return Coin(v) }
+            if let v = (d[key] as? NSNumber)?.intValue { return Coin(v) }
+            return nil
+        }
+        func uint32(_ key: String) -> UInt32? {
+            if let v = d[key] as? Int { return UInt32(v) }
+            if let v = (d[key] as? NSNumber)?.intValue { return UInt32(v) }
+            return nil
+        }
+        func uint16(_ key: String) -> UInt16? {
+            if let v = d[key] as? Int { return UInt16(v) }
+            if let v = (d[key] as? NSNumber)?.intValue { return UInt16(v) }
+            return nil
+        }
+        func epochInterval(_ key: String) -> EpochInterval? {
+            if let v = d[key] as? Int { return EpochInterval(v) }
+            if let v = (d[key] as? NSNumber)?.intValue { return EpochInterval(v) }
+            return nil
+        }
+        func nni(_ key: String) -> NonNegativeInterval? {
+            if let pair = d[key] as? [String: Any],
+               let num = (pair["numerator"] as? NSNumber)?.uint64Value,
+               let den = (pair["denominator"] as? NSNumber)?.uint64Value {
+                return NonNegativeInterval(lowerBound: num, upperBound: den)
+            }
+            if let dbl = (d[key] as? NSNumber)?.doubleValue {
+                let scale: UInt64 = 1_000_000_000
+                return NonNegativeInterval(
+                    lowerBound: UInt64((dbl * Double(scale)).rounded()),
+                    upperBound: scale
+                )
+            }
+            return nil
+        }
+        func unit(_ key: String) -> UnitInterval? {
+            if let pair = d[key] as? [String: Any],
+               let num = (pair["numerator"] as? NSNumber)?.uint64Value,
+               let den = (pair["denominator"] as? NSNumber)?.uint64Value {
+                return UnitInterval(numerator: num, denominator: den)
+            }
+            if let dbl = (d[key] as? NSNumber)?.doubleValue {
+                let scale: UInt64 = 1_000_000_000
+                return UnitInterval(
+                    numerator: UInt64((dbl * Double(scale)).rounded()),
+                    denominator: scale
+                )
+            }
+            return nil
+        }
+        func exUnits(_ key: String) -> ExUnits? {
+            guard let pair = d[key] as? [String: Any] else { return nil }
+            let mem = (pair["memory"] as? NSNumber)?.uint64Value ?? (pair["mem"] as? NSNumber)?.uint64Value ?? 0
+            let steps = (pair["steps"] as? NSNumber)?.uint64Value ?? (pair["step"] as? NSNumber)?.uint64Value ?? 0
+            return ExUnits(mem: mem, steps: steps)
+        }
+
+        var u = ProtocolParamUpdate()
+        u.minFeeA = coin("txFeePerByte") ?? coin("minFeeA")
+        u.minFeeB = coin("txFeeFixed") ?? coin("minFeeB")
+        u.maxBlockBodySize = uint32("maxBlockBodySize")
+        u.maxTransactionSize = uint32("maxTxSize") ?? uint32("maxTransactionSize")
+        u.maxBlockHeaderSize = uint16("maxBlockHeaderSize")
+        u.keyDeposit = coin("stakeAddressDeposit") ?? coin("keyDeposit")
+        u.poolDeposit = coin("stakePoolDeposit") ?? coin("poolDeposit")
+        u.maximumEpoch = epochInterval("poolRetireMaxEpoch") ?? epochInterval("maximumEpoch")
+        u.nOpt = uint16("stakePoolTargetNum") ?? uint16("nOpt")
+        u.poolPledgeInfluence = nni("poolPledgeInfluence")
+        u.expansionRate = unit("monetaryExpansion") ?? unit("expansionRate")
+        u.treasuryGrowthRate = unit("treasuryCut") ?? unit("treasuryGrowthRate")
+        u.minPoolCost = coin("minPoolCost")
+        u.adaPerUtxoByte = coin("utxoCostPerByte") ?? coin("adaPerUTxOByte") ?? coin("adaPerUtxoByte")
+        u.maxValueSize = uint32("maxValueSize")
+        u.collateralPercentage = uint16("collateralPercentage")
+        u.maxCollateralInputs = uint16("maxCollateralInputs")
+        u.minCommitteeSize = uint16("committeeMinSize") ?? uint16("minCommitteeSize")
+        u.committeeTermLimit = epochInterval("committeeMaxTermLength") ?? epochInterval("committeeTermLimit")
+        u.governanceActionValidityPeriod = epochInterval("govActionLifetime") ?? epochInterval("governanceActionValidityPeriod")
+        u.governanceActionDeposit = coin("govActionDeposit") ?? coin("governanceActionDeposit")
+        u.drepDeposit = coin("dRepDeposit") ?? coin("drepDeposit")
+        u.drepInactivityPeriod = epochInterval("dRepActivity") ?? epochInterval("drepInactivityPeriod")
+        u.minFeeRefScriptCoinsPerByte = nni("minFeeRefScriptCostPerByte") ?? nni("minFeeRefScriptCoinsPerByte")
+
+        u.protocolVersion = {
+            if let v = d["protocolVersion"] as? [String: Any],
+               let major = (v["major"] as? NSNumber)?.intValue,
+               let minor = (v["minor"] as? NSNumber)?.intValue {
+                return ProtocolVersion(major: major, minor: minor)
+            }
+            return nil
+        }()
+
+        u.maxBlockExUnits = exUnits("maxBlockExecutionUnits") ?? exUnits("maxBlockExUnits")
+        u.maxTxExUnits = exUnits("maxTxExecutionUnits") ?? exUnits("maxTxExUnits")
+
+        if let prices = d["executionUnitPrices"] as? [String: Any] ?? d["executionCosts"] as? [String: Any] {
+            let mem: NonNegativeInterval?
+            let step: NonNegativeInterval?
+            if let dbl = (prices["priceMemory"] as? NSNumber)?.doubleValue {
+                let s: UInt64 = 1_000_000_000
+                mem = NonNegativeInterval(lowerBound: UInt64((dbl * Double(s)).rounded()), upperBound: s)
+            } else { mem = nil }
+            if let dbl = (prices["priceSteps"] as? NSNumber)?.doubleValue {
+                let s: UInt64 = 1_000_000_000
+                step = NonNegativeInterval(lowerBound: UInt64((dbl * Double(s)).rounded()), upperBound: s)
+            } else { step = nil }
+            if let mem, let step {
+                u.executionCosts = ExUnitPrices(memPrice: mem, stepPrice: step)
+            }
+        }
+
+        if let cm = d["costModels"] as? [String: Any], !cm.isEmpty {
+            // The cardano-cli JSON arrays may not match the strict cost-model template
+            // length (entries are added over hard forks). Pass empty arrays for any
+            // version present in the JSON — `modelFromValues` treats empty as
+            // "zero-filled template" and avoids the length check. Values are wrong,
+            // but downstream consumers in scm only need the field to be non-nil to
+            // detect that the TECHNICAL parameter group was touched.
+            var byId: [Int: [Int64]] = [:]
+            for key in cm.keys {
+                switch key {
+                case "PlutusV1", "PlutusScriptV1": byId[0] = []
+                case "PlutusV2", "PlutusScriptV2": byId[1] = []
+                case "PlutusV3", "PlutusScriptV3": byId[2] = []
+                default: break
+                }
+            }
+            if !byId.isEmpty {
+                u.costModels = try? CostModels(byId)
+            }
+        }
+
+        if let pvt = d["poolVotingThresholds"] as? [String: Any] {
+            func ui(_ key: String) -> UnitInterval? {
+                if let dbl = (pvt[key] as? NSNumber)?.doubleValue {
+                    let s: UInt64 = 1_000_000_000
+                    return UnitInterval(
+                        numerator: UInt64((dbl * Double(s)).rounded()),
+                        denominator: s
+                    )
+                }
+                return nil
+            }
+            if let cnc = ui("committeeNoConfidence"),
+               let cn = ui("committeeNormal"),
+               let hfi = ui("hardForkInitiation"),
+               let mnc = ui("motionNoConfidence"),
+               let psg = ui("ppSecurityGroup")
+            {
+                u.poolVotingThresholds = PoolVotingThresholds(
+                    committeeNoConfidence: cnc,
+                    committeeNormal: cn,
+                    hardForkInitiation: hfi,
+                    motionNoConfidence: mnc,
+                    ppSecurityGroup: psg
+                )
+            }
+        }
+
+        if let dvt = d["dRepVotingThresholds"] as? [String: Any] {
+            func ui(_ key: String) -> UnitInterval? {
+                if let dbl = (dvt[key] as? NSNumber)?.doubleValue {
+                    let s: UInt64 = 1_000_000_000
+                    return UnitInterval(
+                        numerator: UInt64((dbl * Double(s)).rounded()),
+                        denominator: s
+                    )
+                }
+                return nil
+            }
+            let order: [(String, KeyPath<[String: UnitInterval?], UnitInterval?>)] = []  // unused; we'll inline
+            _ = order
+            if let mnc = ui("motionNoConfidence"),
+               let cn = ui("committeeNormal"),
+               let cnc = ui("committeeNoConfidence"),
+               let utc = ui("updateToConstitution"),
+               let hfi = ui("hardForkInitiation"),
+               let net = ui("ppNetworkGroup"),
+               let eco = ui("ppEconomicGroup"),
+               let tech = ui("ppTechnicalGroup"),
+               let gov = ui("ppGovGroup"),
+               let tw = ui("treasuryWithdrawal")
+            {
+                // CDDL order: motionNoConfidence, committeeNormal, committeeNoConfidence,
+                //             updateToConstitution, hardForkInitiation, ppNetworkGroup,
+                //             ppEconomicGroup, ppTechnicalGroup, ppGovGroup, treasuryWithdrawal
+                u.drepVotingThresholds = DrepVotingThresholds(thresholds: [mnc, cn, cnc, utc, hfi, net, eco, tech, gov, tw])
+            }
+        }
+
+        return u
+    }
+
+    /// Build a `RewardAccount` from a bare cardano-cli credential blob
+    /// (`{keyHash: "..."}` or `{scriptHash: "..."}`). The network prefix is
+    /// fixed to mainnet — TreasuryWithdrawals is mainnet-only in practice
+    /// and the chain uses the prefix purely for credential typing.
+    ///
+    /// Header byte: high nibble 0xE (stake key) / 0xF (stake script);
+    ///              low  nibble 0x1 (mainnet)   / 0x0 (testnet).
+    private func buildRewardAccountFromCredential(_ dict: [String: Any]) -> RewardAccount? {
+        if let hex = dict["keyHash"] as? String {
+            // 0xE1 = mainnet + stake key reward account header byte.
+            var data = Data([0xE1])
+            data.append(hex.hexStringToData)
+            return RewardAccount(data)
+        }
+        if let hex = dict["scriptHash"] as? String {
+            // 0xF1 = mainnet + stake script reward account header byte.
+            var data = Data([0xF1])
+            data.append(hex.hexStringToData)
+            return RewardAccount(data)
+        }
+        return nil
+    }
+
+    /// Parse a cardano-cli credential blob — used both for the standalone
+    /// "remove" credential entries in `UpdateCommittee` and for the keys
+    /// inside the "add" map (the latter goes through `parseCommitteeColdKey`).
+    private func parseColdCredential(_ any: Any) -> CommitteeColdCredential? {
+        if let key = any as? String { return parseCommitteeColdKey(key) }
+        guard let dict = any as? [String: Any] else { return nil }
+        if let hex = dict["keyHash"] as? String {
+            return CommitteeColdCredential(
+                credential: .verificationKeyHash(
+                    VerificationKeyHash(payload: hex.hexStringToData)
+                )
+            )
+        }
+        if let hex = dict["scriptHash"] as? String {
+            return CommitteeColdCredential(
+                credential: .scriptHash(ScriptHash(payload: hex.hexStringToData))
+            )
+        }
+        return nil
+    }
+
+    private func parseRewardAccount(_ any: Any?) throws -> RewardAccount? {
+        if let hex = any as? String {
+            return RewardAccount(hex.hexStringToData)
+        }
+        if let dict = any as? [String: Any] {
+            // {"credential":{"keyHash":"..."},"network":"Mainnet"} shape — best-effort.
+            // Header byte: high nibble = 0xE (stake key) or 0xF (stake script);
+            //              low nibble  = 0x1 (mainnet) or 0x0 (testnet).
+            let network = (dict["network"] as? String)?.lowercased() ?? "mainnet"
+            let networkBit: UInt8 = network == "mainnet" ? 0x01 : 0x00
+            if let cred = dict["credential"] as? [String: Any] {
+                if let kh = cred["keyHash"] as? String {
+                    var d = Data([0xE0 | networkBit])
+                    d.append(kh.hexStringToData)
+                    return RewardAccount(d)
+                } else if let sh = cred["scriptHash"] as? String {
+                    var d = Data([0xF0 | networkBit])
+                    d.append(sh.hexStringToData)
+                    return RewardAccount(d)
+                }
+            }
+        }
+        return nil
+    }
+
+    private func parseAnchor(_ any: Any?) -> Anchor? {
+        guard let dict = any as? [String: Any] else { return nil }
+        guard let url = dict["url"] as? String,
+              let hash = dict["dataHash"] as? String ?? dict["anchorDataHash"] as? String
+        else { return nil }
+        guard let parsedURL = try? Url(url) else { return nil }
+        return Anchor(
+            anchorUrl: parsedURL,
+            anchorDataHash: AnchorDataHash(payload: hash.hexStringToData)
+        )
+    }
+
+    private func parseDRepKey(_ any: Any) -> DRep? {
+        if let s = any as? String {
+            // `cardano-cli query drep-stake-distribution` emits keys with a
+            // `drep-` prefix (`drep-keyHash-...`, `drep-alwaysAbstain`, etc).
+            // Strip it so the rest of the matching is independent of the
+            // command that produced the JSON.
+            let stripped = s.hasPrefix("drep-") ? String(s.dropFirst("drep-".count)) : s
+            if stripped.hasPrefix("keyHash-") {
+                let hex = String(stripped.dropFirst("keyHash-".count))
+                return DRep(credential: .verificationKeyHash(
+                    VerificationKeyHash(payload: hex.hexStringToData)
+                ))
+            } else if stripped.hasPrefix("scriptHash-") {
+                let hex = String(stripped.dropFirst("scriptHash-".count))
+                return DRep(credential: .scriptHash(
+                    ScriptHash(payload: hex.hexStringToData)
+                ))
+            } else if stripped == "alwaysAbstain" || stripped == "AlwaysAbstain" {
+                return DRep(credential: .alwaysAbstain)
+            } else if stripped == "alwaysNoConfidence" || stripped == "AlwaysNoConfidence" {
+                return DRep(credential: .alwaysNoConfidence)
+            }
+        }
+        if let dict = any as? [String: Any] {
+            if let hex = dict["keyHash"] as? String {
+                return DRep(credential: .verificationKeyHash(
+                    VerificationKeyHash(payload: hex.hexStringToData)
+                ))
+            }
+            if let hex = dict["scriptHash"] as? String {
+                return DRep(credential: .scriptHash(
+                    ScriptHash(payload: hex.hexStringToData)
+                ))
+            }
+        }
+        return nil
+    }
+
+    private func parsePoolKey(_ any: Any) -> PoolOperator? {
+        if let s = any as? String {
+            // `cardano-cli query spo-stake-distribution` emits raw hex
+            // (sometimes via a `keyHash-` prefix); the gov-state proposal
+            // body emits bech32 (`pool1...`). Try bech32 first, then fall
+            // back to hex bytes.
+            let stripped = s.hasPrefix("keyHash-") ? String(s.dropFirst("keyHash-".count)) : s
+            if let pool = try? PoolOperator(from: .string(stripped)) {
+                return pool
+            }
+            let bytes = stripped.hexStringToData
+            if !bytes.isEmpty {
+                return try? PoolOperator(from: bytes)
+            }
+            return nil
+        }
+        if let dict = any as? [String: Any], let hex = dict["keyHash"] as? String {
+            let bytes = hex.hexStringToData
+            if !bytes.isEmpty {
+                return try? PoolOperator(from: bytes)
+            }
+        }
+        return nil
+    }
+
+    private func parseCommitteeColdKey(_ key: String) -> CommitteeColdCredential? {
+        if key.hasPrefix("keyHash-") {
+            let hex = String(key.dropFirst("keyHash-".count))
+            return CommitteeColdCredential(
+                credential: .verificationKeyHash(VerificationKeyHash(payload: hex.hexStringToData))
+            )
+        } else if key.hasPrefix("scriptHash-") {
+            let hex = String(key.dropFirst("scriptHash-".count))
+            return CommitteeColdCredential(
+                credential: .scriptHash(ScriptHash(payload: hex.hexStringToData))
+            )
+        }
+        return nil
+    }
+
+    private func parseCommitteeHotKey(_ key: String) -> CommitteeHotCredential? {
+        if key.hasPrefix("keyHash-") {
+            let hex = String(key.dropFirst("keyHash-".count))
+            return CommitteeHotCredential(
+                credential: .verificationKeyHash(VerificationKeyHash(payload: hex.hexStringToData))
+            )
+        } else if key.hasPrefix("scriptHash-") {
+            let hex = String(key.dropFirst("scriptHash-".count))
+            return CommitteeHotCredential(
+                credential: .scriptHash(ScriptHash(payload: hex.hexStringToData))
+            )
+        }
+        return nil
+    }
+
+    private func parseLovelace(_ any: Any) -> Coin? {
+        GovernanceParsing.parseLovelace(any).map { Coin($0) }
+    }
+
+    private func parseVoteValue(_ any: Any) -> Vote? {
+        GovernanceParsing.parseVote(any)
+    }
+
+    private func parseCommitteeVotes(_ any: Any?) -> [CommitteeVote] {
+        guard let dict = any as? [String: Any] else { return [] }
+        return dict.compactMap { (k, v) -> CommitteeVote? in
+            guard let cred = parseCommitteeHotKey(k),
+                  let vote = parseVoteValue(v) else { return nil }
+            return CommitteeVote(credential: cred, vote: vote)
+        }
+    }
+
+    private func parseDRepVotes(_ any: Any?) -> [DRepVote] {
+        guard let dict = any as? [String: Any] else { return [] }
+        return dict.compactMap { (k, v) -> DRepVote? in
+            guard let vote = parseVoteValue(v) else { return nil }
+            let cred: DRepCredential
+            if k.hasPrefix("keyHash-") {
+                let hex = String(k.dropFirst("keyHash-".count))
+                cred = DRepCredential(credential: .verificationKeyHash(
+                    VerificationKeyHash(payload: hex.hexStringToData)
+                ))
+            } else if k.hasPrefix("scriptHash-") {
+                let hex = String(k.dropFirst("scriptHash-".count))
+                cred = DRepCredential(credential: .scriptHash(
+                    ScriptHash(payload: hex.hexStringToData)
+                ))
+            } else {
+                return nil
+            }
+            return DRepVote(credential: cred, vote: vote)
+        }
+    }
+
+    private func parseStakePoolVotes(_ any: Any?) -> [StakePoolVote] {
+        guard let dict = any as? [String: Any] else { return [] }
+        return dict.compactMap { (k, v) -> StakePoolVote? in
+            guard let pool = parsePoolKey(k), let vote = parseVoteValue(v) else { return nil }
+            return StakePoolVote(poolOperator: pool, vote: vote)
+        }
     }
 }

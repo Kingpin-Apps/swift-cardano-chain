@@ -1,5 +1,6 @@
 import Foundation
 import SwiftCardanoCore
+import SwiftCardanoNetwork
 import SystemPackage
 
 // MARK: - OfflineTransferGeneral
@@ -431,6 +432,10 @@ public struct OfflineTransfer: Codable {
     public var drepInfos: [DRepInfo]
     public var govActionInfos: [GovActionInfo]
     public var committeeMemberInfos: [CommitteeMemberInfo]
+    public var govActionVotesList: [GovActionVotes]
+    public var drepStakeEntries: [SwiftCardanoNetwork.DRepStakeEntry]
+    public var spoStakeEntries: [SwiftCardanoNetwork.SPOStakeEntry]
+    public var committeeStateSnapshot: CommitteeStateInfo?
     public var evaluations: [OfflineTransferEvaluation]
 
     public init(
@@ -447,6 +452,10 @@ public struct OfflineTransfer: Codable {
         drepInfos: [DRepInfo] = [],
         govActionInfos: [GovActionInfo] = [],
         committeeMemberInfos: [CommitteeMemberInfo] = [],
+        govActionVotesList: [GovActionVotes] = [],
+        drepStakeEntries: [SwiftCardanoNetwork.DRepStakeEntry] = [],
+        spoStakeEntries: [SwiftCardanoNetwork.SPOStakeEntry] = [],
+        committeeStateSnapshot: CommitteeStateInfo? = nil,
         evaluations: [OfflineTransferEvaluation] = []
     ) {
         self.general = general
@@ -462,6 +471,10 @@ public struct OfflineTransfer: Codable {
         self.drepInfos = drepInfos
         self.govActionInfos = govActionInfos
         self.committeeMemberInfos = committeeMemberInfos
+        self.govActionVotesList = govActionVotesList
+        self.drepStakeEntries = drepStakeEntries
+        self.spoStakeEntries = spoStakeEntries
+        self.committeeStateSnapshot = committeeStateSnapshot
         self.evaluations = evaluations
     }
 
@@ -479,7 +492,61 @@ public struct OfflineTransfer: Codable {
         case drepInfos = "drep_infos"
         case govActionInfos = "gov_action_infos"
         case committeeMemberInfos = "committee_member_infos"
+        case govActionVotesList = "gov_action_votes"
+        case drepStakeEntries = "drep_stake_entries"
+        case spoStakeEntries = "spo_stake_entries"
+        case committeeStateSnapshot = "committee_state"
         case evaluations
+    }
+
+    // `drepStakeEntries` and `spoStakeEntries` are SwiftCardanoNetwork
+    // Serializable types with list-form primitive encoding — the default
+    // JSON Codable bridging emits a dict (via Mirror) which the decoder
+    // then rejects. Round-trip them as CBOR-hex strings instead.
+    // All other fields use synthesized Codable behaviour.
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.general = try c.decode(OfflineTransferGeneral.self, forKey: .general)
+        self.protocol = try c.decode(OfflineTransferProtocolData.self, forKey: .protocol)
+        self.history = try c.decodeIfPresent([OfflineTransferHistory].self, forKey: .history) ?? []
+        self.files = try c.decodeIfPresent([OfflineTransferFileEntry].self, forKey: .files) ?? []
+        self.transactions = try c.decodeIfPresent([OfflineTransferTransaction].self, forKey: .transactions) ?? []
+        self.addresses = try c.decodeIfPresent([AddressInfo].self, forKey: .addresses) ?? []
+        self.stakePools = try c.decodeIfPresent([PoolOperator].self, forKey: .stakePools) ?? []
+        self.stakePoolInfos = try c.decodeIfPresent([StakePoolInfo].self, forKey: .stakePoolInfos) ?? []
+        self.kesPeriodInfos = try c.decodeIfPresent([KESPeriodInfo].self, forKey: .kesPeriodInfos) ?? []
+        self.treasury = try c.decodeIfPresent(Coin.self, forKey: .treasury)
+        self.drepInfos = try c.decodeIfPresent([DRepInfo].self, forKey: .drepInfos) ?? []
+        self.govActionInfos = try c.decodeIfPresent([GovActionInfo].self, forKey: .govActionInfos) ?? []
+        self.committeeMemberInfos = try c.decodeIfPresent([CommitteeMemberInfo].self, forKey: .committeeMemberInfos) ?? []
+        self.govActionVotesList = try c.decodeIfPresent([GovActionVotes].self, forKey: .govActionVotesList) ?? []
+        self.drepStakeEntries = try c.decodeCBORHexArray([SwiftCardanoNetwork.DRepStakeEntry].self, forKey: .drepStakeEntries)
+        self.spoStakeEntries = try c.decodeCBORHexArray([SwiftCardanoNetwork.SPOStakeEntry].self, forKey: .spoStakeEntries)
+        self.committeeStateSnapshot = try c.decodeIfPresent(CommitteeStateInfo.self, forKey: .committeeStateSnapshot)
+        self.evaluations = try c.decodeIfPresent([OfflineTransferEvaluation].self, forKey: .evaluations) ?? []
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(general, forKey: .general)
+        try c.encode(`protocol`, forKey: .protocol)
+        try c.encode(history, forKey: .history)
+        try c.encode(files, forKey: .files)
+        try c.encode(transactions, forKey: .transactions)
+        try c.encode(addresses, forKey: .addresses)
+        try c.encode(stakePools, forKey: .stakePools)
+        try c.encode(stakePoolInfos, forKey: .stakePoolInfos)
+        try c.encode(kesPeriodInfos, forKey: .kesPeriodInfos)
+        try c.encodeIfPresent(treasury, forKey: .treasury)
+        try c.encode(drepInfos, forKey: .drepInfos)
+        try c.encode(govActionInfos, forKey: .govActionInfos)
+        try c.encode(committeeMemberInfos, forKey: .committeeMemberInfos)
+        try c.encode(govActionVotesList, forKey: .govActionVotesList)
+        try c.encodeCBORHex(drepStakeEntries, forKey: .drepStakeEntries)
+        try c.encodeCBORHex(spoStakeEntries, forKey: .spoStakeEntries)
+        try c.encodeIfPresent(committeeStateSnapshot, forKey: .committeeStateSnapshot)
+        try c.encode(evaluations, forKey: .evaluations)
     }
 
     // MARK: - Persistence

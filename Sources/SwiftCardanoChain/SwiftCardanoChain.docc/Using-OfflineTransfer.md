@@ -28,7 +28,7 @@ that inherently require one (e.g. `stakePools()`).
 Add the package to your `Package.swift`:
 
 ```swift
-.package(url: "https://github.com/Kingpin-Apps/swift-cardano-chain.git", from: "0.3.0")
+.package(url: "https://github.com/Kingpin-Apps/swift-cardano-chain.git", from: "0.5.0")
 ```
 
 ## Step 1 — Prepare the Transfer File (Online Machine)
@@ -57,6 +57,20 @@ transfer.protocol.protocolParameters = try await onlineContext.protocolParameter
 transfer.protocol.genesisParameters  = try await onlineContext.genesisParameters()
 transfer.protocol.era                = try await onlineContext.era()
 transfer.protocol.network            = .mainnet
+
+// Optionally cache treasury / governance state for offline reads
+transfer.treasury               = try await onlineContext.treasury()
+transfer.govActionVotesList     = try await onlineContext.govActionsAll()
+transfer.drepStakeEntries       = try await onlineContext.drepStakeDistribution()
+transfer.spoStakeEntries        = try await onlineContext.spoStakeDistribution()
+transfer.committeeStateSnapshot = try await onlineContext.committeeState()
+
+// Optionally pre-compute Plutus execution units so the offline machine
+// can serve `evaluateTx` without a network round-trip.
+let units = try await onlineContext.evaluateTx(tx: tx)
+transfer.evaluations.append(
+    OfflineTransferEvaluation(txCborHex: tx.toCBORData().toHex, executionUnits: units)
+)
 
 // Save to disk
 try transfer.save(to: FilePath("/path/to/transfer.json"))
@@ -131,21 +145,33 @@ if context.type == .offline {
 }
 ```
 
-## Limitations
+## Cached Reads
 
-Operations that require live network access are not available:
+Every read is served from the data that was populated on the online machine and
+serialised into the file. If a field was not populated before the file was transferred,
+the corresponding call throws ``CardanoChainError/offlineTransferError(_:)``.
 
-| Feature | Supported |
-|---|:---:|
-| UTxOs from transfer file | ✓ |
-| Protocol parameters | ✓ |
-| Genesis parameters | ✓ |
-| Era / epoch (derived) | ✓ |
-| Tx submission (writes to file) | ✓ |
-| Live UTxO queries | ✗ |
-| Staking / pool queries | ✗ |
-| Tx evaluation | ✗ |
-| Governance queries | ✗ |
+| Call | Source field on `OfflineTransfer` |
+|---|---|
+| `utxos(address:)` / `utxo(input:)` | `addresses` |
+| `protocolParameters()` | `protocol.protocolParameters` |
+| `genesisParameters()` | `protocol.genesisParameters` |
+| `era()` / `epoch()` / `lastBlockSlot()` / `chainTip()` | `protocol` + system clock |
+| `stakePools()` / `stakePoolInfo(poolId:)` | `stakePools`, `stakePoolInfos` |
+| `stakeAddressInfo(address:)` | `addresses[].stakeAddressInfo` |
+| `kesPeriodInfo(...)` | `kesPeriodInfos` |
+| `treasury()` | `treasury` |
+| `drepInfo(drep:)` | `drepInfos` |
+| `govActionInfo(govActionID:)` | `govActionInfos` |
+| `govActionVotes(govActionID:)` / `govActionsAll()` | `govActionVotesList` |
+| `committeeMemberInfo(cold:)` / `committeeMemberInfo(hot:)` | `committeeMemberInfos` |
+| `committeeState()` | `committeeStateSnapshot` |
+| `drepStakeDistribution()` / `spoStakeDistribution()` | `drepStakeEntries`, `spoStakeEntries` |
+| `evaluateTx(...)` / `evaluateTxCBOR(cbor:)` | `evaluations` (matched by tx CBOR hex) |
+| `submitTxCBOR(cbor:)` (writes signed CBOR back into the file) | `transactions`, `history` |
+
+`submitTx` does not broadcast to the network — it appends the signed CBOR to the file
+so the online side can submit it on return.
 
 ## Error Handling
 

@@ -1,5 +1,6 @@
 import Foundation
 import SwiftCardanoCore
+import SwiftCardanoNetwork
 import SystemPackage
 
 /// An offline chain context backed by a JSON transfer file.
@@ -313,5 +314,37 @@ public actor OfflineTransferChainContext: ChainContext {
             )
         }
         return info
+    }
+
+    // MARK: - Votes / Governance State
+
+    public func govActionVotes(govActionID: GovActionID) async throws -> GovActionVotes {
+        guard let votes = offlineTransfer.govActionVotesList.first(where: { $0.govActionId == govActionID }) else {
+            throw CardanoChainError.offlineTransferError(
+                "Gov-action votes for '\(govActionID)' not found in offline transfer file."
+            )
+        }
+        return votes
+    }
+
+    public func govActionsAll() async throws -> [GovActionVotes] {
+        return offlineTransfer.govActionVotesList
+    }
+
+    public func drepStakeDistribution() async throws -> [SwiftCardanoNetwork.DRepStakeEntry] {
+        return offlineTransfer.drepStakeEntries
+    }
+
+    public func spoStakeDistribution() async throws -> [SwiftCardanoNetwork.SPOStakeEntry] {
+        return offlineTransfer.spoStakeEntries
+    }
+
+    public func committeeState() async throws -> CommitteeStateInfo {
+        guard let state = offlineTransfer.committeeStateSnapshot else {
+            throw CardanoChainError.offlineTransferError(
+                "Committee state snapshot not found in offline transfer file."
+            )
+        }
+        return state
     }
 }

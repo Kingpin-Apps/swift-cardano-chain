@@ -7,6 +7,7 @@ import Command
 import Foundation
 import Mockable
 import SwiftCardanoCore
+import SwiftCardanoNetwork
 import SwiftCardanoUtils
 import SystemPackage
 import Testing
@@ -768,6 +769,131 @@ struct CardanoCLIContextTests {
 
         // Verify expiration status
         #expect(memberInfo.status == .active)
+    }
+
+    @Test("Test govActionVotes")
+    func testGovActionVotes() async throws {
+        let config = createMockConfig()
+        let runner = createCardaonCLIMockCommandRunner(config: config)
+        let cli = try await CardanoCLI(configuration: config, commandRunner: runner)
+        let chainContext = try await CardanoCliChainContext(
+            nodeConfig: FilePath(configFilePath!),
+            network: .preview,
+            cli: cli
+        )
+
+        let txHash = "2dd15e0ef6e6a17841cb9541c27724072ce4d4b79b91e58432fbaa32d9572531"
+        let govActionID = GovActionID(
+            transactionID: TransactionId(payload: Data(hex: txHash)),
+            govActionIndex: 1
+        )
+
+        let votes = try await chainContext.govActionVotes(govActionID: govActionID)
+
+        #expect(votes.govActionId == govActionID)
+        #expect(votes.deposit == Coin(100_000_000_000))
+        #expect(votes.committeeVotes.count == 1)
+        #expect(votes.committeeVotes.first?.vote == .yes)
+        #expect(votes.dRepVotes.count == 1)
+        #expect(votes.dRepVotes.first?.vote == .abstain)
+        #expect(votes.stakePoolVotes.count == 1)
+        #expect(votes.stakePoolVotes.first?.vote == .no)
+        #expect(votes.anchor?.anchorUrl.absoluteString == "https://anchor.test")
+        if case .treasuryWithdrawalsAction = votes.govAction {
+        } else {
+            Issue.record("Expected treasuryWithdrawalsAction, got \(votes.govAction)")
+        }
+    }
+
+    @Test("Test govActionsAll")
+    func testGovActionsAll() async throws {
+        let config = createMockConfig()
+        let runner = createCardaonCLIMockCommandRunner(config: config)
+        let cli = try await CardanoCLI(configuration: config, commandRunner: runner)
+        let chainContext = try await CardanoCliChainContext(
+            nodeConfig: FilePath(configFilePath!),
+            network: .preview,
+            cli: cli
+        )
+
+        let all = try await chainContext.govActionsAll()
+
+        #expect(all.count == 1)
+        #expect(
+            all.first?.govActionId.transactionID.payload.toHex
+                == "2dd15e0ef6e6a17841cb9541c27724072ce4d4b79b91e58432fbaa32d9572531"
+        )
+        #expect(all.first?.govActionId.govActionIndex == 1)
+    }
+
+    @Test("Test drepStakeDistribution")
+    func testDRepStakeDistribution() async throws {
+        let config = createMockConfig()
+        let runner = createCardaonCLIMockCommandRunner(config: config)
+        let cli = try await CardanoCLI(configuration: config, commandRunner: runner)
+        let chainContext = try await CardanoCliChainContext(
+            nodeConfig: FilePath(configFilePath!),
+            network: .preview,
+            cli: cli
+        )
+
+        let entries = try await chainContext.drepStakeDistribution()
+
+        // Fixture mirrors real cardano-cli output: 2 always* + 3 keyHash entries.
+        #expect(entries.count == 5)
+        let alwaysAbstain = entries.first(where: {
+            if case .alwaysAbstain = $0.drep.credential { return true }
+            return false
+        })
+        #expect(alwaysAbstain?.stake == 8_784_205_971_620_742)
+        let alwaysNoConfidence = entries.first(where: {
+            if case .alwaysNoConfidence = $0.drep.credential { return true }
+            return false
+        })
+        #expect(alwaysNoConfidence?.stake == 194_879_536_262_091)
+    }
+
+    @Test("Test spoStakeDistribution")
+    func testSPOStakeDistribution() async throws {
+        let config = createMockConfig()
+        let runner = createCardaonCLIMockCommandRunner(config: config)
+        let cli = try await CardanoCLI(configuration: config, commandRunner: runner)
+        let chainContext = try await CardanoCliChainContext(
+            nodeConfig: FilePath(configFilePath!),
+            network: .preview,
+            cli: cli
+        )
+
+        let entries = try await chainContext.spoStakeDistribution()
+
+        #expect(entries.count == 2)
+        let stakes = Set(entries.map { $0.stake })
+        #expect(stakes.contains(1_234_567_890))
+        #expect(stakes.contains(9_876_543_210))
+    }
+
+    @Test("Test committeeState")
+    func testCommitteeState() async throws {
+        let config = createMockConfig()
+        let runner = createCardaonCLIMockCommandRunner(config: config)
+        let cli = try await CardanoCLI(configuration: config, commandRunner: runner)
+        let chainContext = try await CardanoCliChainContext(
+            nodeConfig: FilePath(configFilePath!),
+            network: .preview,
+            cli: cli
+        )
+
+        let state = try await chainContext.committeeState()
+
+        #expect(abs(state.threshold - (2.0 / 3.0)) < 1e-9)
+        #expect(state.members.count == 1)
+        let member = try #require(state.members.first)
+        #expect(member.expiration == EpochNumber(653))
+        if case .active? = member.status {
+        } else {
+            Issue.record("Expected active status")
+        }
+        #expect(member.hotCredential != nil)
     }
 }
 

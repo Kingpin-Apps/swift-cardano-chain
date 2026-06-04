@@ -105,6 +105,21 @@ struct ChainContextExtensionsTests {
         await #expect(throws: CardanoChainError.self) {
             _ = try await context.committeeMemberInfo(cold: committeeCredential)
         }
+        await #expect(throws: CardanoChainError.self) {
+            _ = try await context.govActionVotes(govActionID: govActionID)
+        }
+        await #expect(throws: CardanoChainError.self) {
+            _ = try await context.govActionsAll()
+        }
+        await #expect(throws: CardanoChainError.self) {
+            _ = try await context.drepStakeDistribution()
+        }
+        await #expect(throws: CardanoChainError.self) {
+            _ = try await context.spoStakeDistribution()
+        }
+        await #expect(throws: CardanoChainError.self) {
+            _ = try await context.committeeState()
+        }
     }
 }
 

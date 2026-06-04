@@ -439,4 +439,75 @@ struct KoiosChainContextTests {
             _ = try await chainContext.committeeMemberInfo(cold: missingCredential)
         }
     }
+
+    @Test("Test govActionVotes")
+    func testGovActionVotes() async throws {
+        let chainContext = try await KoiosChainContext(
+            network: .preview,
+            client: Client(
+                serverURL: try SwiftKoios.Network.preview.url(),
+                transport: KoiosMockTransport()
+            )
+        )
+
+        let txHash = "2dd15e0ef6e6a17841cb9541c27724072ce4d4b79b91e58432fbaa32d9572531"
+        let govActionID = GovActionID(
+            transactionID: TransactionId(payload: Data(hex: txHash)),
+            govActionIndex: 0
+        )
+
+        let votes = try await chainContext.govActionVotes(govActionID: govActionID)
+
+        #expect(votes.govActionId == govActionID)
+        #expect(votes.deposit == Coin(500_000_000))
+        #expect(votes.proposedIn == 100)
+        #expect(votes.expiresAfter == 120)
+        #expect(votes.committeeVotes.count == 1)
+        #expect(votes.committeeVotes.first?.vote == .yes)
+        #expect(votes.dRepVotes.count == 1)
+        #expect(votes.dRepVotes.first?.vote == .abstain)
+        #expect(votes.stakePoolVotes.count == 1)
+        #expect(votes.stakePoolVotes.first?.vote == .no)
+        #expect(votes.anchor?.anchorUrl.absoluteString == "https://example.com")
+    }
+
+    @Test("Test govActionsAll")
+    func testGovActionsAll() async throws {
+        let chainContext = try await KoiosChainContext(
+            network: .preview,
+            client: Client(
+                serverURL: try SwiftKoios.Network.preview.url(),
+                transport: KoiosMockTransport()
+            )
+        )
+
+        let all = try await chainContext.govActionsAll()
+
+        #expect(all.count >= 1)
+        #expect(
+            all.first?.govActionId.transactionID.payload.toHex
+                == "2dd15e0ef6e6a17841cb9541c27724072ce4d4b79b91e58432fbaa32d9572531"
+        )
+    }
+
+    @Test("Test committeeState")
+    func testCommitteeState() async throws {
+        let chainContext = try await KoiosChainContext(
+            network: .preview,
+            client: Client(
+                serverURL: try SwiftKoios.Network.preview.url(),
+                transport: KoiosMockTransport()
+            )
+        )
+
+        let state = try await chainContext.committeeState()
+
+        #expect(abs(state.threshold - (2.0 / 3.0)) < 1e-9)
+        #expect(state.members.count == 2)
+        // Mocked fixture has one authorized member and one resigned member.
+        let hasResigned = state.members.contains { $0.hotCredential == nil }
+        let hasAuthorized = state.members.contains { $0.hotCredential != nil }
+        #expect(hasResigned)
+        #expect(hasAuthorized)
+    }
 }

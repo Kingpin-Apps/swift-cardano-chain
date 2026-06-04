@@ -195,6 +195,34 @@ func createCardaonCLIMockCommandRunner(
             }
         )
 
+        .run(
+            arguments: .value([config.cardano!.cli!.string] + CLICommands.queryCommitteeStateAll),
+            environment: .any,
+            workingDirectory: .any
+        )
+        .willReturn(
+            AsyncThrowingStream<CommandEvent, any Error> { continuation in
+                continuation.yield(
+                    .standardOutput([UInt8](CLIResponse.committeeState.utf8))
+                )
+                continuation.finish()
+            }
+        )
+
+        .run(
+            arguments: .value([config.cardano!.cli!.string] + CLICommands.spoStakeDistribution),
+            environment: .any,
+            workingDirectory: .any
+        )
+        .willReturn(
+            AsyncThrowingStream<CommandEvent, any Error> { continuation in
+                continuation.yield(
+                    .standardOutput([UInt8](CLIResponse.spoStakeDistribution.utf8))
+                )
+                continuation.finish()
+            }
+        )
+
     return commandRunner
 }
 
@@ -274,6 +302,16 @@ struct CLICommands {
     static let queryCommitteeState = [
         "conway", "query", "committee-state", "--cold-verification-key-hash",
         "13493790d9b03483a1e1e684ea4faf1ee48a58f402574e7f2246f4d4", "--output-json",
+        "--testnet-magic", "2",
+    ]
+
+    static let queryCommitteeStateAll = [
+        "conway", "query", "committee-state", "--output-json",
+        "--testnet-magic", "2",
+    ]
+
+    static let spoStakeDistribution = [
+        "conway", "query", "spo-stake-distribution", "--all-spos", "--output-json",
         "--testnet-magic", "2",
     ]
 }
@@ -540,24 +578,51 @@ struct CLIResponse {
               },
               "proposedIn": 100,
               "expiresAfter": 120,
-                        "proposalProcedure": {
-                            "govAction": {
-                                "tag": "TreasuryWithdrawals",
-                                "contents": [
-                                    [
-                                        [
-                                            {
-                                                "keyHash": "b02f7b335aebf284bbdc20bdc3b59e4e183ae2cfc47ad2d8bc19a241"
-                                            },
-                                            20000000
-                                        ]
-                                    ],
-                                    null
-                                ]
-                            }
+              "committeeVotes": {
+                "keyHash-0000000000000000000000000000000000000000000000000000000000": "yes"
+              },
+              "dRepVotes": {
+                "keyHash-b02f7b335aebf284bbdc20bdc3b59e4e183ae2cfc47ad2d8bc19a241": "abstain"
+              },
+              "stakePoolVotes": {
+                "keyHash-0f292fcaa02b8b2f9b3c8f9fd8e0bb21abedb692a6d5058df3ef2735": "no"
+              },
+              "proposalProcedure": {
+                "deposit": 100000000000,
+                "returnAddr": {
+                  "credential": {
+                    "keyHash": "9139e5c0a42f0f2389634c3dd18dc621f5594c5ba825d9a8883c6627"
+                  },
+                  "network": "Testnet"
+                },
+                "anchor": {
+                  "url": "https://anchor.test",
+                  "dataHash": "35aeb21ba4be07cf9fda041b635f107ef978238b3fccae9be1b571518ce9d1b7"
+                },
+                "govAction": {
+                    "tag": "TreasuryWithdrawals",
+                    "contents": [
+                        [
+                            [
+                                {
+                                    "keyHash": "b02f7b335aebf284bbdc20bdc3b59e4e183ae2cfc47ad2d8bc19a241"
+                                },
+                                20000000
+                            ]
+                        ],
+                        null
+                    ]
+                }
               }
             }
           ]
+        }
+        """
+
+    static let spoStakeDistribution = """
+        {
+            "keyHash-0f292fcaa02b8b2f9b3c8f9fd8e0bb21abedb692a6d5058df3ef2735": 1234567890,
+            "keyHash-dd0bdf064dab59e47675c2bfeb1e12d7a8afe1d2b29f2604b1827e2f": 9876543210
         }
         """
 

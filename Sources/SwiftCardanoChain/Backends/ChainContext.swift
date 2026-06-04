@@ -1,5 +1,6 @@
 import Foundation
 import SwiftCardanoCore
+import SwiftCardanoNetwork
 import SwiftCardanoUPLC
 
 /// Enum representing transaction data input types.
@@ -126,6 +127,34 @@ public protocol ChainContext: Sendable, CustomStringConvertible, CustomDebugStri
     /// - Parameter hot: The `CommitteeHotCredential` the member has authorized.
     /// - Returns: The `CommitteeMemberInfo` object containing information about the committee member.
     func committeeMemberInfo(hot: CommitteeHotCredential) async throws -> CommitteeMemberInfo
+
+    /// Get the votes recorded against a single governance action, split by voter class.
+    /// - Parameter govActionID: The identifier of the governance action.
+    /// - Returns: A `GovActionVotes` aggregate carrying the proposal procedure plus the
+    ///   three vote arrays (committee, DRep, stake-pool).
+    func govActionVotes(govActionID: GovActionID) async throws -> GovActionVotes
+
+    /// Get all active governance proposals with their votes.
+    /// Equivalent of `cardano-cli query gov-state --output-json | jq .proposals` shaped
+    /// for in-memory filtering by the caller.
+    /// - Returns: One `GovActionVotes` per active proposal.
+    func govActionsAll() async throws -> [GovActionVotes]
+
+    /// Effective stake delegated to each DRep this epoch.
+    /// Maps to `cardano-cli query drep-stake-distribution --all-dreps`.
+    /// - Returns: One `DRepStakeEntry` (from SwiftCardanoNetwork) per DRep.
+    func drepStakeDistribution() async throws -> [SwiftCardanoNetwork.DRepStakeEntry]
+
+    /// Effective stake delegated to each stake pool this epoch.
+    /// Maps to `cardano-cli query spo-stake-distribution --all-spos`.
+    /// - Returns: One `SPOStakeEntry` (from SwiftCardanoNetwork) per pool.
+    func spoStakeDistribution() async throws -> [SwiftCardanoNetwork.SPOStakeEntry]
+
+    /// Full constitutional committee state: cold→hot authorizations, term expirations,
+    /// and active quorum threshold.
+    /// Maps to `cardano-cli query committee-state --output-json`.
+    /// - Returns: A `CommitteeStateInfo`.
+    func committeeState() async throws -> CommitteeStateInfo
 }
 
 // MARK: - Default Implementation
@@ -261,6 +290,26 @@ public extension ChainContext {
 
     func committeeMemberInfo(hot: CommitteeHotCredential) async throws -> CommitteeMemberInfo {
         throw CardanoChainError.notImplemented("committeeMemberInfo(hot:) is not implemented for \(Self.self).")
+    }
+
+    func govActionVotes(govActionID: GovActionID) async throws -> GovActionVotes {
+        throw CardanoChainError.notImplemented("govActionVotes(govActionID:) is not implemented for \(Self.self).")
+    }
+
+    func govActionsAll() async throws -> [GovActionVotes] {
+        throw CardanoChainError.notImplemented("govActionsAll() is not implemented for \(Self.self).")
+    }
+
+    func drepStakeDistribution() async throws -> [SwiftCardanoNetwork.DRepStakeEntry] {
+        throw CardanoChainError.notImplemented("drepStakeDistribution() is not implemented for \(Self.self).")
+    }
+
+    func spoStakeDistribution() async throws -> [SwiftCardanoNetwork.SPOStakeEntry] {
+        throw CardanoChainError.notImplemented("spoStakeDistribution() is not implemented for \(Self.self).")
+    }
+
+    func committeeState() async throws -> CommitteeStateInfo {
+        throw CardanoChainError.notImplemented("committeeState() is not implemented for \(Self.self).")
     }
 }
 

@@ -17,7 +17,7 @@ https://github.com/Kingpin-Apps/swift-cardano-chain.git
 Or add it to your `Package.swift`:
 
 ```swift
-.package(url: "https://github.com/Kingpin-Apps/swift-cardano-chain.git", from: "0.3.0")
+.package(url: "https://github.com/Kingpin-Apps/swift-cardano-chain.git", from: "0.5.0")
 ```
 
 Then import it in your source files:
@@ -42,9 +42,10 @@ Pick the one that matches your environment — the rest of your code stays the s
 
 All contexts support:
 
-- Reading blockchain data (UTxOs, protocol parameters, genesis parameters, epoch, era, slot)
-- Submitting and evaluating transactions
+- Reading blockchain data (UTxOs, protocol parameters, genesis parameters, epoch, era, slot, chain tip)
+- Submitting and evaluating transactions (with a backend-agnostic local UPLC evaluator for contexts that don't expose a remote evaluator)
 - Querying stake addresses, pools, DReps, governance actions, and committee members
+- Querying treasury balance, DRep / SPO stake distributions, full constitutional committee state, and per-proposal vote tallies
 
 ## Getting Started
 
@@ -139,6 +140,11 @@ for utxo in utxos {
         }
     }
 }
+
+// Resolve a single UTxO by transaction input
+if let (utxo, isSpent) = try await context.utxo(input: input) {
+    print(isSpent ? "Spent: \(utxo)" : "Unspent: \(utxo)")
+}
 ```
 
 ### Protocol Parameters
@@ -173,6 +179,24 @@ let era   = try await context.era()
 print("Epoch \(epoch), slot \(slot), era \(era?.description ?? "unknown")")
 ```
 
+### Chain Tip
+
+For a single call that returns slot, block, epoch, era, and sync progress in one shot:
+
+```swift
+let tip = try await context.chainTip()
+
+print("Slot          : \(tip.slot)")
+print("Block         : \(tip.block ?? 0)")
+print("Epoch         : \(tip.epoch)")
+print("Era           : \(tip.era ?? "unknown")")
+print("Sync progress : \(tip.syncProgress.map { "\($0)%" } ?? "n/a")")
+```
+
+`NodeSocket`, `Ogmios`, and `CardanoCLI` populate every field; cloud APIs derive the values
+they can and leave the rest `nil`. `OfflineTransfer` derives slot and epoch from cached
+genesis parameters and wall-clock time.
+
 ## Writing to the Blockchain
 
 ### Submitting Transactions
@@ -194,6 +218,8 @@ print("Submitted: \(txId)")
 
 ### Evaluating Plutus Script Execution Units
 
+Contexts with a remote evaluator (BlockFrost, Koios, Ogmios) call out directly:
+
 ```swift
 let units = try await context.evaluateTx(tx: transaction)
 
@@ -201,6 +227,24 @@ for (redeemer, eu) in units {
     print("\(redeemer): mem=\(eu.mem) steps=\(eu.steps)")
 }
 ```
+
+For contexts without a remote evaluator (CardanoCLI, NodeSocket), the protocol exposes a
+local UPLC fallback. Fetch the resolved UTxOs for the transaction's inputs and reference
+inputs using whatever transport you have, then hand them off:
+
+```swift
+let resolvedInputs = try await fetchResolvedInputs(for: transaction)
+let params         = try await context.protocolParameters()
+
+let units = try await context.evaluateTx(
+    tx: transaction,
+    resolvedInputs: resolvedInputs,
+    protocolParameters: params
+)
+```
+
+`OfflineTransferChainContext` returns execution units from `OfflineTransfer.evaluations`
+populated on the online machine — see the offline signing section below.
 
 ## Staking Operations
 
@@ -215,7 +259,16 @@ for info in stakeInfo {
 }
 ```
 
+## Treasury
+
+```swift
+let balance = try await context.treasury()
+print("Treasury: \(balance) lovelace")
+```
+
 ## Governance Queries (Conway Era)
+
+### DRep, Governance Action, and Committee Member Info
 
 ```swift
 // DRep information
@@ -224,8 +277,56 @@ let drepInfo = try await context.drepInfo(drep: someDRep)
 // Governance action details
 let govInfo = try await context.govActionInfo(govActionID: someActionId)
 
-// Committee member state
-let cmInfo = try await context.committeeMemberInfo(committeeMember: cred)
+// Committee member state, looked up by either cold or hot credential
+let cmInfo  = try await context.committeeMemberInfo(cold: coldCred)
+let cmInfo2 = try await context.committeeMemberInfo(hot:  hotCred)
+```
+
+### Per-Proposal Vote Tally
+
+`govActionVotes` returns a `GovActionVotes` aggregate carrying the proposal procedure
+(deposit, return address, anchor) plus the three vote arrays (committee, DRep,
+stake-pool) and lifecycle epochs (proposed / expires / ratified / enacted / dropped /
+expired). Each empty array means no votes have been recorded for that voter class yet.
+
+```swift
+let votes = try await context.govActionVotes(govActionID: actionId)
+
+print("Status   : \(votes.status?.rawValue ?? "active")")
+print("Deposit  : \(votes.deposit) lovelace")
+print("CC votes : \(votes.committeeVotes.count)")
+print("DRep     : \(votes.dRepVotes.count)")
+print("Pool     : \(votes.stakePoolVotes.count)")
+```
+
+To pull every active proposal in one round-trip (equivalent to
+`cardano-cli query gov-state | jq .proposals`):
+
+```swift
+let all = try await context.govActionsAll()
+let activeOnly = all.filter { $0.status == nil }
+```
+
+### Stake Distributions
+
+Effective stake delegated to each DRep and each stake pool for the current epoch —
+the inputs ratifier code uses to decide proposal outcomes. These map to
+`cardano-cli query drep-stake-distribution --all-dreps` and
+`cardano-cli query spo-stake-distribution --all-spos`.
+
+```swift
+let drepStake = try await context.drepStakeDistribution()
+let spoStake  = try await context.spoStakeDistribution()
+```
+
+### Constitutional Committee State
+
+```swift
+let state = try await context.committeeState()
+print("Quorum threshold: \(state.threshold)")
+for member in state.members {
+    print("\(member.coldCredential) → \(member.hotCredential.map(String.init(describing:)) ?? "unauthorized")")
+}
 ```
 
 ## Offline Signing Workflow
@@ -240,6 +341,20 @@ transfer.protocol.protocolParameters = try await onlineContext.protocolParameter
 transfer.protocol.genesisParameters  = try await onlineContext.genesisParameters()
 transfer.protocol.era                = try await onlineContext.era()
 transfer.protocol.network            = .mainnet
+
+// Optionally cache governance and committee snapshots for offline reads
+transfer.treasury               = try await onlineContext.treasury()
+transfer.govActionVotesList     = try await onlineContext.govActionsAll()
+transfer.drepStakeEntries       = try await onlineContext.drepStakeDistribution()
+transfer.spoStakeEntries        = try await onlineContext.spoStakeDistribution()
+transfer.committeeStateSnapshot = try await onlineContext.committeeState()
+
+// Optionally pre-compute Plutus execution units so the offline machine can serve them
+let units = try await onlineContext.evaluateTx(tx: tx)
+transfer.evaluations.append(
+    OfflineTransferEvaluation(txCborHex: tx.toCBORData().toHex, executionUnits: units)
+)
+
 try transfer.save(to: FilePath("/path/to/transfer.json"))
 
 // --- Copy file to offline machine ---
@@ -256,6 +371,10 @@ try await offlineContext.submitTx(tx: .string(signedCborHex)) // writes to file
 // --- Copy file back and submit online ---
 let txId = try await onlineContext.submitTx(tx: .string(signedCborHex))
 ```
+
+Every read and write through the offline context appends a typed entry to
+`OfflineTransfer.history`, giving you a tamper-evident audit log of every action taken
+against the file.
 
 ## Error Handling
 

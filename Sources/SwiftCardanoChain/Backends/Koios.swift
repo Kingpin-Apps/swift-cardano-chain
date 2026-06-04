@@ -1,6 +1,7 @@
 import Foundation
 import OpenAPIRuntime
 import SwiftCardanoCore
+import SwiftCardanoNetwork
 import SwiftKoios
 
 /// A chain context implementation backed by the [Koios](https://www.koios.rest) distributed API.
@@ -1107,55 +1108,7 @@ public actor KoiosChainContext: ChainContext {
                 throw CardanoChainError.valueError("Governance action not found: \(govActionID)")
             }
 
-            var govAction: GovAction = .infoAction(.init())
-
-            if let type = proposal.proposalType {
-                switch type {
-                    case .parameterChange:
-                        govAction = .parameterChangeAction(
-                            ParameterChangeAction(
-                                id: govActionID,
-                                protocolParamUpdate: ProtocolParamUpdate(),
-                                policyHash: nil
-                            ))
-                    case .hardForkInitiation:
-                        govAction = .hardForkInitiationAction(
-                            HardForkInitiationAction(
-                                id: nil,
-                                protocolVersion: ProtocolVersion(major: 0, minor: 0)
-                            ))
-                    case .treasuryWithdrawals:
-                        govAction = .treasuryWithdrawalsAction(
-                            TreasuryWithdrawalsAction(
-                                withdrawals: [:],
-                                policyHash: nil
-                            ))
-                    case .noConfidence:
-                        govAction = .noConfidence(NoConfidence(id: govActionID))
-                    case .newCommittee:
-                        govAction = .updateCommittee(
-                            UpdateCommittee(
-                                id: govActionID,
-                                coldCredentials: [],
-                                credentialEpochs: [:],
-                                interval: try! UnitInterval(from: .float(0.5))
-                            ))
-                    case .newConstitution:
-                        govAction = .newConstitution(
-                            NewConstitution(
-                                id: govActionID,
-                                constitution: Constitution(
-                                    anchor: Anchor(
-                                        anchorUrl: try! Url(""),
-                                        anchorDataHash: AnchorDataHash(payload: Data())
-                                    ),
-                                    scriptHash: nil
-                                )
-                            ))
-                    default:
-                        govAction = .infoAction(.init())
-                }
-            }
+            let govAction = parseKoiosGovAction(proposal.proposalDescription, id: govActionID)
 
             return GovActionInfo(
                 govActionId: govActionID,
@@ -1329,5 +1282,390 @@ public actor KoiosChainContext: ChainContext {
             throw CardanoChainError.koiosError(
                 "Failed to get committee member info by hot credential: \(error)")
         }
+    }
+
+    // MARK: - Votes / Governance State
+
+    public func govActionVotes(govActionID: GovActionID) async throws -> GovActionVotes {
+        let proposalIdBech32 = try govActionID.id()
+        let proposalResponse = try await api.client.proposalList()
+        let proposals = try proposalResponse.ok.body.json
+
+        let txHashLower = govActionID.transactionID.payload.toHex.lowercased()
+        let idx = Int(govActionID.govActionIndex)
+
+        guard let proposal = proposals.first(where: { p in
+            if p.proposalId == proposalIdBech32 { return true }
+            let pTx = (p.proposalTxHash?.value as? String)?.lowercased()
+            let pIdx = p.proposalIndex.map(Int.init)
+            return pTx == txHashLower && pIdx == idx
+        }) else {
+            throw CardanoChainError.valueError("Governance action not found: \(govActionID)")
+        }
+
+        return try await buildKoiosGovActionVotes(
+            govActionID: govActionID,
+            proposal: proposal,
+            proposalIdBech32: proposalIdBech32
+        )
+    }
+
+    public func govActionsAll() async throws -> [GovActionVotes] {
+        let response = try await api.client.proposalList()
+        let proposals = try response.ok.body.json
+
+        var results: [GovActionVotes] = []
+        for proposal in proposals {
+            guard let txHashRaw = proposal.proposalTxHash?.value as? String else { continue }
+            let idx: Int = proposal.proposalIndex.map(Int.init) ?? 0
+            let govActionID = GovActionID(
+                transactionID: TransactionId(payload: Data(hex: txHashRaw)),
+                govActionIndex: UInt16(idx)
+            )
+            let proposalIdBech32 = proposal.proposalId ?? (try? govActionID.id()) ?? ""
+            if let votes = try? await buildKoiosGovActionVotes(
+                govActionID: govActionID,
+                proposal: proposal,
+                proposalIdBech32: proposalIdBech32
+            ) {
+                results.append(votes)
+            }
+        }
+        return results
+    }
+
+    /// Shared mapping logic: given an already-fetched Koios proposal row, fetch its votes
+    /// and assemble a `GovActionVotes`. Reused by both `govActionVotes(govActionID:)` and
+    /// `govActionsAll()` to avoid the N+1 of refetching `proposalList()` per action.
+    private func buildKoiosGovActionVotes(
+        govActionID: GovActionID,
+        proposal: Components.Schemas.ProposalListPayload,
+        proposalIdBech32: String
+    ) async throws -> GovActionVotes {
+        let govAction = parseKoiosGovAction(proposal.proposalDescription, id: govActionID)
+
+        // deposit / returnAddress / anchor straight from the proposal row.
+        let deposit = Coin(GovernanceParsing.parseLovelace(proposal.deposit?.value) ?? 0)
+        let returnAddrData: Data = {
+            guard let s = proposal.returnAddress else { return Data() }
+            return (try? Address.fromBech32(s).toBytes()) ?? Data()
+        }()
+        let anchor: SwiftCardanoCore.Anchor? = {
+            guard let urlStr = proposal.metaUrl?.value as? String,
+                  let hashStr = proposal.metaHash?.value as? String,
+                  let url = try? Url(urlStr)
+            else { return nil }
+            return SwiftCardanoCore.Anchor(
+                anchorUrl: url,
+                anchorDataHash: AnchorDataHash(payload: Data(hex: hashStr))
+            )
+        }()
+
+        // Vote list for this proposal.
+        let votesResponse = try await api.client.proposalVotes(
+            .init(query: .init(_proposalId: proposalIdBech32))
+        )
+        let voteRows = try votesResponse.ok.body.json
+
+        var committeeVotes: [SwiftCardanoNetwork.CommitteeVote] = []
+        var dRepVotes: [SwiftCardanoNetwork.DRepVote] = []
+        var stakePoolVotes: [SwiftCardanoNetwork.StakePoolVote] = []
+
+        for row in voteRows {
+            guard let role = row.voterRole,
+                  let hotOrPoolHex = row.voterHex,
+                  let voteRaw = row.vote?.value as? String,
+                  let vote = GovernanceParsing.parseVote(voteRaw) else { continue }
+
+            let isScript = (row.voterHasScript?.value as? Bool) ?? false
+
+            switch role {
+            case .constitutionalCommittee:
+                let cred: CommitteeHotCredential = isScript
+                    ? CommitteeHotCredential(credential: .scriptHash(ScriptHash(payload: Data(hex: hotOrPoolHex))))
+                    : CommitteeHotCredential(credential: .verificationKeyHash(VerificationKeyHash(payload: Data(hex: hotOrPoolHex))))
+                committeeVotes.append(.init(credential: cred, vote: vote))
+            case .dRep:
+                let cred: DRepCredential = isScript
+                    ? DRepCredential(credential: .scriptHash(ScriptHash(payload: Data(hex: hotOrPoolHex))))
+                    : DRepCredential(credential: .verificationKeyHash(VerificationKeyHash(payload: Data(hex: hotOrPoolHex))))
+                dRepVotes.append(.init(credential: cred, vote: vote))
+            case .spo:
+                if let poolBech32 = row.voterId,
+                   let pool = try? PoolOperator(from: .string(poolBech32)) {
+                    stakePoolVotes.append(.init(poolOperator: pool, vote: vote))
+                }
+            }
+        }
+
+        return GovActionVotes(
+            govActionId: govActionID,
+            govAction: govAction,
+            committeeVotes: committeeVotes,
+            dRepVotes: dRepVotes,
+            stakePoolVotes: stakePoolVotes,
+            deposit: deposit,
+            depositReturnAddr: returnAddrData,
+            anchor: anchor,
+            proposedIn: proposal.proposedEpoch.map { UInt64($0) },
+            expiresAfter: proposal.expiration.map { UInt64($0) },
+            ratifiedEpoch: proposal.ratifiedEpoch.map { UInt64($0) },
+            enactedEpoch: proposal.enactedEpoch.map { UInt64($0) },
+            droppedEpoch: proposal.droppedEpoch.map { UInt64($0) },
+            expiredEpoch: proposal.expiredEpoch.map { UInt64($0) }
+        )
+    }
+
+    public func committeeState() async throws -> CommitteeStateInfo {
+        let response = try await api.client.committeeInfo()
+        let committeeInfo = try response.ok.body.json
+
+        let currentEpoch = try await epoch()
+
+        let members: [CommitteeStateInfo.Member] = (committeeInfo.members ?? []).compactMap { m in
+            guard let coldHex = m.ccColdHex else { return nil }
+            let coldIsScript = m.ccColdHasScript ?? false
+
+            let cold: CommitteeColdCredential = coldIsScript
+                ? CommitteeColdCredential(credential: .scriptHash(ScriptHash(payload: Data(hex: coldHex))))
+                : CommitteeColdCredential(credential: .verificationKeyHash(VerificationKeyHash(payload: Data(hex: coldHex))))
+
+            let hot: CommitteeHotCredential? = {
+                guard let hotHex = m.ccHotHex else { return nil }
+                let isScript = m.ccHotHasScript ?? false
+                return isScript
+                    ? CommitteeHotCredential(credential: .scriptHash(ScriptHash(payload: Data(hex: hotHex))))
+                    : CommitteeHotCredential(credential: .verificationKeyHash(VerificationKeyHash(payload: Data(hex: hotHex))))
+            }()
+
+            let expirationEpoch = m.expirationEpoch.map { Int($0) }
+            let status: CommitteeMemberStatus = {
+                switch m.status {
+                case .authorized:
+                    return (expirationEpoch ?? -1) >= currentEpoch ? .active : .expired
+                case .notAuthorized, .resigned:
+                    return .expired
+                case nil:
+                    return (expirationEpoch ?? -1) >= currentEpoch ? .unrecognized : .expired
+                }
+            }()
+
+            return CommitteeStateInfo.Member(
+                coldCredential: cold,
+                hotCredential: hot,
+                expiration: expirationEpoch.map { EpochNumber($0) },
+                status: status
+            )
+        }
+
+        let threshold: Double = {
+            guard let num = committeeInfo.quorumNumerator,
+                  let den = committeeInfo.quorumDenominator,
+                  den != 0 else { return 0.0 }
+            return num / den
+        }()
+
+        return CommitteeStateInfo(members: members, threshold: threshold)
+    }
+
+    // MARK: - GovAction parsing
+
+    /// Parse a Koios `proposal_description` (an OpenAPI generic JSON object)
+    /// into a real `GovAction`. The shape matches cardano-cli's
+    /// `proposalProcedure.govAction` (tag + contents) — Koios indexes the
+    /// ledger-state output. When the description is missing or unparseable
+    /// we surface the variant as `.infoAction` so callers can detect the
+    /// gap via the variant tag rather than via fabricated inner data.
+    private func parseKoiosGovAction(
+        _ description: OpenAPIRuntime.OpenAPIObjectContainer?,
+        id: GovActionID
+    ) -> GovAction {
+        guard let value = description?.value as? [String: Any],
+              let tag = value["tag"] as? String
+        else { return .infoAction(InfoAction()) }
+
+        let contents = value["contents"] as? [Any] ?? []
+
+        switch tag {
+        case "ParameterChange":
+            // TODO: walk contents[1] and map ProposedProtocolParameters → ProtocolParamUpdate.
+            return .parameterChangeAction(ParameterChangeAction(
+                id: id,
+                protocolParamUpdate: ProtocolParamUpdate(),
+                policyHash: nil
+            ))
+
+        case "HardForkInitiation":
+            guard contents.count >= 2,
+                  let versionDict = contents[1] as? [String: Any],
+                  let major = versionDict["major"] as? Int,
+                  let minor = versionDict["minor"] as? Int
+            else { return .infoAction(InfoAction()) }
+            return .hardForkInitiationAction(HardForkInitiationAction(
+                id: nil,
+                protocolVersion: ProtocolVersion(major: major, minor: minor)
+            ))
+
+        case "TreasuryWithdrawals":
+            // contents = [[[{network, credential}, lovelace], ...], policyHash]
+            var withdrawals: [RewardAccount: Coin] = [:]
+            if let pairs = contents.first as? [[Any]] {
+                for entry in pairs where entry.count >= 2 {
+                    guard let wrapper = entry[0] as? [String: Any],
+                          let lovelace = GovernanceParsing.parseLovelace(entry[1]),
+                          let returnAddr = buildKoiosRewardAccount(wrapper)
+                    else { continue }
+                    withdrawals[returnAddr] = Coin(lovelace)
+                }
+            }
+            let policyHash: ScriptHash? = {
+                guard contents.count > 1,
+                      let hex = contents[1] as? String,
+                      !hex.isEmpty
+                else { return nil }
+                return try? ScriptHash(from: .string(hex))
+            }()
+            return .treasuryWithdrawalsAction(TreasuryWithdrawalsAction(
+                withdrawals: withdrawals,
+                policyHash: policyHash
+            ))
+
+        case "NoConfidence":
+            return .noConfidence(NoConfidence(id: id))
+
+        case "UpdateCommittee":
+            // contents = [prevGovActionId, [removed], {added}, quorum]
+            var coldCredentials: Set<CommitteeColdCredential> = []
+            var credentialEpochs: [CommitteeColdCredential: UInt64] = [:]
+            if contents.count >= 2, let removed = contents[1] as? [Any] {
+                for entry in removed {
+                    if let cred = parseKoiosColdCredential(entry) {
+                        coldCredentials.insert(cred)
+                    }
+                }
+            }
+            if contents.count >= 3, let added = contents[2] as? [String: Any] {
+                for (key, value) in added {
+                    guard let cred = parseKoiosColdCredentialKey(key),
+                          let epoch = (value as? NSNumber)?.uint64Value
+                              ?? (value as? Int).map(UInt64.init)
+                    else { continue }
+                    coldCredentials.insert(cred)
+                    credentialEpochs[cred] = epoch
+                }
+            }
+            let interval: UnitInterval = {
+                guard contents.count >= 4 else {
+                    return UnitInterval(numerator: 0, denominator: 1)
+                }
+                if let dict = contents[3] as? [String: Any],
+                   let num = (dict["numerator"] as? NSNumber)?.uint64Value
+                       ?? (dict["numerator"] as? Int).map(UInt64.init),
+                   let den = (dict["denominator"] as? NSNumber)?.uint64Value
+                       ?? (dict["denominator"] as? Int).map(UInt64.init),
+                   den != 0 {
+                    return UnitInterval(numerator: num, denominator: den)
+                }
+                if let arr = contents[3] as? [Any], arr.count == 2,
+                   let num = (arr[0] as? NSNumber)?.uint64Value
+                       ?? (arr[0] as? Int).map(UInt64.init),
+                   let den = (arr[1] as? NSNumber)?.uint64Value
+                       ?? (arr[1] as? Int).map(UInt64.init),
+                   den != 0 {
+                    return UnitInterval(numerator: num, denominator: den)
+                }
+                return UnitInterval(numerator: 0, denominator: 1)
+            }()
+            return .updateCommittee(UpdateCommittee(
+                id: id,
+                coldCredentials: coldCredentials,
+                credentialEpochs: credentialEpochs,
+                interval: interval
+            ))
+
+        case "NewConstitution":
+            guard contents.count >= 2,
+                  let constitution = contents[1] as? [String: Any],
+                  let anchorDict = constitution["anchor"] as? [String: Any],
+                  let urlString = anchorDict["url"] as? String,
+                  let url = try? Url(urlString)
+            else { return .infoAction(InfoAction()) }
+            let dataHashHex = (anchorDict["dataHash"] as? String)
+                ?? (anchorDict["anchorDataHash"] as? String)
+                ?? ""
+            let anchor = Anchor(
+                anchorUrl: url,
+                anchorDataHash: AnchorDataHash(payload: dataHashHex.hexStringToData)
+            )
+            let scriptHash: ScriptHash? = {
+                guard let hex = constitution["script"] as? String, !hex.isEmpty
+                else { return nil }
+                return try? ScriptHash(from: .string(hex))
+            }()
+            return .newConstitution(NewConstitution(
+                id: id,
+                constitution: Constitution(anchor: anchor, scriptHash: scriptHash)
+            ))
+
+        case "InfoAction":
+            return .infoAction(InfoAction())
+
+        default:
+            return .infoAction(InfoAction())
+        }
+    }
+
+    /// Koios's TreasuryWithdrawals credential wrapper is
+    /// `{network: "Mainnet" | "Testnet", credential: {keyHash | scriptHash}}`.
+    private func buildKoiosRewardAccount(_ wrapper: [String: Any]) -> RewardAccount? {
+        guard let credential = wrapper["credential"] as? [String: Any] else { return nil }
+        let isTestnet = (wrapper["network"] as? String)?.lowercased() == "testnet"
+        if let hex = credential["keyHash"] as? String {
+            // 0xE0 = mainnet+keyHash, 0xE2 = testnet+keyHash header byte.
+            var data = Data([isTestnet ? 0xE0 : 0xE0])
+            data.append(hex.hexStringToData)
+            return RewardAccount(data)
+        }
+        if let hex = credential["scriptHash"] as? String {
+            // 0xE1 = mainnet+scriptHash, 0xE3 = testnet+scriptHash header byte.
+            var data = Data([isTestnet ? 0xE1 : 0xE1])
+            data.append(hex.hexStringToData)
+            return RewardAccount(data)
+        }
+        return nil
+    }
+
+    /// Koios cold credentials can be either a bare `{keyHash | scriptHash}` dict
+    /// or a stringified `keyHash-<hex>` / `scriptHash-<hex>` form.
+    private func parseKoiosColdCredential(_ any: Any) -> CommitteeColdCredential? {
+        if let key = any as? String { return parseKoiosColdCredentialKey(key) }
+        guard let dict = any as? [String: Any] else { return nil }
+        if let hex = dict["keyHash"] as? String {
+            return CommitteeColdCredential(
+                credential: .verificationKeyHash(VerificationKeyHash(payload: hex.hexStringToData))
+            )
+        }
+        if let hex = dict["scriptHash"] as? String {
+            return CommitteeColdCredential(
+                credential: .scriptHash(ScriptHash(payload: hex.hexStringToData))
+            )
+        }
+        return nil
+    }
+
+    private func parseKoiosColdCredentialKey(_ key: String) -> CommitteeColdCredential? {
+        if key.hasPrefix("keyHash-") {
+            let hex = String(key.dropFirst("keyHash-".count))
+            return CommitteeColdCredential(
+                credential: .verificationKeyHash(VerificationKeyHash(payload: hex.hexStringToData))
+            )
+        }
+        if key.hasPrefix("scriptHash-") {
+            let hex = String(key.dropFirst("scriptHash-".count))
+            return CommitteeColdCredential(
+                credential: .scriptHash(ScriptHash(payload: hex.hexStringToData))
+            )
+        }
+        return nil
     }
 }

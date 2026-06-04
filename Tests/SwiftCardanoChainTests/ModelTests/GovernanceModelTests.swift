@@ -1,5 +1,6 @@
 import Foundation
 import SwiftCardanoCore
+import SwiftCardanoNetwork
 import Testing
 
 @testable import SwiftCardanoChain
@@ -158,5 +159,268 @@ struct GovActionInfoModelTests {
         let identifier = try govActionId.id()
 
         #expect(info.description == identifier)
+    }
+}
+
+@Suite("GovActionVotes Model Tests")
+struct GovActionVotesModelTests {
+
+    private static func makeBase(
+        committeeVotes: [SwiftCardanoNetwork.CommitteeVote] = [],
+        dRepVotes: [SwiftCardanoNetwork.DRepVote] = [],
+        stakePoolVotes: [SwiftCardanoNetwork.StakePoolVote] = [],
+        anchor: Anchor? = nil,
+        proposedIn: UInt64? = nil,
+        expiresAfter: UInt64? = nil,
+        ratifiedEpoch: UInt64? = nil,
+        enactedEpoch: UInt64? = nil,
+        droppedEpoch: UInt64? = nil,
+        expiredEpoch: UInt64? = nil
+    ) -> GovActionVotes {
+        GovActionVotes(
+            govActionId: ModelTestFixtures.makeGovActionID(),
+            govAction: GovAction.infoAction(InfoAction()),
+            committeeVotes: committeeVotes,
+            dRepVotes: dRepVotes,
+            stakePoolVotes: stakePoolVotes,
+            deposit: Coin(100_000_000_000),
+            depositReturnAddr: RewardAccount(Data(repeating: 0xE0, count: 29)),
+            anchor: anchor,
+            proposedIn: proposedIn,
+            expiresAfter: expiresAfter,
+            ratifiedEpoch: ratifiedEpoch,
+            enactedEpoch: enactedEpoch,
+            droppedEpoch: droppedEpoch,
+            expiredEpoch: expiredEpoch
+        )
+    }
+
+    @Test("status prefers enacted over all other epochs")
+    func statusPrefersEnacted() {
+        let votes = Self.makeBase(
+            ratifiedEpoch: 130,
+            enactedEpoch: 140,
+            droppedEpoch: 150,
+            expiredEpoch: 160
+        )
+
+        if case .enacted? = votes.status {
+        } else {
+            Issue.record("Expected enacted status")
+        }
+    }
+
+    @Test("status falls back through ratified, dropped, expired, nil")
+    func statusFallbackOrder() {
+        let ratified = Self.makeBase(ratifiedEpoch: 130)
+        let dropped = Self.makeBase(droppedEpoch: 140)
+        let expired = Self.makeBase(expiredEpoch: 150)
+        let pending = Self.makeBase()
+
+        if case .ratified? = ratified.status {
+        } else {
+            Issue.record("Expected ratified status")
+        }
+        if case .dropped? = dropped.status {
+        } else {
+            Issue.record("Expected dropped status")
+        }
+        if case .expired? = expired.status {
+        } else {
+            Issue.record("Expected expired status")
+        }
+        #expect(pending.status == nil)
+    }
+
+    @Test("description returns governance action identifier")
+    func descriptionReturnsActionIdentifier() throws {
+        let govActionId = ModelTestFixtures.makeGovActionID(byte: 0x55, index: 2)
+        let votes = GovActionVotes(
+            govActionId: govActionId,
+            govAction: GovAction.infoAction(InfoAction()),
+            deposit: Coin(0),
+            depositReturnAddr: RewardAccount(Data())
+        )
+
+        #expect(votes.description == (try govActionId.id()))
+    }
+
+    @Test("init defaults leave votes empty and optional fields nil")
+    func initDefaults() {
+        let votes = GovActionVotes(
+            govActionId: ModelTestFixtures.makeGovActionID(),
+            govAction: GovAction.infoAction(InfoAction()),
+            deposit: Coin(0),
+            depositReturnAddr: RewardAccount(Data())
+        )
+
+        #expect(votes.committeeVotes.isEmpty)
+        #expect(votes.dRepVotes.isEmpty)
+        #expect(votes.stakePoolVotes.isEmpty)
+        #expect(votes.anchor == nil)
+        #expect(votes.proposedIn == nil)
+        #expect(votes.expiresAfter == nil)
+        #expect(votes.ratifiedEpoch == nil)
+        #expect(votes.enactedEpoch == nil)
+        #expect(votes.droppedEpoch == nil)
+        #expect(votes.expiredEpoch == nil)
+        #expect(votes.status == nil)
+    }
+
+    @Test("asGovActionInfo projects epochs and identifiers")
+    func asGovActionInfoProjects() {
+        let votes = Self.makeBase(
+            proposedIn: 100,
+            expiresAfter: 120,
+            ratifiedEpoch: 130,
+            enactedEpoch: 140,
+            droppedEpoch: 150,
+            expiredEpoch: 160
+        )
+        let info = votes.asGovActionInfo
+
+        #expect(info.govActionId == votes.govActionId)
+        #expect(info.govAction == votes.govAction)
+        #expect(info.proposedIn == 100)
+        #expect(info.expiresAfter == 120)
+        #expect(info.ratifiedEpoch == 130)
+        #expect(info.enactedEpoch == 140)
+        #expect(info.droppedEpoch == 150)
+        #expect(info.expiredEpoch == 160)
+    }
+
+    @Test("Codable round-trip preserves vote arrays, anchor, and epoch fields")
+    func codableRoundTrip() throws {
+        let committeeCred = CommitteeHotCredential(
+            credential: .verificationKeyHash(
+                VerificationKeyHash(payload: Data(repeating: 0x11, count: 28))
+            )
+        )
+        let drepCred = DRepCredential(
+            credential: .scriptHash(ScriptHash(payload: Data(repeating: 0x22, count: 28)))
+        )
+        let poolOp = PoolOperator(
+            poolKeyHash: PoolKeyHash(payload: Data(repeating: 0x33, count: 28))
+        )
+        let anchor = Anchor(
+            anchorUrl: try Url("https://anchor.test"),
+            anchorDataHash: AnchorDataHash(
+                payload: Data(repeating: 0x44, count: 32)
+            )
+        )
+
+        let original = GovActionVotes(
+            govActionId: ModelTestFixtures.makeGovActionID(byte: 0xab, index: 1),
+            govAction: GovAction.infoAction(InfoAction()),
+            committeeVotes: [.init(credential: committeeCred, vote: .yes)],
+            dRepVotes: [.init(credential: drepCred, vote: .abstain)],
+            stakePoolVotes: [.init(poolOperator: poolOp, vote: .no)],
+            deposit: Coin(500_000_000_000),
+            depositReturnAddr: RewardAccount(Data(repeating: 0xE0, count: 29)),
+            anchor: anchor,
+            proposedIn: 10,
+            expiresAfter: 20,
+            ratifiedEpoch: 30,
+            enactedEpoch: 40
+        )
+
+        let encoded = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(GovActionVotes.self, from: encoded)
+
+        #expect(decoded == original)
+    }
+}
+
+@Suite("CommitteeStateInfo Model Tests")
+struct CommitteeStateInfoModelTests {
+
+    @Test("Member init stores credentials, expiration, status")
+    func memberInitStoresFields() {
+        let cold = CommitteeColdCredential(
+            credential: .verificationKeyHash(
+                VerificationKeyHash(payload: Data(repeating: 0xaa, count: 28))
+            )
+        )
+        let hot = CommitteeHotCredential(
+            credential: .verificationKeyHash(
+                VerificationKeyHash(payload: Data(repeating: 0xbb, count: 28))
+            )
+        )
+
+        let member = CommitteeStateInfo.Member(
+            coldCredential: cold,
+            hotCredential: hot,
+            expiration: EpochNumber(500),
+            status: .active
+        )
+
+        #expect(member.coldCredential == cold)
+        #expect(member.hotCredential == hot)
+        #expect(member.expiration == EpochNumber(500))
+        if case .active? = member.status {
+        } else {
+            Issue.record("Expected active status")
+        }
+    }
+
+    @Test("init preserves member order and threshold")
+    func initPreservesMembersAndThreshold() {
+        let memberA = CommitteeStateInfo.Member(
+            coldCredential: CommitteeColdCredential(
+                credential: .verificationKeyHash(
+                    VerificationKeyHash(payload: Data(repeating: 0x01, count: 28))
+                )
+            )
+        )
+        let memberB = CommitteeStateInfo.Member(
+            coldCredential: CommitteeColdCredential(
+                credential: .verificationKeyHash(
+                    VerificationKeyHash(payload: Data(repeating: 0x02, count: 28))
+                )
+            ),
+            status: .expired
+        )
+
+        let state = CommitteeStateInfo(members: [memberA, memberB], threshold: 0.67)
+
+        #expect(state.members.count == 2)
+        #expect(state.members[0] == memberA)
+        #expect(state.members[1] == memberB)
+        #expect(state.threshold == 0.67)
+    }
+
+    @Test("Codable round-trip preserves keyHash and scriptHash members")
+    func codableRoundTrip() throws {
+        let keyHashMember = CommitteeStateInfo.Member(
+            coldCredential: CommitteeColdCredential(
+                credential: .verificationKeyHash(
+                    VerificationKeyHash(payload: Data(repeating: 0x10, count: 28))
+                )
+            ),
+            hotCredential: CommitteeHotCredential(
+                credential: .verificationKeyHash(
+                    VerificationKeyHash(payload: Data(repeating: 0x11, count: 28))
+                )
+            ),
+            expiration: EpochNumber(800),
+            status: .active
+        )
+        let scriptHashMember = CommitteeStateInfo.Member(
+            coldCredential: CommitteeColdCredential(
+                credential: .scriptHash(ScriptHash(payload: Data(repeating: 0x20, count: 28)))
+            ),
+            hotCredential: nil,
+            expiration: EpochNumber(900),
+            status: .expired
+        )
+        let original = CommitteeStateInfo(
+            members: [keyHashMember, scriptHashMember],
+            threshold: 0.51
+        )
+
+        let encoded = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(CommitteeStateInfo.self, from: encoded)
+
+        #expect(decoded == original)
     }
 }

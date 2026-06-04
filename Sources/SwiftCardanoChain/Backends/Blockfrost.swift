@@ -2,6 +2,7 @@ import Foundation
 import OpenAPIRuntime
 import SwiftBlockfrostAPI
 import SwiftCardanoCore
+import SwiftCardanoNetwork
 
 /// A chain context implementation backed by the [BlockFrost](https://blockfrost.io) cloud API.
 ///
@@ -1166,10 +1167,10 @@ public actor BlockFrostChainContext: ChainContext {
                 poolDeposit: params.poolDeposit != nil ? Coin(Int(params.poolDeposit!)!) : nil,
                 maximumEpoch: params.eMax != nil ? EpochInterval(params.eMax!) : nil,
                 nOpt: params.nOpt != nil ? UInt16(params.nOpt!) : nil,
-                poolPledgeInfluence: params.a0 != nil ? try? NonNegativeInterval(from: .float(params.a0!)) : nil,
-                expansionRate: params.rho != nil ? try? UnitInterval(from: .float(params.rho!)) : nil,
-                treasuryGrowthRate: params.tau != nil ? try? UnitInterval(from: .float(params.tau!)) : nil,
-                decentralizationConstant: params.decentralisationParam != nil ? try? UnitInterval(from: .float(params.decentralisationParam!)) : nil,
+                poolPledgeInfluence: params.a0.map { makeNonNegativeInterval($0) },
+                expansionRate: params.rho.map { makeUnitInterval($0) },
+                treasuryGrowthRate: params.tau.map { makeUnitInterval($0) },
+                decentralizationConstant: params.decentralisationParam.map { makeUnitInterval($0) },
                 extraEntropy: params.extraEntropy != nil ? 0 : nil, // Placeholder as extraEntropy in ProtocolParamUpdate is UInt32
                 protocolVersion: (params.protocolMajorVer != nil && params.protocolMinorVer != nil) ? ProtocolVersion(major: params.protocolMajorVer!, minor: params.protocolMinorVer!) : nil,
                 minPoolCost: params.minPoolCost != nil ? Coin(Int64(params.minPoolCost!)!) : nil,
@@ -1186,9 +1187,45 @@ public actor BlockFrostChainContext: ChainContext {
         case .noConfidence:
             govAction = .noConfidence(.init(id: govActionID)) // Using same ID as placeholder
         case .newCommittee:
-            govAction = .updateCommittee(.init(id: govActionID, coldCredentials: [], credentialEpochs: [:], interval: try! UnitInterval(from: .float(0.5))))
+            // Blockfrost's `/governance/proposals/{tx_hash}/{cert_index}`
+            // payload does not expose the proposed cold-credential add/remove
+            // sets or the new quorum threshold (only `governance_description`
+            // as an untyped opaque container). Surface the variant tag
+            // correctly, but use an honest "unknown" interval (0/1) and
+            // empty credential collections rather than a plausible-looking
+            // fake. Switch to Koios, Ogmios, or cardano-cli for the real
+            // proposed values.
+            govAction = .updateCommittee(.init(
+                id: govActionID,
+                coldCredentials: [],
+                credentialEpochs: [:],
+                interval: UnitInterval(numerator: 0, denominator: 1)
+            ))
         case .newConstitution:
-            govAction = .newConstitution(.init(id: govActionID, constitution: .init(anchor: .init(anchorUrl: try! Url(""), anchorDataHash: .init(payload: Data())), scriptHash: nil)))
+            // The proposal endpoint doesn't carry the constitution's anchor;
+            // fetch it from the metadata endpoint. Fall back to a placeholder
+            // URL if Blockfrost hasn't indexed the metadata yet so the call
+            // still returns a valid `GovAction` instead of trapping.
+            let realAnchor: Anchor? = try? await {
+                let metadataResponse = try await api.client.getGovernanceProposalsTxHashCertIndexMetadata(
+                    .init(path: .init(
+                        txHash: govActionID.transactionID.payload.toHex,
+                        certIndex: Int(govActionID.govActionIndex)
+                    ))
+                )
+                let meta = try metadataResponse.ok.body.json
+                guard let url = try? Url(meta.url) else { return nil as Anchor? }
+                return Anchor(
+                    anchorUrl: url,
+                    anchorDataHash: AnchorDataHash(payload: Data(hex: meta.hash))
+                )
+            }()
+            let anchor = realAnchor
+                ?? Anchor(
+                    anchorUrl: (try? Url("https://example.invalid"))!,
+                    anchorDataHash: AnchorDataHash(payload: Data())
+                )
+            govAction = .newConstitution(.init(id: govActionID, constitution: .init(anchor: anchor, scriptHash: nil)))
         case .treasuryWithdrawals:
             let withdrawalsResponse = try await api.client.getGovernanceProposalsTxHashCertIndexWithdrawals(
                 .init(path: .init(
@@ -1351,4 +1388,183 @@ public actor BlockFrostChainContext: ChainContext {
             status: status
         )
     }
+
+    // MARK: - Votes / Governance State
+
+    public func govActionVotes(govActionID: GovActionID) async throws -> GovActionVotes {
+        let info = try await self.govActionInfo(govActionID: govActionID)
+
+        // Pull deposit + return-address from the proposal record itself. The proposal
+        // endpoint already runs inside govActionInfo above; we re-query rather than
+        // refactor it to return the raw payload, accepting one extra HTTP call to keep
+        // the existing govActionInfo signature untouched.
+        let proposalResponse = try await api.client.getGovernanceProposalsTxHashCertIndex(
+            .init(path: .init(
+                txHash: govActionID.transactionID.payload.toHex,
+                certIndex: Int(govActionID.govActionIndex)
+            ))
+        )
+        let proposal = try proposalResponse.ok.body.json
+
+        let deposit = Coin(UInt64(proposal.deposit) ?? 0)
+        let returnAddrData: Data = (try? Address.fromBech32(proposal.returnAddress).toBytes()) ?? Data()
+
+        // Anchor metadata via a separate endpoint. Best-effort — the proposal may have
+        // no anchor (rare in practice), or Blockfrost may return 404 if the metadata
+        // hasn't been indexed yet. Either way we just drop the anchor and continue.
+        let anchor: SwiftCardanoCore.Anchor? = try? await {
+            let metadataResponse = try await api.client.getGovernanceProposalsTxHashCertIndexMetadata(
+                .init(path: .init(
+                    txHash: govActionID.transactionID.payload.toHex,
+                    certIndex: Int(govActionID.govActionIndex)
+                ))
+            )
+            let meta = try metadataResponse.ok.body.json
+            guard let url = try? Url(meta.url) else { return nil as SwiftCardanoCore.Anchor? }
+            return SwiftCardanoCore.Anchor(
+                anchorUrl: url,
+                anchorDataHash: AnchorDataHash(payload: Data(hex: meta.hash))
+            )
+        }()
+
+        let votesResponse = try await api.client.getGovernanceProposalsTxHashCertIndexVotes(
+            .init(path: .init(
+                txHash: govActionID.transactionID.payload.toHex,
+                certIndex: Int(govActionID.govActionIndex)
+            ))
+        )
+        let voteRows = try votesResponse.ok.body.json
+
+        var committeeVotes: [SwiftCardanoNetwork.CommitteeVote] = []
+        var dRepVotes: [SwiftCardanoNetwork.DRepVote] = []
+        var stakePoolVotes: [SwiftCardanoNetwork.StakePoolVote] = []
+
+        for row in voteRows {
+            let vote: Vote
+            switch row.vote {
+            case .yes: vote = .yes
+            case .no: vote = .no
+            case .abstain: vote = .abstain
+            }
+
+            switch row.voterRole {
+            case .constitutionalCommittee:
+                if let cred = try? CommitteeHotCredential(from: row.voter) {
+                    committeeVotes.append(.init(credential: cred, vote: vote))
+                }
+            case .drep:
+                if let drep = try? DRep(from: row.voter) {
+                    let cred: DRepCredential
+                    switch drep.credential {
+                    case .verificationKeyHash(let h):
+                        cred = DRepCredential(credential: .verificationKeyHash(h))
+                    case .scriptHash(let h):
+                        cred = DRepCredential(credential: .scriptHash(h))
+                    case .alwaysAbstain, .alwaysNoConfidence:
+                        continue
+                    }
+                    dRepVotes.append(.init(credential: cred, vote: vote))
+                }
+            case .spo:
+                if let pool = try? PoolOperator(from: .string(row.voter)) {
+                    stakePoolVotes.append(.init(poolOperator: pool, vote: vote))
+                }
+            }
+        }
+
+        return GovActionVotes(
+            govActionId: govActionID,
+            govAction: info.govAction,
+            committeeVotes: committeeVotes,
+            dRepVotes: dRepVotes,
+            stakePoolVotes: stakePoolVotes,
+            deposit: deposit,
+            depositReturnAddr: returnAddrData,
+            anchor: anchor,
+            proposedIn: info.proposedIn,
+            expiresAfter: info.expiresAfter,
+            ratifiedEpoch: info.ratifiedEpoch,
+            enactedEpoch: info.enactedEpoch,
+            droppedEpoch: info.droppedEpoch,
+            expiredEpoch: info.expiredEpoch
+        )
+    }
+
+    public func govActionsAll() async throws -> [GovActionVotes] {
+        let response = try await api.client.getGovernanceProposals()
+        let proposals = try response.ok.body.json
+
+        var results: [GovActionVotes] = []
+        for proposal in proposals {
+            let govActionID = GovActionID(
+                transactionID: TransactionId(payload: Data(hex: proposal.txHash)),
+                govActionIndex: UInt16(proposal.certIndex)
+            )
+            if let votes = try? await govActionVotes(govActionID: govActionID) {
+                results.append(votes)
+            }
+        }
+        return results
+    }
+
+    public func committeeState() async throws -> CommitteeStateInfo {
+        let response = try await api.client.getGovernanceCommittee()
+        let committee = try response.ok.body.json
+
+        let currentEpoch = try await epoch()
+
+        let members: [CommitteeStateInfo.Member] = committee.members.map { m in
+            let cold: CommitteeColdCredential = m.ccColdHasScript
+                ? CommitteeColdCredential(credential: .scriptHash(ScriptHash(payload: Data(hex: m.ccColdHex))))
+                : CommitteeColdCredential(credential: .verificationKeyHash(VerificationKeyHash(payload: Data(hex: m.ccColdHex))))
+
+            let hot: CommitteeHotCredential? = {
+                guard let hotHex = m.ccHotHex else { return nil }
+                let isScript = m.ccHotHasScript ?? false
+                return isScript
+                    ? CommitteeHotCredential(credential: .scriptHash(ScriptHash(payload: Data(hex: hotHex))))
+                    : CommitteeHotCredential(credential: .verificationKeyHash(VerificationKeyHash(payload: Data(hex: hotHex))))
+            }()
+
+            let status: CommitteeMemberStatus = {
+                switch m.status {
+                case .authorized:
+                    return m.expirationEpoch >= currentEpoch ? .active : .expired
+                case .notAuthorized, .resigned:
+                    return .expired
+                }
+            }()
+
+            return CommitteeStateInfo.Member(
+                coldCredential: cold,
+                hotCredential: hot,
+                expiration: EpochNumber(m.expirationEpoch),
+                status: status
+            )
+        }
+
+        let threshold: Double = committee.quorum.denominator != 0
+            ? Double(committee.quorum.numerator) / Double(committee.quorum.denominator)
+            : 0.0
+
+        return CommitteeStateInfo(members: members, threshold: threshold)
+    }
+}
+
+// Blockfrost returns protocol-parameter ratios as JSON doubles, but
+// `UnitInterval`/`NonNegativeInterval`'s primitive initializers reject
+// `.float` — they want a CBOR-tagged or list-form pair of integers.
+// Round to a fixed precision (6 decimal places by default, which covers
+// the precision Cardano actually publishes for these parameters).
+
+internal func makeUnitInterval(_ value: Double, precision: UInt64 = 1_000_000) -> UnitInterval {
+    let bounded = max(0.0, min(1.0, value))
+    let scaled = (bounded * Double(precision)).rounded()
+    return UnitInterval(numerator: UInt64(scaled), denominator: precision)
+}
+
+internal func makeNonNegativeInterval(_ value: Double, precision: UInt64 = 1_000_000) -> NonNegativeInterval {
+    let bounded = max(0.0, value)
+    let scaled = (bounded * Double(precision)).rounded()
+    return NonNegativeInterval(lowerBound: UInt64(scaled), upperBound: precision)
 }

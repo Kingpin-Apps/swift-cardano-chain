@@ -303,6 +303,42 @@ struct KoiosMockTransport: ClientTransport {
                 ]
                 """.data(using: .utf8)!
 
+        case "proposal_votes":
+            responseBody = """
+                [
+                    {
+                        "block_time": 1774800000,
+                        "voter_role": "ConstitutionalCommittee",
+                        "voter_id": "cc_hot1qgqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqvcdjk7",
+                        "voter_hex": "0000000000000000000000000000000000000000000000000000000000",
+                        "voter_has_script": false,
+                        "vote": "yes",
+                        "meta_url": null,
+                        "meta_hash": null
+                    },
+                    {
+                        "block_time": 1774800001,
+                        "voter_role": "DRep",
+                        "voter_id": "drep1kqhhkv66a0egfw7uyz7u8dv7fcvr4ck0c3ad9k9urx3yzhefup0",
+                        "voter_hex": "b02f7b335aebf284bbdc20bdc3b59e4e183ae2cfc47ad2d8bc19a241",
+                        "voter_has_script": false,
+                        "vote": "abstain",
+                        "meta_url": null,
+                        "meta_hash": null
+                    },
+                    {
+                        "block_time": 1774800002,
+                        "voter_role": "SPO",
+                        "voter_id": "pool1pu5jlj4q9w9jlxeu370a3c9myx47md5j5m2str0naunn2q3lkdy",
+                        "voter_hex": "0f292fcaa02b8b2f9b3c8f9fd8e0bb21abedb692a6d5058df3ef2735",
+                        "voter_has_script": false,
+                        "vote": "no",
+                        "meta_url": null,
+                        "meta_hash": null
+                    }
+                ]
+                """.data(using: .utf8)!
+
         case "committee_info":
             responseBody = """
                 {

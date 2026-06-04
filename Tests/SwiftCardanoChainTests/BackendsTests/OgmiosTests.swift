@@ -600,4 +600,60 @@ struct OgmiosChainContextTests {
             _ = try await chainContext.committeeMemberInfo(cold: missingCredential)
         }
     }
+
+    @Test("Test govActionVotes via mock client")
+    func testGovActionVotes() async throws {
+        let chainContext = try await createMockOgmiosChainContext()
+
+        let txHash = "2dd15e0ef6e6a17841cb9541c27724072ce4d4b79b91e58432fbaa32d9572531"
+        let govActionID = GovActionID(
+            transactionID: TransactionId(payload: Data(hex: txHash)),
+            govActionIndex: 1
+        )
+
+        let votes = try await chainContext.govActionVotes(govActionID: govActionID)
+
+        #expect(votes.govActionId == govActionID)
+        #expect(votes.deposit == Coin(100_000_000_000))
+        #expect(votes.proposedIn == 100)
+        #expect(votes.expiresAfter == 130)
+        // Mock fixture has a single committee vote (no) and no DRep/SPO votes.
+        #expect(votes.committeeVotes.count == 1)
+        #expect(votes.committeeVotes.first?.vote == .no)
+        #expect(votes.dRepVotes.isEmpty)
+        #expect(votes.stakePoolVotes.isEmpty)
+        if case .infoAction = votes.govAction {
+        } else {
+            Issue.record("Expected infoAction for action.type = information")
+        }
+    }
+
+    @Test("Test govActionsAll via mock client")
+    func testGovActionsAll() async throws {
+        let chainContext = try await createMockOgmiosChainContext()
+
+        let all = try await chainContext.govActionsAll()
+
+        #expect(all.count == 1)
+        #expect(
+            all.first?.govActionId.transactionID.payload.toHex
+                == "2dd15e0ef6e6a17841cb9541c27724072ce4d4b79b91e58432fbaa32d9572531"
+        )
+        #expect(all.first?.govActionId.govActionIndex == 1)
+    }
+
+    @Test("Test committeeState via mock client")
+    func testCommitteeState() async throws {
+        let chainContext = try await createMockOgmiosChainContext()
+
+        let state = try await chainContext.committeeState()
+
+        #expect(abs(state.threshold - (2.0 / 3.0)) < 1e-9)
+        #expect(state.members.count == 3)
+        // All three mock members have status: "active".
+        #expect(state.members.allSatisfy {
+            if case .active? = $0.status { return true }
+            return false
+        })
+    }
 }

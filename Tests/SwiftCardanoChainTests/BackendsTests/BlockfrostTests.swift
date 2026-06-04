@@ -3,6 +3,7 @@ import Foundation
 import HTTPTypes
 import OpenAPIRuntime
 import SwiftCardanoCore
+import SwiftCardanoNetwork
 import SwiftBlockfrostAPI
 @testable import SwiftCardanoChain
 
@@ -356,5 +357,156 @@ struct BlockfrostChainContextTests {
         }
         #expect(govActionInfo.enactedEpoch == 123)
         #expect(govActionInfo.expiresAfter == 120)
+    }
+
+    @Test("Test govActionVotes")
+    func testGovActionVotes() async throws {
+        let chainContext = try await BlockFrostChainContext(
+            projectId: "fake-project-id",
+            network: .preview,
+            client: Client(
+                serverURL: URL(string: "https://cardano-preview.blockfrost.io/api/v0")!,
+                transport: MockTransport()
+            )
+        )
+
+        let txHash = "2dd15e0ef6e6a17841cb9541c27724072ce4d4b79b91e58432fbaa32d9572531"
+        let govActionID = GovActionID(
+            transactionID: TransactionId(payload: Data(hex: txHash)),
+            govActionIndex: 1
+        )
+
+        let votes = try await chainContext.govActionVotes(govActionID: govActionID)
+
+        #expect(votes.govActionId == govActionID)
+        #expect(votes.deposit == Coin(12000))
+        #expect(votes.committeeVotes.count == 1)
+        #expect(votes.committeeVotes.first?.vote == .yes)
+        #expect(votes.dRepVotes.count == 1)
+        #expect(votes.dRepVotes.first?.vote == .abstain)
+        #expect(votes.stakePoolVotes.count == 1)
+        #expect(votes.stakePoolVotes.first?.vote == .no)
+        #expect(votes.anchor?.anchorUrl.absoluteString == "https://anchor.test")
+    }
+
+    @Test("Test govActionsAll")
+    func testGovActionsAll() async throws {
+        let chainContext = try await BlockFrostChainContext(
+            projectId: "fake-project-id",
+            network: .preview,
+            client: Client(
+                serverURL: URL(string: "https://cardano-preview.blockfrost.io/api/v0")!,
+                transport: MockTransport()
+            )
+        )
+
+        let all = try await chainContext.govActionsAll()
+
+        #expect(all.count == 1)
+        #expect(
+            all.first?.govActionId.transactionID.payload.toHex
+                == "2dd15e0ef6e6a17841cb9541c27724072ce4d4b79b91e58432fbaa32d9572531"
+        )
+        #expect(all.first?.govActionId.govActionIndex == 1)
+    }
+
+    @Test("makeUnitInterval converts a Double to a rational approximation")
+    func testMakeUnitInterval() {
+        // 0.003 (monetary expansion rate) ≈ 3000 / 1_000_000.
+        let rho = makeUnitInterval(0.003)
+        #expect(rho.numerator == 3_000)
+        #expect(rho.denominator == 1_000_000)
+        #expect(abs(Double(rho.numerator) / Double(rho.denominator) - 0.003) < 1e-9)
+
+        // 0.2 (treasury growth rate) ≈ 200000 / 1_000_000.
+        let tau = makeUnitInterval(0.2)
+        #expect(tau.numerator == 200_000)
+        #expect(tau.denominator == 1_000_000)
+
+        // Below 0 is clamped to 0; above 1 is clamped to 1.
+        #expect(makeUnitInterval(-0.5).numerator == 0)
+        #expect(makeUnitInterval(1.7).numerator == 1_000_000)
+
+        // Custom precision honoured.
+        let coarse = makeUnitInterval(0.5, precision: 10)
+        #expect(coarse.numerator == 5)
+        #expect(coarse.denominator == 10)
+    }
+
+    @Test("makeNonNegativeInterval converts a Double to a rational approximation")
+    func testMakeNonNegativeInterval() {
+        // 0.3 (pool pledge influence) ≈ 300000 / 1_000_000.
+        let a0 = makeNonNegativeInterval(0.3)
+        #expect(a0.lowerBound == 300_000)
+        #expect(a0.upperBound == 1_000_000)
+
+        // Negative is clamped to 0; values > 1 are allowed (non-negative,
+        // not unit-bounded).
+        #expect(makeNonNegativeInterval(-0.1).lowerBound == 0)
+        let big = makeNonNegativeInterval(2.5)
+        #expect(big.lowerBound == 2_500_000)
+        #expect(big.upperBound == 1_000_000)
+    }
+
+    @Test("Test govActionInfo populates parameter-change ratios")
+    func testGovActionInfoParameterChangeRatios() async throws {
+        let chainContext = try await BlockFrostChainContext(
+            projectId: "fake-project-id",
+            network: .preview,
+            client: Client(
+                serverURL: URL(string: "https://cardano-preview.blockfrost.io/api/v0")!,
+                transport: ParameterChangeMockTransport()
+            )
+        )
+
+        let txHash = "2dd15e0ef6e6a17841cb9541c27724072ce4d4b79b91e58432fbaa32d9572531"
+        let govActionID = GovActionID(
+            transactionID: TransactionId(payload: Data(hex: txHash)),
+            govActionIndex: 1
+        )
+
+        let info = try await chainContext.govActionInfo(govActionID: govActionID)
+        guard case let .parameterChangeAction(action) = info.govAction else {
+            Issue.record("Expected parameterChangeAction, got \(info.govAction)")
+            return
+        }
+
+        let update = action.protocolParamUpdate
+        let expansion = try #require(update.expansionRate)
+        #expect(expansion.numerator == 3_000)
+        #expect(expansion.denominator == 1_000_000)
+        let treasury = try #require(update.treasuryGrowthRate)
+        #expect(treasury.numerator == 200_000)
+        let decentralization = try #require(update.decentralizationConstant)
+        #expect(decentralization.numerator == 500_000)
+        let pledge = try #require(update.poolPledgeInfluence)
+        #expect(pledge.lowerBound == 300_000)
+    }
+
+    @Test("Test committeeState")
+    func testCommitteeState() async throws {
+        let chainContext = try await BlockFrostChainContext(
+            projectId: "fake-project-id",
+            network: .preview,
+            client: Client(
+                serverURL: URL(string: "https://cardano-preview.blockfrost.io/api/v0")!,
+                transport: MockTransport()
+            )
+        )
+
+        let state = try await chainContext.committeeState()
+
+        #expect(abs(state.threshold - (2.0 / 3.0)) < 1e-9)
+        #expect(state.members.count == 1)
+        let member = try #require(state.members.first)
+        if case .verificationKeyHash = member.coldCredential.credential {
+        } else {
+            Issue.record("Expected verificationKeyHash cold credential")
+        }
+        #expect(member.expiration == EpochNumber(800))
+        if case .active? = member.status {
+        } else {
+            Issue.record("Expected active status (epoch 800 >= mocked epoch 500)")
+        }
     }
 }

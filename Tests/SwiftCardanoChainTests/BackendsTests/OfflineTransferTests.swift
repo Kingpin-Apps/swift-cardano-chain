@@ -1,5 +1,6 @@
 import Foundation
 import SwiftCardanoCore
+import SwiftCardanoNetwork
 import SystemPackage
 import Testing
 
@@ -583,6 +584,136 @@ struct OfflineTransferChainContextTests {
         )
         await #expect(throws: CardanoChainError.self) {
             _ = try await context.committeeMemberInfo(cold: credential)
+        }
+    }
+
+    // MARK: Gov Action Votes
+
+    @Test("govActionVotes returns stored votes")
+    func testGovActionVotes() async throws {
+        let govActionID = ModelTestFixtures.makeGovActionID()
+        let stored = GovActionVotes(
+            govActionId: govActionID,
+            govAction: GovAction.infoAction(InfoAction()),
+            deposit: Coin(100_000_000_000),
+            depositReturnAddr: RewardAccount(Data(repeating: 0xE0, count: 29)),
+            proposedIn: 50
+        )
+        let (context, _) = try makeContext { transfer in
+            transfer.govActionVotesList = [stored]
+        }
+
+        let result = try await context.govActionVotes(govActionID: govActionID)
+        #expect(result == stored)
+    }
+
+    @Test("govActionVotes throws for unknown action")
+    func testGovActionVotesUnknown() async throws {
+        let (context, _) = try makeContext()
+        let govActionID = ModelTestFixtures.makeGovActionID(byte: 0xff)
+        await #expect(throws: CardanoChainError.self) {
+            _ = try await context.govActionVotes(govActionID: govActionID)
+        }
+    }
+
+    @Test("govActionsAll returns stored list")
+    func testGovActionsAll() async throws {
+        let entry = GovActionVotes(
+            govActionId: ModelTestFixtures.makeGovActionID(byte: 0x01),
+            govAction: GovAction.infoAction(InfoAction()),
+            deposit: Coin(100_000_000_000),
+            depositReturnAddr: RewardAccount(Data(repeating: 0xE0, count: 29))
+        )
+        let (context, _) = try makeContext { transfer in
+            transfer.govActionVotesList = [entry]
+        }
+
+        let all = try await context.govActionsAll()
+        #expect(all.count == 1)
+        #expect(all[0] == entry)
+    }
+
+    @Test("govActionsAll returns empty when none stored")
+    func testGovActionsAllEmpty() async throws {
+        let (context, _) = try makeContext()
+        let all = try await context.govActionsAll()
+        #expect(all.isEmpty)
+    }
+
+    // MARK: DRep / SPO Stake Distributions
+
+    @Test("drepStakeDistribution returns stored entries")
+    func testDRepStakeDistribution() async throws {
+        let drep = try DRep.fromBech32("drep1kqhhkv66a0egfw7uyz7u8dv7fcvr4ck0c3ad9k9urx3yzhefup0")
+        let entry = SwiftCardanoNetwork.DRepStakeEntry(drep: drep, stake: 305_554_989_074)
+        let (context, _) = try makeContext { transfer in
+            transfer.drepStakeEntries = [entry]
+        }
+
+        let entries = try await context.drepStakeDistribution()
+        #expect(entries.count == 1)
+        #expect(entries[0].drep == drep)
+        #expect(entries[0].stake == 305_554_989_074)
+    }
+
+    @Test("drepStakeDistribution returns empty when none stored")
+    func testDRepStakeDistributionEmpty() async throws {
+        let (context, _) = try makeContext()
+        let entries = try await context.drepStakeDistribution()
+        #expect(entries.isEmpty)
+    }
+
+    @Test("spoStakeDistribution returns stored entries")
+    func testSPOStakeDistribution() async throws {
+        let pool = try PoolOperator(from: testPoolId)
+        let entry = SwiftCardanoNetwork.SPOStakeEntry(poolOperator: pool, stake: 1_234_567_890)
+        let (context, _) = try makeContext { transfer in
+            transfer.spoStakeEntries = [entry]
+        }
+
+        let entries = try await context.spoStakeDistribution()
+        #expect(entries.count == 1)
+        #expect(entries[0].stake == 1_234_567_890)
+    }
+
+    @Test("spoStakeDistribution returns empty when none stored")
+    func testSPOStakeDistributionEmpty() async throws {
+        let (context, _) = try makeContext()
+        let entries = try await context.spoStakeDistribution()
+        #expect(entries.isEmpty)
+    }
+
+    // MARK: Committee State
+
+    @Test("committeeState returns stored snapshot")
+    func testCommitteeState() async throws {
+        let member = CommitteeStateInfo.Member(
+            coldCredential: CommitteeColdCredential(
+                credential: .verificationKeyHash(
+                    VerificationKeyHash(payload: Data(repeating: 0xab, count: 28))
+                )
+            ),
+            hotCredential: nil,
+            expiration: EpochNumber(500),
+            status: .active
+        )
+        let snapshot = CommitteeStateInfo(members: [member], threshold: 0.67)
+
+        let (context, _) = try makeContext { transfer in
+            transfer.committeeStateSnapshot = snapshot
+        }
+
+        let result = try await context.committeeState()
+        #expect(result == snapshot)
+        #expect(result.threshold == 0.67)
+        #expect(result.members.count == 1)
+    }
+
+    @Test("committeeState throws when no snapshot stored")
+    func testCommitteeStateMissing() async throws {
+        let (context, _) = try makeContext()
+        await #expect(throws: CardanoChainError.self) {
+            _ = try await context.committeeState()
         }
     }
 

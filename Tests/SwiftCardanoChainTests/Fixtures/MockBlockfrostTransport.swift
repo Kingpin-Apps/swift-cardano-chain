@@ -943,6 +943,10 @@ struct MockTransport: ClientTransport {
                         txHash: "2dd15e0ef6e6a17841cb9541c27724072ce4d4b79b91e58432fbaa32d9572531",
                         certIndex: 1,
                         parameters: Components.Schemas.ProposalParameters.ParametersPayload(
+                            a0: 0.3,
+                            rho: 0.003,
+                            tau: 0.2,
+                            decentralisationParam: 0.5,
                             protocolMajorVer: 10,
                             protocolMinorVer: 0
                         )
@@ -956,6 +960,79 @@ struct MockTransport: ClientTransport {
                             amount: "20000000"
                         )
                     ]
+                )
+            case "get/governance/proposals":
+                body = try JSONEncoder().encode(
+                    [
+                        Components.Schemas.ProposalsPayload(
+                            id: "gov_action1qkm52uwlnw0gtcyh9259sjuwsyrnjdfd3hg7tjzrl463xtv4wfxysqqqqqfd6vw0",
+                            txHash: "2dd15e0ef6e6a17841cb9541c27724072ce4d4b79b91e58432fbaa32d9572531",
+                            certIndex: 1,
+                            governanceType: .treasuryWithdrawals
+                        )
+                    ]
+                )
+            case "get/governance/proposals/{tx_hash}/{cert_index}/votes":
+                body = try JSONEncoder().encode(
+                    [
+                        Components.Schemas.ProposalVotesPayload(
+                            txHash: "0000000000000000000000000000000000000000000000000000000000000001",
+                            certIndex: 0,
+                            voterRole: .constitutionalCommittee,
+                            voter: "cc_hot1qgqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqvcdjk7",
+                            vote: .yes
+                        ),
+                        Components.Schemas.ProposalVotesPayload(
+                            txHash: "0000000000000000000000000000000000000000000000000000000000000002",
+                            certIndex: 0,
+                            voterRole: .drep,
+                            voter: "drep1kqhhkv66a0egfw7uyz7u8dv7fcvr4ck0c3ad9k9urx3yzhefup0",
+                            vote: .abstain
+                        ),
+                        Components.Schemas.ProposalVotesPayload(
+                            txHash: "0000000000000000000000000000000000000000000000000000000000000003",
+                            certIndex: 0,
+                            voterRole: .spo,
+                            voter: "pool1pu5jlj4q9w9jlxeu370a3c9myx47md5j5m2str0naunn2q3lkdy",
+                            vote: .no
+                        )
+                    ]
+                )
+            case "get/governance/proposals/{tx_hash}/{cert_index}/metadata":
+                body = try JSONEncoder().encode(
+                    Components.Schemas.ProposalMetadata(
+                        id: "gov_action1qkm52uwlnw0gtcyh9259sjuwsyrnjdfd3hg7tjzrl463xtv4wfxysqqqqqfd6vw0",
+                        txHash: "2dd15e0ef6e6a17841cb9541c27724072ce4d4b79b91e58432fbaa32d9572531",
+                        certIndex: 1,
+                        url: "https://anchor.test",
+                        hash: "35aeb21ba4be07cf9fda041b635f107ef978238b3fccae9be1b571518ce9d1b7",
+                        bytes: ""
+                    )
+                )
+            case "get/governance/committee":
+                body = try JSONEncoder().encode(
+                    Components.Schemas.Committee(
+                        govActionId: nil,
+                        proposalTxHash: nil,
+                        proposalIndex: nil,
+                        isDissolved: false,
+                        quorum: Components.Schemas.Committee.QuorumPayload(
+                            numerator: 2,
+                            denominator: 3
+                        ),
+                        members: [
+                            Components.Schemas.Committee.MembersPayloadPayload(
+                                ccColdId: "cc_cold1zgqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqz3la7s",
+                                ccColdHex: "13493790d9b03483a1e1e684ea4faf1ee48a58f402574e7f2246f4d4",
+                                ccColdHasScript: false,
+                                ccHotId: "cc_hot1qgqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqvcdjk7",
+                                ccHotHex: "0000000000000000000000000000000000000000000000000000000000",
+                                ccHotHasScript: false,
+                                status: .authorized,
+                                expirationEpoch: 800
+                            )
+                        ]
+                    )
                 )
             default:
                 return (
@@ -1042,7 +1119,7 @@ struct BlockfrostPoolMockTransport: ClientTransport {
         } else {
             return try await fallback.send(request, body: body, baseURL: baseURL, operationID: operationID)
         }
-        
+
         return (
             HTTPResponse(
                 status: .ok,
@@ -1050,5 +1127,49 @@ struct BlockfrostPoolMockTransport: ClientTransport {
             ),
             .init(responseBody)
         )
+    }
+}
+
+// MARK: - Blockfrost Parameter-Change Mock Transport
+
+/// Variant of `MockTransport` that returns `parameter_change` as the
+/// governanceType of the single proposal — used to exercise the Conway
+/// protocol-parameter UnitInterval/NonNegativeInterval conversion path in
+/// `govActionInfo`. Everything else delegates to the default mock.
+struct ParameterChangeMockTransport: ClientTransport {
+    private let fallback = MockTransport()
+
+    func send(
+        _ request: HTTPTypes.HTTPRequest,
+        body: OpenAPIRuntime.HTTPBody?,
+        baseURL: URL,
+        operationID: String
+    ) async throws -> (HTTPTypes.HTTPResponse, OpenAPIRuntime.HTTPBody?) {
+        if operationID == "get/governance/proposals/{tx_hash}/{cert_index}" {
+            let payload = try JSONEncoder().encode(
+                Components.Schemas.Proposal(
+                    id: "gov_action1qkm52uwlnw0gtcyh9259sjuwsyrnjdfd3hg7tjzrl463xtv4wfxysqqqqqfd6vw0",
+                    txHash: "2dd15e0ef6e6a17841cb9541c27724072ce4d4b79b91e58432fbaa32d9572531",
+                    certIndex: 1,
+                    governanceType: .parameterChange,
+                    governanceDescription: Components.Schemas.Proposal.GovernanceDescriptionPayload(),
+                    deposit: "12000",
+                    returnAddress: "stake_test1urd3hs7rlxwwdzthe6hj026dmyt3y0heuulctscyydh2kgck6nkmz",
+                    ratifiedEpoch: nil,
+                    enactedEpoch: 123,
+                    droppedEpoch: nil,
+                    expiredEpoch: nil,
+                    expiration: 120
+                )
+            )
+            return (
+                HTTPResponse(
+                    status: .ok,
+                    headerFields: [.contentType: "application/json"]
+                ),
+                .init(payload)
+            )
+        }
+        return try await fallback.send(request, body: body, baseURL: baseURL, operationID: operationID)
     }
 }
