@@ -1,3 +1,9 @@
+## 0.6.0 (2026-06-04)
+
+### Feat
+
+- add governance and DRep queries
+
 ## 0.5.3 (2026-06-02)
 
 ### Fix
