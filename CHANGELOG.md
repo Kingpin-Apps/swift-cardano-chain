@@ -1,3 +1,9 @@
+## 0.6.2 (2026-06-25)
+
+### Fix
+
+- `query committee-member` now finds script-hash committee members: `committeeMemberInfo(cold:)` selects `--cold-script-hash` and the `scriptHash-` state key by credential type (was key-hash only), and parses key- or script-hash authorized hot credentials.
+
 ## 0.6.1 (2026-06-25)
 
 ### Feat
