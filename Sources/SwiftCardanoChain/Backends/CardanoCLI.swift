@@ -939,9 +939,25 @@ public actor CardanoCliChainContext: ChainContext {
     public func committeeMemberInfo(cold: CommitteeColdCredential) async throws
         -> CommitteeMemberInfo
     {
+        // Branch on the credential type: a script-hash committee member must be
+        // queried with --cold-script-hash and is keyed as "scriptHash-<hex>" in the
+        // committee-state JSON (key-hash members use --cold-verification-key-hash /
+        // "keyHash-<hex>"). Treating every cold credential as a key hash makes
+        // script-based members — e.g. preview's entire committee — unfindable.
+        let coldHashFlag: String
+        let coldKeyPrefix: String
+        switch cold.credential {
+        case .verificationKeyHash:
+            coldHashFlag = "--cold-verification-key-hash"
+            coldKeyPrefix = "keyHash-"
+        case .scriptHash:
+            coldHashFlag = "--cold-script-hash"
+            coldKeyPrefix = "scriptHash-"
+        }
+
         let result = try await cli.query.committeeState(
             arguments: [
-                "--cold-verification-key-hash",
+                coldHashFlag,
                 cold.credential.payload.toHex,
                 "--output-json",
             ]
@@ -954,13 +970,13 @@ public actor CardanoCliChainContext: ChainContext {
             throw CardanoChainError.valueError("Failed to parse committee state JSON")
         }
 
-        // Find the committee member entry for the given cold key hash
+        // Find the committee member entry for the given cold credential.
         let coldKeyHexPrefix = cold.credential.payload.toHex
-        let keyHashKey = "keyHash-\(coldKeyHexPrefix)"
+        let memberKey = "\(coldKeyPrefix)\(coldKeyHexPrefix)"
 
-        guard let memberEntry = committee[keyHashKey] as? [String: Any] else {
+        guard let memberEntry = committee[memberKey] as? [String: Any] else {
             throw CardanoChainError.valueError(
-                "Committee member not found for key hash: \(coldKeyHexPrefix)")
+                "Committee member not found for cold credential: \(memberKey)")
         }
 
         // Extract expiration epoch
@@ -980,19 +996,24 @@ public actor CardanoCliChainContext: ChainContext {
             status = .unrecognized
         }
 
-        // Extract hot credential from hotCredsAuthStatus
+        // Extract hot credential from hotCredsAuthStatus. The authorized hot
+        // credential may be a key hash or a script hash — use whichever field is
+        // present and build the matching credential type (the entry previously
+        // always read "keyHash" yet labelled it a scriptHash).
         var hotCredential: CommitteeHotCredential?
         if let hotCredsAuthStatus = memberEntry["hotCredsAuthStatus"] as? [String: Any],
             let tag = hotCredsAuthStatus["tag"] as? String,
             tag == "MemberAuthorized",
-            let contents = hotCredsAuthStatus["contents"] as? [String: Any],
-            let hotKeyHash = contents["keyHash"] as? String
+            let contents = hotCredsAuthStatus["contents"] as? [String: Any]
         {
-            hotCredential = CommitteeHotCredential(
-                credential: .scriptHash(
-                    try ScriptHash(from: .string(hotKeyHash))
-                )
-            )
+            if let hotKeyHash = contents["keyHash"] as? String {
+                hotCredential = CommitteeHotCredential(
+                    credential: .verificationKeyHash(
+                        VerificationKeyHash(payload: hotKeyHash.hexStringToData)))
+            } else if let hotScriptHash = contents["scriptHash"] as? String {
+                hotCredential = CommitteeHotCredential(
+                    credential: .scriptHash(ScriptHash(payload: hotScriptHash.hexStringToData)))
+            }
         }
 
         guard let hotCred = hotCredential else {

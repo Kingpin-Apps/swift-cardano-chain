@@ -299,8 +299,10 @@ struct CLICommands {
         "conway", "query", "gov-state", "--output-json", "--testnet-magic", "2",
     ]
 
+    // The fixture credential is a script hash, so the cli is invoked with
+    // --cold-script-hash and the member is keyed as "scriptHash-<hex>" below.
     static let queryCommitteeState = [
-        "conway", "query", "committee-state", "--cold-verification-key-hash",
+        "conway", "query", "committee-state", "--cold-script-hash",
         "13493790d9b03483a1e1e684ea4faf1ee48a58f402574e7f2246f4d4", "--output-json",
         "--testnet-magic", "2",
     ]
@@ -629,7 +631,7 @@ struct CLIResponse {
     static let committeeState = """
         {
             "committee": {
-                "keyHash-13493790d9b03483a1e1e684ea4faf1ee48a58f402574e7f2246f4d4": {
+                "scriptHash-13493790d9b03483a1e1e684ea4faf1ee48a58f402574e7f2246f4d4": {
                     "expiration": 653,
                     "hotCredsAuthStatus": {
                         "contents": {
