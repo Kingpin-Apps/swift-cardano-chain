@@ -646,7 +646,23 @@ public actor CardanoCliChainContext: ChainContext {
     /// - Parameter poolId: The pool ID (Bech32).
     /// - Returns: `StakePoolInfo` object.
     /// - Throws: `CardanoChainError.cardanoCLIError` if the query fails or parsing fails.
+    ///
+    /// Off-chain metadata problems (unreachable URL / hash mismatch) are tolerated.
+    /// Use ``stakePoolInfo(poolId:strict:)`` with `strict: true` to require successful
+    /// metadata download + hash verification.
     public func stakePoolInfo(poolId: String) async throws -> StakePoolInfo {
+        try await stakePoolInfo(poolId: poolId, strict: false)
+    }
+
+    /// Get the stake pool information.
+    /// - Parameters:
+    ///   - poolId: The pool ID (Bech32).
+    ///   - strict: When `true`, the off-chain metadata is downloaded and its hash
+    ///     verified; any failure is fatal. When `false`, metadata problems are
+    ///     tolerated and the on-chain parameters are still returned.
+    /// - Returns: `StakePoolInfo` object.
+    /// - Throws: `CardanoChainError.cardanoCLIError` if the query fails or parsing fails.
+    public func stakePoolInfo(poolId: String, strict: Bool) async throws -> StakePoolInfo {
         let poolOperator = try PoolOperator(from: poolId)
 
         let poolState = try await cli.query.poolState(
@@ -659,7 +675,7 @@ public actor CardanoCliChainContext: ChainContext {
 
         let poolParams = try await poolEntry.value.poolParams.toPoolParams(
             poolOperator: poolOperator,
-            strict: true
+            strict: strict
         )
 
         let stakeSnapshot = try await cli.query.stakeSnapshot(

@@ -102,7 +102,18 @@ public protocol ChainContext: Sendable, CustomStringConvertible, CustomDebugStri
     /// - Parameter poolId: The pool ID (Bech32).
     /// - Returns: `StakePoolInfo` object.
     func stakePoolInfo(poolId: String) async throws -> StakePoolInfo
-    
+
+    /// Get the stake pool information.
+    /// - Parameters:
+    ///   - poolId: The pool ID (Bech32).
+    ///   - strict: When `true`, the pool's off-chain metadata is downloaded and its
+    ///     hash verified, and any failure (unreachable URL or hash mismatch) is fatal.
+    ///     When `false` (the default behaviour of the single-argument overload),
+    ///     metadata problems are tolerated so the on-chain parameters can still be
+    ///     returned.
+    /// - Returns: `StakePoolInfo` object.
+    func stakePoolInfo(poolId: String, strict: Bool) async throws -> StakePoolInfo
+
     /// Get the treasury balance.
     /// - Returns: The current balance of the treasury as a `Coin` object.
     /// - Throws: An error if the treasury balance cannot be retrieved.
@@ -271,7 +282,14 @@ public extension ChainContext {
     func stakePoolInfo(poolId: String) async throws -> StakePoolInfo {
         throw CardanoChainError.notImplemented("stakePoolInfo(poolId:) is not implemented for \(Self.self).")
     }
-    
+
+    /// Default: backends that don't fetch off-chain metadata have nothing to verify,
+    /// so `strict` is ignored and the single-argument overload is used. Backends that
+    /// do fetch metadata (e.g. `CardanoCliChainContext`) override this.
+    func stakePoolInfo(poolId: String, strict: Bool) async throws -> StakePoolInfo {
+        try await stakePoolInfo(poolId: poolId)
+    }
+
     func treasury() async throws -> Coin {
         throw CardanoChainError.notImplemented("treasury() is not implemented for \(Self.self).")
     }
