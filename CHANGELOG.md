@@ -1,3 +1,9 @@
+## 0.6.1 (2026-06-25)
+
+### Feat
+
+- add `stakePoolInfo(poolId:strict:)`; `stakePoolInfo(poolId:)` is now lenient about off-chain pool metadata (unreachable URL / hash mismatch no longer fails the query), with `strict: true` to require download + hash verification. Requires swift-cardano-utils 0.5.4.
+
 ## 0.6.0 (2026-06-04)
 
 ### Feat
