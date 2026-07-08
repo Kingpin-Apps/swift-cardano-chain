@@ -1,14 +1,20 @@
+## 0.7.0 (2026-07-08)
+
+### Feat
+
+- trait-gate CLI backends, decouple ogmios client from SwiftCardanoUtils
+
 ## 0.6.2 (2026-06-25)
 
 ### Fix
 
-- `query committee-member` now finds script-hash committee members: `committeeMemberInfo(cold:)` selects `--cold-script-hash` and the `scriptHash-` state key by credential type (was key-hash only), and parses key- or script-hash authorized hot credentials.
+- committeeMemberInfo(cold:) supports script-hash members (use --cold-script-hash + scriptHash- key; was key-hash only)
 
 ## 0.6.1 (2026-06-25)
 
 ### Feat
 
-- add `stakePoolInfo(poolId:strict:)`; `stakePoolInfo(poolId:)` is now lenient about off-chain pool metadata (unreachable URL / hash mismatch no longer fails the query), with `strict: true` to require download + hash verification. Requires swift-cardano-utils 0.5.4.
+- add stakePoolInfo(poolId:strict:) — lenient metadata by default, opt-in strict
 
 ## 0.6.0 (2026-06-04)
 
