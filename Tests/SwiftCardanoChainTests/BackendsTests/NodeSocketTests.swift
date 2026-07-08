@@ -1,3 +1,4 @@
+#if CLIBACKENDS // CLI-backend tests (Command/Mockable via SwiftCardanoUtils) — CLIBackends trait only
 import Foundation
 import SwiftCardanoCore
 import SwiftCardanoNetwork
@@ -182,3 +183,5 @@ struct NodeSocketChainContextTests {
         }
     }
 }
+
+#endif

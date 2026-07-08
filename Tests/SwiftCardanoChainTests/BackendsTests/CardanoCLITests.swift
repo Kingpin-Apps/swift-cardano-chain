@@ -1,3 +1,4 @@
+#if CLIBACKENDS // CLI-backend tests (Command/Mockable via SwiftCardanoUtils) — CLIBackends trait only
 // Depends on `MockCommandRunning` from Mockable's `@Mockable` macro, which
 // tuist/Command only applies on macOS (Combine dependency). See
 // `MockCardanoCLIClient.swift` for the same gate.
@@ -898,3 +899,5 @@ struct CardanoCLIContextTests {
 }
 
 #endif // canImport(Darwin)
+
+#endif

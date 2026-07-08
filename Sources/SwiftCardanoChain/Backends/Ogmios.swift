@@ -1,7 +1,6 @@
 import Foundation
 import SwiftCardanoCore
 import SwiftCardanoNetwork
-import SwiftCardanoUtils
 import SwiftOgmios
 import SystemPackage
 
@@ -277,10 +276,15 @@ public actor OgmiosChainContext: ChainContext {
                 rpcVersion: rpcVersion ?? "2.0"
             )
         } else {
-            let ogmiosConfig = try Config.default().ogmios!
+            // Decoupled from SwiftCardanoUtils (a macOS/Linux CLI toolkit whose `Ogmios` type RUNS
+            // an ogmios *server*). The client only needs an endpoint — default to a local ogmios.
             self.client = try await OgmiosClient(
-                host: ogmiosConfig.host ?? "localhost",
-                port: ogmiosConfig.port ?? 1337
+                host: host ?? "localhost",
+                port: port ?? 1337,
+                path: path ?? "",
+                secure: secure ?? false,
+                httpOnly: httpOnly ?? false,
+                rpcVersion: rpcVersion ?? "2.0"
             )
         }
     }

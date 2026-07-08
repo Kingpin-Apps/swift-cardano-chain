@@ -33,6 +33,8 @@ struct NetworkTests {
         #expect(Network.custom(customMagic).description == "custom(\(customMagic))")
     }
 
+    // `Network.arguments` is a CLI extension from SwiftCardanoUtils — CLIBackends only.
+    #if CLIBACKENDS
     @Test func testNetworkArguments() {
         // Test mainnet arguments
         #expect(Network.mainnet.arguments == ["--mainnet"])
@@ -47,6 +49,7 @@ struct NetworkTests {
         let customMagic = 999
         #expect(Network.custom(customMagic).arguments == ["--testnet-magic", "\(customMagic)"])
     }
+    #endif
 
     @Test func testNetworkEquality() async {
         // Create two instances of the same network type
@@ -63,9 +66,12 @@ struct NetworkTests {
 
         #expect(custom1.description == custom2.description)
         #expect(custom1.testnetMagic == custom2.testnetMagic)
+        #if CLIBACKENDS
         #expect(custom1.arguments == custom2.arguments)
+        #endif
     }
 
+    #if CLIBACKENDS
     @Test func testNetworkArgumentsFormat() async {
         // Test that arguments are properly formatted for CLI use
         for network in [Network.preprod, Network.preview, Network.guildnet, Network.sanchonet] {
@@ -80,4 +86,5 @@ struct NetworkTests {
         #expect(mainnetArgs.count == 1)
         #expect(mainnetArgs[0] == "--mainnet")
     }
+    #endif
 }

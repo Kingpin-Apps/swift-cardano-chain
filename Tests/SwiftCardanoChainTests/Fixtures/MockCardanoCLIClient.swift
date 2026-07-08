@@ -1,3 +1,4 @@
+#if CLIBACKENDS // CLI-backend tests (Command/Mockable via SwiftCardanoUtils) — CLIBackends trait only
 // `Mockable` / `MockCommandRunning` are macOS-only: tuist/Command's `@Mockable`
 // annotation on `CommandRunning` is wrapped in `#if os(macOS)` because Mockable
 // historically depended on Combine. Skip these fixtures on non-Apple platforms.
@@ -1494,3 +1495,5 @@ public struct MockCardanoCLIClient {
 }
 
 #endif // canImport(Darwin)
+
+#endif

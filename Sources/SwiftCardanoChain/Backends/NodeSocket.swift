@@ -1,3 +1,4 @@
+#if CLIBACKENDS
 import Foundation
 import SwiftCardanoCore
 import SwiftCardanoNetwork
@@ -893,3 +894,5 @@ public actor NodeSocketChainContext: ChainContext {
         try await CardanoNode.withClient(config: _networkConfig, body: body)
     }
 }
+
+#endif

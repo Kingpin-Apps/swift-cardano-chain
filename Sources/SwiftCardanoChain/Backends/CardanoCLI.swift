@@ -1,3 +1,4 @@
+#if CLIBACKENDS
 import Foundation
 import SwiftCardanoCore
 import SwiftCardanoNetwork
@@ -1959,3 +1960,5 @@ public actor CardanoCliChainContext: ChainContext {
         }
     }
 }
+
+#endif
