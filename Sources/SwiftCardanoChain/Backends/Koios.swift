@@ -707,16 +707,18 @@ public actor KoiosChainContext: ChainContext {
             var result: [StakeAddressInfo] = []
 
             for stakeInfo in stakeInfoArray {
+                // An account can be registered but not delegated to a pool and/or DRep, in which
+                // case Koios returns null/empty for those fields. Parse only when present —
+                // `PoolOperator(from: "")` / `DRep(from: "")` would otherwise throw and fail the
+                // whole read for every un-delegated account.
+                let delegatedPool = stakeInfo.delegatedPool.flatMap { $0.isEmpty ? nil : $0 }
+                let delegatedDrep = stakeInfo.delegatedDrep.flatMap { $0.isEmpty ? nil : $0 }
                 let info = StakeAddressInfo(
                     active: stakeInfo.status == .registered,
                     address: (stakeInfo.stakeAddress?.value as? String) ?? "",
                     rewardAccountBalance: Int64(stakeInfo.rewardsAvailable ?? "0") ?? 0,
-                    stakeDelegation: try PoolOperator(
-                        from: stakeInfo.delegatedPool ?? ""
-                    ),
-                    voteDelegation: try DRep(
-                        from: stakeInfo.delegatedDrep ?? ""
-                    )
+                    stakeDelegation: try delegatedPool.map { try PoolOperator(from: $0) },
+                    voteDelegation: try delegatedDrep.map { try DRep(from: $0) }
                 )
                 result.append(info)
             }
