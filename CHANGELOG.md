@@ -1,3 +1,9 @@
+## 0.7.1 (2026-07-09)
+
+### Fix
+
+- **koios**: tolerate un-delegated stake accounts in stakeAddressInfo
+
 ## 0.7.0 (2026-07-08)
 
 ### Feat
