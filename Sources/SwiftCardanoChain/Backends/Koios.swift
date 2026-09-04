@@ -347,39 +347,32 @@ public actor KoiosChainContext: ChainContext {
     /// Parse a script from a dictionary (typically from reference_script field)
     /// - Parameter scriptDict: Dictionary containing script type and data
     /// - Returns: A ScriptType object
-    private func getScript(from scriptDict: [String: Any]) throws -> ScriptType {
-        guard let scriptType = scriptDict["type"] as? String else {
+    private func getScript(
+        from referenceScript: Components.Schemas.UtxoInfosPayload.ReferenceScriptPayload
+    ) throws -> ScriptType {
+        guard let scriptType = referenceScript._type else {
             throw CardanoChainError.koiosError("Missing script type")
         }
 
         switch scriptType {
-        case "plutusV1":
-            guard let bytes = scriptDict["bytes"] as? String else {
+        case "plutusV1", "plutusV2", "plutusV3":
+            guard let bytes = referenceScript.bytes else {
                 throw CardanoChainError.koiosError("Missing script bytes")
             }
-            let script = PlutusV1Script(data: Data(hex: bytes))
-            return .plutusV1Script(script)
+            let data = Data(hex: bytes)
 
-        case "plutusV2":
-            guard let bytes = scriptDict["bytes"] as? String else {
-                throw CardanoChainError.koiosError("Missing script bytes")
+            switch scriptType {
+            case "plutusV1": return .plutusV1Script(PlutusV1Script(data: data))
+            case "plutusV2": return .plutusV2Script(PlutusV2Script(data: data))
+            default: return .plutusV3Script(PlutusV3Script(data: data))
             }
-            let script = PlutusV2Script(data: Data(hex: bytes))
-            return .plutusV2Script(script)
-
-        case "plutusV3":
-            guard let bytes = scriptDict["bytes"] as? String else {
-                throw CardanoChainError.koiosError("Missing script bytes")
-            }
-            let script = PlutusV3Script(data: Data(hex: bytes))
-            return .plutusV3Script(script)
 
         default:
             // For native scripts, expect a 'value' field with the script JSON
-            guard let value = scriptDict["value"] else {
+            guard let value = referenceScript.value else {
                 throw CardanoChainError.koiosError("Missing script value for native script")
             }
-            let jsonData = try JSONSerialization.data(withJSONObject: value)
+            let jsonData = try JSONEncoder().encode(value)
             let nativeScript = try JSONDecoder().decode(NativeScript.self, from: jsonData)
             return .nativeScript(nativeScript)
         }
@@ -397,8 +390,10 @@ public actor KoiosChainContext: ChainContext {
     public func utxos(address: SwiftCardanoCore.Address) async throws -> [UTxO] {
         let addressUtxos = try await api.client.addressUtxos(
             Operations.AddressUtxos.Input(
+                // `_extended` is required for Koios to populate `asset_list` and
+                // the inline datum body; without it native tokens are omitted.
                 body: Components.RequestBodies.PaymentAddressesWithExtended
-                    .json(.init(_addresses: [address.toBech32()]))
+                    .json(.init(_addresses: [address.toBech32()], _extended: true))
             )
         )
 
@@ -417,32 +412,26 @@ public actor KoiosChainContext: ChainContext {
                 var lovelaceAmount: UInt64 = 0
                 var multiAssets = MultiAsset([:])
 
-                // Parse the value from OpenAPIValueContainer
-                if let valueContainer = result.value,
-                    let valueArray = valueContainer.value as? [[String: Any]]
-                {
-                    for item in valueArray {
-                        if let unit = item["unit"] as? String,
-                            let quantity = item["quantity"] as? String
-                        {
-                            if unit == "lovelace" {
-                                lovelaceAmount = UInt64(quantity) ?? 0
-                            } else {
-                                // The utxo contains Multi-asset
-                                let data = Data(hex: unit)
-                                let policyId = ScriptHash(
-                                    payload: data.prefix(SCRIPT_HASH_SIZE)
-                                )
-                                let assetName = try AssetName(
-                                    payload: data.suffix(from: SCRIPT_HASH_SIZE)
-                                )
+                // Koios returns `value` as a string holding the total lovelace on the UTxO
+                if let valueStr = result.value {
+                    lovelaceAmount = UInt64(valueStr) ?? 0
+                }
 
-                                if multiAssets[policyId] == nil {
-                                    multiAssets[policyId] = Asset([:])
-                                }
-                                multiAssets[policyId]?[assetName] = Int64(quantity) ?? 0
-                            }
+                // Multi-assets are returned separately in `asset_list`
+                if let assetList = result.assetList {
+                    for asset in assetList {
+                        guard let policyIdStr = asset.policyId,
+                            let assetNameStr = asset.assetName,
+                            let quantityStr = asset.quantity
+                        else { continue }
+
+                        let policyId = try ScriptHash(from: .string(policyIdStr))
+                        let assetName = try AssetName(payload: Data(hex: assetNameStr))
+
+                        if multiAssets[policyId] == nil {
+                            multiAssets[policyId] = Asset([:])
                         }
+                        multiAssets[policyId]?[assetName] = Int64(quantityStr) ?? 0
                     }
                 }
 
@@ -455,26 +444,20 @@ public actor KoiosChainContext: ChainContext {
                 var datumOption: DatumOption? = nil
                 var script: ScriptType? = nil
 
-                if let datumHashValue = result.datumHash?.value as? String,
-                    result.inlineDatum == nil
-                {
+                if let datumHashValue = result.datumHash, result.inlineDatum == nil {
                     datumHash = try DatumHash(from: .string(datumHashValue))
                 }
 
-                if let inlineDatum = result.inlineDatum?.value as? String,
-                    let datumData = Data(hexString: inlineDatum)
+                if let inlineDatumBytes = result.inlineDatum?.bytes,
+                    let datumData = Data(hexString: inlineDatumBytes)
                 {
                     // Parse as PlutusData first, then wrap in DatumOption
                     let plutusData = try PlutusData.fromCBOR(data: datumData)
                     datumOption = DatumOption(datum: plutusData)
                 }
 
-                if let referenceScriptValue = result.referenceScript?.value {
-                    // For reference scripts, we need to parse the script object
-                    // This is a simplified implementation - may need adjustment based on actual data structure
-                    if let scriptDict = referenceScriptValue as? [String: Any] {
-                        script = try? getScript(from: scriptDict)
-                    }
+                if let referenceScript = result.referenceScript {
+                    script = try? getScript(from: referenceScript)
                 }
 
                 let address = try Address(from: .string(result.address!))
@@ -508,7 +491,7 @@ public actor KoiosChainContext: ChainContext {
         let response = try await api.client.utxoInfo(
             Operations.UtxoInfo.Input(
                 body: Components.RequestBodies.UtxoRefsWithExtended.json(
-                    .init(_utxoRefs: [txRef])
+                    .init(_utxoRefs: [txRef], _extended: true)
                 )
             )
         )
@@ -538,17 +521,15 @@ public actor KoiosChainContext: ChainContext {
             var multiAssets = MultiAsset([:])
 
             // Parse lovelace from value field
-            if let valueContainer = result.value,
-                let valueStr = valueContainer.value as? String
-            {
+            if let valueStr = result.value {
                 lovelaceAmount = UInt64(valueStr) ?? 0
             }
 
             // Parse multi-assets from asset_list
             if let assetList = result.assetList {
                 for asset in assetList {
-                    guard let policyIdStr = asset.policyId?.value as? String,
-                        let assetNameStr = asset.assetName?.value as? String,
+                    guard let policyIdStr = asset.policyId,
+                        let assetNameStr = asset.assetName,
                         let quantityStr = asset.quantity
                     else { continue }
 
@@ -571,23 +552,19 @@ public actor KoiosChainContext: ChainContext {
             var datumOption: DatumOption? = nil
             var script: ScriptType? = nil
 
-            if let datumHashValue = result.datumHash?.value as? String,
-                result.inlineDatum == nil
-            {
+            if let datumHashValue = result.datumHash, result.inlineDatum == nil {
                 datumHash = try DatumHash(from: .string(datumHashValue))
             }
 
-            if let inlineDatum = result.inlineDatum?.value as? String,
-                let datumData = Data(hexString: inlineDatum)
+            if let inlineDatumBytes = result.inlineDatum?.bytes,
+                let datumData = Data(hexString: inlineDatumBytes)
             {
                 let plutusData = try PlutusData.fromCBOR(data: datumData)
                 datumOption = DatumOption(datum: plutusData)
             }
 
-            if let referenceScriptValue = result.referenceScript?.value {
-                if let scriptDict = referenceScriptValue as? [String: Any] {
-                    script = try? getScript(from: scriptDict)
-                }
+            if let referenceScript = result.referenceScript {
+                script = try? getScript(from: referenceScript)
             }
 
             let address = try Address(from: .string(addressStr))

@@ -123,6 +123,14 @@ struct KoiosChainContextTests {
                 == "39a7a284c2a0948189dc45dec670211cd4d72f7b66c5726c08d9b3df11e44d58"
         )
         #expect(utxos[0].output.amount.coin == 1_000_000)
+
+        let policyId = try ScriptHash(
+            from: .string(
+                "b0d07d45fe9514f80213f4020e5a61241458be626841cde717cb38a76e7574636f696e"
+            )
+        )
+        let assetName = try AssetName(payload: Data(hex: "6574636f696e"))
+        #expect(utxos[0].output.amount.multiAsset[policyId]?[assetName] == 50)
     }
 
     @Test("Test utxo(input:)")
