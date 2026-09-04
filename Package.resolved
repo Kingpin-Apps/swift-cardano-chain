@@ -285,8 +285,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/Kingpin-Apps/swift-koios.git",
       "state" : {
-        "revision" : "6fb970ab6e007e3c364e4f1c612ffcc991246b5b",
-        "version" : "0.2.1"
+        "revision" : "5a21e34fa4c181403eff599c3c5d93ed554814a6",
+        "version" : "0.2.2"
       }
     },
     {

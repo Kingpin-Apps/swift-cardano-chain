@@ -30,7 +30,7 @@ let package = Package(
         .package(url: "https://github.com/Kingpin-Apps/swift-cardano-utils.git", from: "0.5.4"),
         .package(url: "https://github.com/Kingpin-Apps/swift-blockfrost-api.git", from: "0.2.1"),
         .package(url: "https://github.com/Kingpin-Apps/swift-handles-api.git", from: "0.1.1"),
-        .package(url: "https://github.com/Kingpin-Apps/swift-koios.git", from: "0.2.1"),
+        .package(url: "https://github.com/Kingpin-Apps/swift-koios.git", from: "0.2.2"),
         .package(url: "https://github.com/Kingpin-Apps/swift-ogmios.git", from: "0.3.0"),
         .package(url: "https://github.com/Kingpin-Apps/swift-cardano-network.git", from: "1.1.1"),
         .package(url: "https://github.com/Kingpin-Apps/swift-cardano-uplc.git", from: "0.3.0"),
