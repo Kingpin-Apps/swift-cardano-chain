@@ -1,3 +1,9 @@
+## 0.7.2 (2026-09-03)
+
+### Fix
+
+- **koios**: parse UTxO value, assets and inline datum correctly
+
 ## 0.7.1 (2026-07-09)
 
 ### Fix
