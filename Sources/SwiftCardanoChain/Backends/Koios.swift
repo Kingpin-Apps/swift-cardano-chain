@@ -322,21 +322,33 @@ public actor KoiosChainContext: ChainContext {
         do {
             let response = try await api.client.cliProtocolParams()
             let protocolParams = try response.ok.body.json
-            let jsonData =
-                try JSONSerialization
-                .data(
-                    withJSONObject: protocolParams,
-                    options: [
-                        .prettyPrinted,
-                        .sortedKeys,
-                        .withoutEscapingSlashes,
-                    ]
-                )
-
-            return try JSONDecoder().decode(ProtocolParameters.self, from: jsonData)
-
+            return try Self.decodeProtocolParameters(from: protocolParams)
+        } catch let error as CardanoChainError {
+            throw error
         } catch {
             throw CardanoChainError.koiosError("Failed to get protocol parameters: \(error)")
+        }
+    }
+
+    /// Converts the raw `cli_protocol_params` payload into ``ProtocolParameters``.
+    ///
+    /// Koios leaves this endpoint untyped (`type: object`), so the generated client hands back an
+    /// `OpenAPIObjectContainer`. That is a Swift struct, not a Foundation container, and passing
+    /// it to `JSONSerialization.data(withJSONObject:)` raises an uncatchable `NSInvalidArgumentException`
+    /// ("Invalid top-level type in JSON write"). Re-encoding it with `JSONEncoder` yields the
+    /// cardano-cli style JSON that ``ProtocolParameters`` knows how to decode, and every failure
+    /// surfaces as a thrown ``CardanoChainError`` instead of a crash.
+    static func decodeProtocolParameters(
+        from container: OpenAPIObjectContainer
+    ) throws -> ProtocolParameters {
+        guard !container.value.isEmpty else {
+            throw CardanoChainError.koiosError("Protocol parameters response was empty")
+        }
+        do {
+            let jsonData = try JSONEncoder().encode(container)
+            return try JSONDecoder().decode(ProtocolParameters.self, from: jsonData)
+        } catch {
+            throw CardanoChainError.koiosError("Failed to decode protocol parameters: \(error)")
         }
     }
 

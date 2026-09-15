@@ -1,4 +1,5 @@
 import Foundation
+import OpenAPIRuntime
 import SwiftCardanoCore
 import SwiftKoios
 import Testing
@@ -81,9 +82,10 @@ struct KoiosChainContextTests {
         #expect(genesisParameters.updateQuorum == 5)
     }
 
-    @Test(
-        "Test protocolParameters",
-        .disabled("Requires investigation of OpenAPI object container handling"))
+    /// Regression: `cli_protocol_params` is an untyped object, so the generated client returns an
+    /// `OpenAPIObjectContainer`. Passing that to `JSONSerialization` used to crash the process
+    /// with `NSInvalidArgumentException` ("Invalid top-level type in JSON write").
+    @Test("Test protocolParameters")
     func testProtocolParameters() async throws {
         let chainContext = try await KoiosChainContext(
             network: .preview,
@@ -97,6 +99,60 @@ struct KoiosChainContextTests {
 
         #expect(protocolParameters.txFeePerByte == 44)
         #expect(protocolParameters.txFeeFixed == 155381)
+        #expect(protocolParameters.utxoCostPerByte == 4310)
+        #expect(protocolParameters.protocolVersion.major == 10)
+        #expect(protocolParameters.costModels.PlutusV1.count == 166)
+        #expect(protocolParameters.executionUnitPrices.priceMemory == 0.0577)
+    }
+
+    @Test("Test protocolParameters throws on empty response")
+    func testProtocolParametersThrowsOnEmptyResponse() async throws {
+        let chainContext = try await KoiosChainContext(
+            network: .preview,
+            client: Client(
+                serverURL: try SwiftKoios.Network.preview.url(),
+                transport: KoiosMockTransport(overrides: ["cli_protocol_params": "{}"])
+            )
+        )
+
+        await #expect(throws: CardanoChainError.self) {
+            _ = try await chainContext.protocolParameters()
+        }
+    }
+
+    @Test("Test protocolParameters throws on malformed response")
+    func testProtocolParametersThrowsOnMalformedResponse() async throws {
+        let chainContext = try await KoiosChainContext(
+            network: .preview,
+            client: Client(
+                serverURL: try SwiftKoios.Network.preview.url(),
+                transport: KoiosMockTransport(
+                    overrides: ["cli_protocol_params": #"{"txFeePerByte": "not-a-number"}"#]
+                )
+            )
+        )
+
+        await #expect(throws: CardanoChainError.self) {
+            _ = try await chainContext.protocolParameters()
+        }
+    }
+
+    @Test("Test decodeProtocolParameters round-trips an OpenAPIObjectContainer")
+    func testDecodeProtocolParametersFromContainer() throws {
+        let container = try JSONDecoder().decode(
+            OpenAPIObjectContainer.self,
+            from: Data(KoiosMockResponses.protocolParams.utf8)
+        )
+
+        let protocolParameters = try KoiosChainContext.decodeProtocolParameters(from: container)
+
+        #expect(protocolParameters.txFeePerByte == 44)
+        #expect(protocolParameters.maxTxSize == 16384)
+        #expect(protocolParameters.dRepVotingThresholds.ppGovGroup == 0.75)
+
+        #expect(throws: CardanoChainError.self) {
+            _ = try KoiosChainContext.decodeProtocolParameters(from: OpenAPIObjectContainer())
+        }
     }
 
     @Test("Test utxos")

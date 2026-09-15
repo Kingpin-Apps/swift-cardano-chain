@@ -6,6 +6,10 @@ import SwiftKoios
 // MARK: - Koios Mock Transport
 
 struct KoiosMockTransport: ClientTransport {
+    /// Raw JSON bodies keyed by operation ID that take precedence over the canned responses
+    /// below. Lets a test feed a malformed or edge-case payload to a single endpoint.
+    var overrides: [String: String] = [:]
+
     func send(
         _ request: HTTPTypes.HTTPRequest,
         body: OpenAPIRuntime.HTTPBody?,
@@ -14,6 +18,16 @@ struct KoiosMockTransport: ClientTransport {
     ) async throws -> (HTTPTypes.HTTPResponse, OpenAPIRuntime.HTTPBody?) {
         var responseBody: Data = Data()
         var statusCode: HTTPResponse.Status = .ok
+
+        if let override = overrides[operationID] {
+            return (
+                HTTPResponse(
+                    status: statusCode,
+                    headerFields: [.contentType: "application/json"]
+                ),
+                .init(Data(override.utf8))
+            )
+        }
 
         switch operationID {
         case "epoch_info":
