@@ -851,10 +851,26 @@ public actor KoiosChainContext: ChainContext {
     }
 
     /// Get the stake pool information.
+    ///
+    /// Off-chain metadata problems (unreachable URL, or a document that no longer
+    /// matches the registered hash) are tolerated: the on-chain parameters are still
+    /// returned, with the registered metadata URL and hash.
     /// - Parameter poolId: The pool ID (Bech32).
     /// - Returns: `StakePoolInfo` object.
     /// - Throws: `CardanoChainError.koiosError` if the pool info cannot be fetched.
     public func stakePoolInfo(poolId: String) async throws -> StakePoolInfo {
+        try await stakePoolInfo(poolId: poolId, strict: false)
+    }
+
+    /// Get the stake pool information.
+    /// - Parameters:
+    ///   - poolId: The pool ID (Bech32).
+    ///   - strict: When `true`, the pool's off-chain metadata is downloaded and its
+    ///     hash verified, and a hash mismatch is fatal. When `false`, metadata
+    ///     problems are tolerated and the on-chain parameters are still returned.
+    /// - Returns: `StakePoolInfo` object.
+    /// - Throws: `CardanoChainError.koiosError` if the pool info cannot be fetched.
+    public func stakePoolInfo(poolId: String, strict: Bool) async throws -> StakePoolInfo {
         let poolInfoResponse = try await api.client.poolInfo(
             Operations.PoolInfo.Input(
                 body: .json(
@@ -868,15 +884,16 @@ public actor KoiosChainContext: ChainContext {
             throw CardanoChainError.koiosError("Pool not found")
         }
 
-        // Map relays (Koios relay schema has no port field)
+        // Map relays
         let relays: [SwiftCardanoCore.Relay] =
             pool.relays?.compactMap { relay in
+                let port = relay.port.map { Int($0) }
                 if let ipv4String = relay.ipv4, let ipv4 = IPv4Address(ipv4String) {
-                    return .singleHostAddr(SingleHostAddr(port: nil, ipv4: ipv4, ipv6: nil))
+                    return .singleHostAddr(SingleHostAddr(port: port, ipv4: ipv4, ipv6: nil))
                 } else if let ipv6String = relay.ipv6, let ipv6 = IPv6Address(ipv6String) {
-                    return .singleHostAddr(SingleHostAddr(port: nil, ipv4: nil, ipv6: ipv6))
+                    return .singleHostAddr(SingleHostAddr(port: port, ipv4: nil, ipv6: ipv6))
                 } else if let dns = relay.dns {
-                    return .singleHostName(SingleHostName(port: nil, dnsName: dns))
+                    return .singleHostName(SingleHostName(port: port, dnsName: dns))
                 } else if let srv = relay.srv {
                     return .multiHostName(MultiHostName(dnsName: srv))
                 }
@@ -912,14 +929,23 @@ public actor KoiosChainContext: ChainContext {
         }
         let poolOwners = ListOrOrderedSet<VerificationKeyHash>.list(poolOwnersList)
 
+        // Pool metadata. The on-chain url + hash are always kept; `strict` only
+        // governs verification of the off-chain document.
         var poolMetadata: PoolMetadata? = nil
         if let urlString = pool.metaUrl, let hashString = pool.metaHash,
             let hashData = Data(hexString: hashString)
         {
-            poolMetadata = try await PoolMetadata.fetch(
-                url: try Url(urlString),
-                poolMetadataHash: PoolMetadataHash(payload: hashData)
-            )
+            let url = try Url(urlString)
+            let hash = PoolMetadataHash(payload: hashData)
+            if strict {
+                poolMetadata = try await PoolMetadata.fetch(url: url, poolMetadataHash: hash)
+            } else {
+                do {
+                    poolMetadata = try await PoolMetadata.fetch(url: url, poolMetadataHash: hash)
+                } catch {
+                    poolMetadata = try PoolMetadata(url: url, poolMetadataHash: hash)
+                }
+            }
         }
 
         let params = PoolParams(

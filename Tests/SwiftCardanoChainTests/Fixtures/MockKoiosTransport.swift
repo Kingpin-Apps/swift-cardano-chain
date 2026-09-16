@@ -216,9 +216,13 @@ struct KoiosMockTransport: ClientTransport {
                     "pledge": "1000000000000",
                     "reward_addr": "stake_test1upyz3gk6mw5he20apnwfn96cn9rscgvmmsxc9r86dh0k66gswf59n",
                     "owners": ["stake_test1upyz3gk6mw5he20apnwfn96cn9rscgvmmsxc9r86dh0k66gswf59n"],
-                    "relays": [],
-                    "meta_url": null,
-                    "meta_hash": null,
+                    "relays": [
+                        {"dns": null, "srv": null, "ipv4": "203.0.113.7", "ipv6": null, "port": 3001},
+                        {"dns": "relay.example.com", "srv": null, "ipv4": null, "ipv6": null, "port": 6000},
+                        {"dns": null, "srv": "_cardano._tcp.example.com", "ipv4": null, "ipv6": null, "port": null}
+                    ],
+                    "meta_url": "data:application/json,%7B%7D",
+                    "meta_hash": "abababababababababababababababababababababababababababababababab",
                     "meta_json": null,
                     "pool_status": "registered",
                     "retiring_epoch": null,

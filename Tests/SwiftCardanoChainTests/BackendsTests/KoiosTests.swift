@@ -366,7 +366,34 @@ struct KoiosChainContextTests {
 
         #expect(poolParams.pledge == 1_000_000_000_000)
         #expect(poolParams.cost == 340_000_000)
-        #expect(poolParams.relays?.count == 0)
+
+        // Relays keep their ports
+        let relays = try #require(poolParams.relays)
+        #expect(relays.count == 3)
+        if case .singleHostAddr(let addr) = relays[0] {
+            #expect(addr.port == 3001)
+            #expect(addr.ipv4?.address == "203.0.113.7")
+        } else {
+            Issue.record("Expected a single host address relay")
+        }
+        if case .singleHostName(let name) = relays[1] {
+            #expect(name.port == 6000)
+            #expect(name.dnsName == "relay.example.com")
+        } else {
+            Issue.record("Expected a single host name relay")
+        }
+        if case .multiHostName(let name) = relays[2] {
+            #expect(name.dnsName == "_cardano._tcp.example.com")
+        } else {
+            Issue.record("Expected a multi host name relay")
+        }
+
+        // The metadata document doesn't match the registered hash: tolerated by
+        // default, keeping the on-chain url + hash
+        let metadata = try #require(poolParams.poolMetadata)
+        #expect(metadata.url?.absoluteString == "data:application/json,%7B%7D")
+        #expect(metadata.poolMetadataHash?.payload == Data(repeating: 0xab, count: 32))
+        #expect(metadata.name == nil)
 
         // Verify StakePoolInfo fields
         #expect(poolInfo.opcertCounter == 42)
@@ -374,6 +401,24 @@ struct KoiosChainContextTests {
         #expect(poolInfo.activeSize == Decimal(0.001))
         #expect(poolInfo.livePledge == 1_000_000_000_000)
         #expect(poolInfo.liveStake == 1_000_000_000_000)
+    }
+
+    @Test("stakePoolInfo strict mode fails when the metadata doesn't match its hash")
+    func testStakePoolInfoStrict() async throws {
+        let chainContext = try await KoiosChainContext(
+            network: .preview,
+            client: Client(
+                serverURL: try SwiftKoios.Network.preview.url(),
+                transport: KoiosMockTransport()
+            )
+        )
+
+        let poolId = "pool1pu5jlj4q9w9jlxeu370a3c9myx47md5j5m2str0naunn2q3lkdy"
+        await #expect(throws: (any Error).self) {
+            _ = try await chainContext.stakePoolInfo(poolId: poolId, strict: true)
+        }
+        let lenient = try await chainContext.stakePoolInfo(poolId: poolId, strict: false)
+        #expect(lenient.poolParams.poolMetadata?.url != nil)
     }
 
     @Test("Test treasury")
