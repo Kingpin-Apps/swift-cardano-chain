@@ -1,3 +1,9 @@
+## 0.7.4 (2026-09-16)
+
+### Fix
+
+- **koios**: tolerate metadata hash mismatch and keep relay ports
+
 ## 0.7.3 (2026-09-14)
 
 ### Fix
