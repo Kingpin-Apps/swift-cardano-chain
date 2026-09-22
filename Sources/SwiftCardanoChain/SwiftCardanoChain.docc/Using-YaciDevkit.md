@@ -127,13 +127,14 @@ therefore reconstructions from the certificate log, and a few have no data sourc
 | Stake pools | Pool certificate log, merged with the pools set up in genesis |
 | Pool parameters | Registration certificate, then genesis, then per-epoch state |
 | Pool status | Per-epoch pool state, falling back to the certificate log |
+| Stake address registration | Folded from the stake certificate log |
 | DRep info | Folded from DRep registration / update / retirement certificates |
 | Governance actions, votes | Proposal and voting-procedure log |
 | Committee state | Current committee, with hot keys folded from the certificate log |
 | KES period info | Latest block minted by the pool |
 | Treasury, SPO stake distribution | Not available |
 
-Three consequences are worth planning around:
+Some consequences are worth planning around:
 
 - **Governance outcomes are unknown.** Yaci does not index governance state, so
   `ratifiedEpoch`, `enactedEpoch`, `droppedEpoch` and `expiredEpoch` are always `nil`, which
@@ -147,6 +148,11 @@ Three consequences are worth planning around:
   it is read from the Shelley genesis instead of the certificate log. Its relays are parsed
   best-effort, because genesis encodes them differently from the certificate log and a devnet
   usually declares none.
+- **Registration is read from certificates, not from the account.** Yaci answers
+  `/accounts/{stakeAddress}` with 200 and zeroed amounts for any well-formed stake address,
+  including one it has never seen, so a successful response says nothing about registration.
+  the `active` flag on `StakeAddressInfo` therefore comes from the stake certificate log, and
+  an address with no certificate reports `false`.
 - **A pruned or still-syncing store misleads.** Reconstruction treats an unseen certificate as
   one that was never submitted.
 
@@ -156,6 +162,17 @@ equivalent and throw ``CardanoChainError/notImplemented(_:)``.
 The DRep stake distribution and the live committee view read the node through DevKit's
 local-state endpoints, which are only served while the cluster is running. A DRep whose stake
 cannot be read reports `0`.
+
+## Verified Against a Live Devnet
+
+This backend is exercised against a running DevKit as well as against mocked responses. The
+live run registers a stake address, a stake pool with three relay shapes, a DRep and a
+governance action, votes on that action from both the DRep and the pool, and reads all of it
+back, alongside the devnet's own genesis-configured block producer and its operational
+certificate.
+
+``ChainContext/committeeMemberInfo(cold:)`` is the one query with no live coverage, because a
+DevKit devnet starts with an empty constitutional committee.
 
 ## Error Handling
 

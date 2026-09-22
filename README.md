@@ -131,7 +131,10 @@ let context = try YaciDevkitChainContext(
 ```
 
 Yaci indexes certificates and outputs rather than ledger state, so some queries are
-reconstructions and a few are unavailable. See the `Using-YaciDevkit` guide for the details.
+reconstructions from the certificate log and genesis rather than state reads. `treasury()` and
+`spoStakeDistribution()` have no Yaci equivalent and throw `notImplemented`, governance
+outcome epochs are always `nil`, and `evaluateTx` needs DevKit started with
+`ogmios_enabled=true`. See the `Using-YaciDevkit` guide for the full picture.
 
 ### OfflineTransfer (Air-Gapped Signing)
 
