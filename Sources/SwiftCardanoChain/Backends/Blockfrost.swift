@@ -474,13 +474,14 @@ public actor BlockFrostChainContext: ChainContext {
                 do {
                     let json = try scriptJSON.ok.body.json.json
                     let jsonData = try JSONEncoder().encode(json)
-
-                    let nativeScript = try JSONDecoder()
-                        .decode(
-                            NativeScript.self,
-                            from: jsonData
-                        )
-                    return .nativeScript(nativeScript)
+                    guard let text = String(data: jsonData, encoding: .utf8) else {
+                        throw CardanoChainError.blockfrostError(
+                            "Script JSON is not valid UTF-8")
+                    }
+                    // `NativeScript.fromJSON` is the entry point that understands the
+                    // `{"type": "sig", …}` shape; decoding the type directly goes through its
+                    // CBOR representation instead.
+                    return .nativeScript(try NativeScript.fromJSON(text))
                 } catch {
                     throw CardanoChainError.blockfrostError(
                         "Failed to get scriptJSON: \(scriptJSON)")

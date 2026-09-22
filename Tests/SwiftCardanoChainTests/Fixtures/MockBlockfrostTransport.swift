@@ -1173,3 +1173,58 @@ struct ParameterChangeMockTransport: ClientTransport {
         return try await fallback.send(request, body: body, baseURL: baseURL, operationID: operationID)
     }
 }
+
+
+// MARK: - Blockfrost Native-Script Mock Transport
+
+/// Hangs a `timelock` reference script off the single address UTxO and serves the script
+/// endpoints Blockfrost uses to resolve it.
+struct BlockfrostNativeScriptMockTransport: ClientTransport {
+    static let scriptHash = "33333333333333333333333333333333333333333333333333333333"
+    static let keyHash = "646d1b3ac94568a422b687db6c47acdf849f1674982ae4f9a494be43"
+
+    private let fallback = MockTransport()
+
+    func send(
+        _ request: HTTPTypes.HTTPRequest,
+        body: OpenAPIRuntime.HTTPBody?,
+        baseURL: URL,
+        operationID: String
+    ) async throws -> (HTTPTypes.HTTPResponse, OpenAPIRuntime.HTTPBody?) {
+        let payload: String
+
+        switch operationID {
+            case "get/addresses/{address}/utxos":
+                payload = """
+                    [{
+                        "address": "addr_test1qp4kux2v7xcg9urqssdffff5p0axz9e3hcc43zz7pcuyle0e20hkwsu2ndpd9dh9anm4jn76ljdz0evj22stzrw9egxqmza5y3",
+                        "tx_hash": "39a7a284c2a0948189dc45dec670211cd4d72f7b66c5726c08d9b3df11e44d58",
+                        "tx_index": 0,
+                        "output_index": 0,
+                        "amount": [{"unit": "lovelace", "quantity": "1000000"}],
+                        "block": "123456",
+                        "data_hash": null,
+                        "inline_datum": null,
+                        "reference_script_hash": "\(Self.scriptHash)"
+                    }]
+                    """
+            case "get/scripts/{script_hash}":
+                payload = """
+                    {"script_hash": "\(Self.scriptHash)", "type": "timelock", "serialised_size": null}
+                    """
+            case "get/scripts/{script_hash}/json":
+                payload = #"{"json": {"type": "sig", "keyHash": "\#(Self.keyHash)"}}"#
+            default:
+                return try await fallback.send(
+                    request, body: body, baseURL: baseURL, operationID: operationID)
+        }
+
+        return (
+            HTTPResponse(
+                status: .ok,
+                headerFields: [.contentType: "application/json"]
+            ),
+            .init(Data(payload.utf8))
+        )
+    }
+}

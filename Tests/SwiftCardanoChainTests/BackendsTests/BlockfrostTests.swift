@@ -118,6 +118,36 @@ struct BlockfrostChainContextTests {
         #expect(utxos[0].output.amount.coin == 1000000)
     }
 
+    @Test("Test a native reference script is resolved")
+    func testNativeReferenceScript() async throws {
+        let chainContext = try await BlockFrostChainContext(
+            projectId: "fake-project-id",
+            network: .preview,
+            client: Client(
+                serverURL: URL(string: "https://cardano-preview.blockfrost.io/api/v0")!,
+                transport: BlockfrostNativeScriptMockTransport()
+            )
+        )
+
+        let address = try Address(
+            from: .string(
+                "addr_test1qp4kux2v7xcg9urqssdffff5p0axz9e3hcc43zz7pcuyle0e20hkwsu2ndpd9dh9anm4jn76ljdz0evj22stzrw9egxqmza5y3"
+            )
+        )
+
+        let utxos = try await chainContext.utxos(address: address)
+
+        guard case .nativeScript(let native) = utxos[0].output.script else {
+            Issue.record("Expected a native reference script")
+            return
+        }
+        guard case .scriptPubkey(let pubkey) = native else {
+            Issue.record("Expected a sig script")
+            return
+        }
+        #expect(pubkey.keyHash.payload.toHex == BlockfrostNativeScriptMockTransport.keyHash)
+    }
+
     @Test("Test utxo(input:)")
     func testUtxoInput() async throws {
         let chainContext = try await BlockFrostChainContext(

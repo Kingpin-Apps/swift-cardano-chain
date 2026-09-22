@@ -385,8 +385,12 @@ public actor KoiosChainContext: ChainContext {
                 throw CardanoChainError.koiosError("Missing script value for native script")
             }
             let jsonData = try JSONEncoder().encode(value)
-            let nativeScript = try JSONDecoder().decode(NativeScript.self, from: jsonData)
-            return .nativeScript(nativeScript)
+            guard let text = String(data: jsonData, encoding: .utf8) else {
+                throw CardanoChainError.koiosError("Script value is not valid UTF-8 JSON")
+            }
+            // `NativeScript.fromJSON` is the entry point that understands the `{"type": "sig",
+            // …}` shape; decoding the type directly goes through its CBOR representation instead.
+            return .nativeScript(try NativeScript.fromJSON(text))
         }
     }
 

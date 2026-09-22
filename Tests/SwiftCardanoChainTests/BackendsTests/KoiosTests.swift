@@ -189,6 +189,57 @@ struct KoiosChainContextTests {
         #expect(utxos[0].output.amount.multiAsset[policyId]?[assetName] == 50)
     }
 
+    @Test("Test a native reference script is resolved")
+    func testNativeReferenceScript() async throws {
+        let keyHash = "646d1b3ac94568a422b687db6c47acdf849f1674982ae4f9a494be43"
+        let scriptHash = "33333333333333333333333333333333333333333333333333333333"
+        let chainContext = try await KoiosChainContext(
+            network: .preview,
+            client: Client(
+                serverURL: try SwiftKoios.Network.preview.url(),
+                transport: KoiosMockTransport(
+                    overrides: [
+                        "address_utxos": """
+                            [{
+                                "tx_hash": "39a7a284c2a0948189dc45dec670211cd4d72f7b66c5726c08d9b3df11e44d58",
+                                "tx_index": 0,
+                                "address": "addr_test1qp4kux2v7xcg9urqssdffff5p0axz9e3hcc43zz7pcuyle0e20hkwsu2ndpd9dh9anm4jn76ljdz0evj22stzrw9egxqmza5y3",
+                                "value": "1000000",
+                                "epoch_no": 500,
+                                "block_height": 123456,
+                                "reference_script": {
+                                    "hash": "\(scriptHash)",
+                                    "size": 30,
+                                    "type": "timelock",
+                                    "value": {"type": "sig", "keyHash": "\(keyHash)"}
+                                },
+                                "is_spent": false
+                            }]
+                            """
+                    ]
+                )
+            )
+        )
+
+        let address = try Address(
+            from: .string(
+                "addr_test1qp4kux2v7xcg9urqssdffff5p0axz9e3hcc43zz7pcuyle0e20hkwsu2ndpd9dh9anm4jn76ljdz0evj22stzrw9egxqmza5y3"
+            )
+        )
+
+        let utxos = try await chainContext.utxos(address: address)
+
+        guard case .nativeScript(let native) = utxos[0].output.script else {
+            Issue.record("Expected a native reference script")
+            return
+        }
+        guard case .scriptPubkey(let pubkey) = native else {
+            Issue.record("Expected a sig script")
+            return
+        }
+        #expect(pubkey.keyHash.payload.toHex == keyHash)
+    }
+
     @Test("Test utxo(input:)")
     func testUtxoInput() async throws {
         let chainContext = try await KoiosChainContext(
