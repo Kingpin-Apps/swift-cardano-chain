@@ -660,6 +660,21 @@ struct YaciDevkitChainContextTests {
             return
         }
 
+        // Yaci writes an absent port as 0, not null, so a zero port still means SRV.
+        let srvZeroPort = YaciDevkitChainContext.relay(
+            from: .init(port: 0, dnsName: "_cardano._tcp.example.com"))
+        guard case .multiHostName? = srvZeroPort else {
+            Issue.record("Expected a zero port to mean no port, got \(String(describing: srvZeroPort))")
+            return
+        }
+        // A zero port on an IP relay means the same thing.
+        let addrZeroPort = YaciDevkitChainContext.relay(from: .init(port: 0, ipv4: "203.0.113.7"))
+        guard case .singleHostAddr(let zero)? = addrZeroPort else {
+            Issue.record("Expected a single host address")
+            return
+        }
+        #expect(zero.port == nil)
+
         #expect(YaciDevkitChainContext.relay(from: .init()) == nil)
     }
 
@@ -858,6 +873,11 @@ struct YaciDevkitChainContextTests {
         #expect(votes.dRepVotes[0].vote == .yes)
         #expect(votes.stakePoolVotes.count == 1)
         #expect(votes.stakePoolVotes[0].vote == .abstain)
+        // A vote on a different governance action in the same transaction is filtered out by
+        // index, not counted here.
+        #expect(!votes.dRepVotes.contains {
+            $0.credential.credential.payload.toHex == YaciMockData.retiredDrepHex
+        })
 
         #expect(votes.deposit == Coin(100_000_000_000))
         #expect(!votes.depositReturnAddr.isEmpty)

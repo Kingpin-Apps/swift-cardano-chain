@@ -377,19 +377,28 @@ struct MockYaciTransport: ClientTransport {
             }
             return json("[]")
 
-        case "getVotingProceduresForGovActionProposal":
+        case "getVotingProceduresByGovActionProposalTx":
             guard page == 0, path.contains(YaciMockData.proposalTxHash) else { return json("[]") }
+            // The last row belongs to a different governance action in the same transaction, so
+            // it must be filtered out by index rather than counted.
             return json(
                 """
                 [{"slot": 1, "index": 0, "voter_type": "CONSTITUTIONAL_COMMITTEE_HOT_KEY_HASH",
-                  "voter_hash": "\(YaciMockData.ccHotHex)", "vote": "YES"},
+                  "voter_hash": "\(YaciMockData.ccHotHex)", "vote": "YES", "gov_action_index": 0},
                  {"slot": 2, "index": 0, "voter_type": "DREP_KEY_HASH",
-                  "voter_hash": "\(YaciMockData.drepHex)", "vote": "NO"},
+                  "voter_hash": "\(YaciMockData.drepHex)", "vote": "NO", "gov_action_index": 0},
                  {"slot": 3, "index": 0, "voter_type": "STAKING_POOL_KEY_HASH",
-                  "voter_hash": "\(YaciMockData.poolAHex)", "vote": "ABSTAIN"},
+                  "voter_hash": "\(YaciMockData.poolAHex)", "vote": "ABSTAIN", "gov_action_index": 0},
                  {"slot": 4, "index": 0, "voter_type": "DREP_KEY_HASH",
-                  "voter_hash": "\(YaciMockData.drepHex)", "vote": "YES"}]
+                  "voter_hash": "\(YaciMockData.drepHex)", "vote": "YES", "gov_action_index": 0},
+                 {"slot": 5, "index": 0, "voter_type": "DREP_KEY_HASH",
+                  "voter_hash": "\(YaciMockData.retiredDrepHex)", "vote": "NO", "gov_action_index": 9}]
                 """)
+
+        case "getVotingProceduresForGovActionProposal":
+            // Yaci's indexed variant drops the stake-pool and committee votes, which is why the
+            // backend does not use it. Serving it empty keeps that fact visible.
+            return json("[]")
 
         case "getCommitteeMembers":
             if emptyIndexedCommittee {
@@ -499,7 +508,7 @@ enum YaciMockResponses {
           "pool_owners": ["\(YaciMockData.ccHotHex)", "\(YaciMockData.stakeAddress)"],
           "relays": [{"port": 3001, "ipv4": "203.0.113.7"},
                      {"port": 6000, "dnsName": "relay.example.com"},
-                     {"dnsName": "_cardano._tcp.example.com"}],
+                     {"port": 0, "dnsName": "_cardano._tcp.example.com"}],
           "metadata_url": "https://example.com/pool.json",
           "metadata_hash": "\(YaciMockData.anchorHash)", "epoch": 11, "slot": 300}]
         """

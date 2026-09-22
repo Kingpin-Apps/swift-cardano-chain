@@ -1177,7 +1177,10 @@ public actor YaciDevkitChainContext: ChainContext {
     /// Yaci reports every relay with the same four fields and leaves the ones that do not apply
     /// unset, so the shape is inferred from which are populated.
     static func relay(from relay: Components.Schemas.Relay) -> SwiftCardanoCore.Relay? {
-        let port = relay.port.map { Int($0) }
+        // Yaci reports a relay's absent port as 0 rather than null. Zero is not a usable TCP
+        // port, so it is read as "no port" — and that distinction is what separates a
+        // single-host DNS relay from a multi-host SRV record.
+        let port = relay.port.flatMap { $0 > 0 ? Int($0) : nil }
         let ipv4 = relay.ipv4.flatMap { $0.isEmpty ? nil : IPv4Address($0) }
         let ipv6 = relay.ipv6.flatMap { $0.isEmpty ? nil : IPv6Address($0) }
         if ipv4 != nil || ipv6 != nil {
@@ -1591,11 +1594,16 @@ public actor YaciDevkitChainContext: ChainContext {
         [SwiftCardanoNetwork.DRepVote],
         [SwiftCardanoNetwork.StakePoolVote]
     ) {
+        // Fetched by transaction and filtered here rather than through Yaci's
+        // `/proposals/{txHash}/{indexInTx}/votes` endpoint: that one returns only the
+        // delegate-representative votes and silently drops the stake-pool and committee ones.
         let rows = try await paginate("get votes for \(txHash)#\(index)") { page, count in
-            try await api.client.getVotingProceduresForGovActionProposal(
-                path: .init(txHash: txHash, indexInTx: index),
+            try await api.client.getVotingProceduresByGovActionProposalTx(
+                path: .init(txHash: txHash),
                 query: .init(page: page, count: count, order: .asc)
             ).ok.body.json
+        }.filter {
+            $0.govActionIndex == index
         }.sorted {
             Self.certificateOrder($0.slot, $0.index) < Self.certificateOrder($1.slot, $1.index)
         }
