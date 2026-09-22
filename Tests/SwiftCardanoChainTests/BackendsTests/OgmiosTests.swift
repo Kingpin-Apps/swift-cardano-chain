@@ -235,6 +235,13 @@ struct OgmiosChainContextTests {
         #expect(tip.slot == 90_918_798)
         #expect(tip.epoch == 1052)
         #expect(tip.hash == "4dc5188a99ce636e624ab72104f6f18031dcd849c151ce1c8ef4871b7c3913b9")
+        // Sourced from the mocked `/health` body rather than the ledger-state queries. These
+        // pin the probe to the injected connection: were it to fall back to a real HTTP call,
+        // they would come back nil (or carry a live server's numbers).
+        #expect(tip.block == 3_595_887)
+        #expect(tip.era == "conway")
+        #expect(tip.slotInEpoch == 40398)
+        #expect(tip.syncProgress == "100.00")
     }
 
     @Test("Test genesisParameters via mock client")

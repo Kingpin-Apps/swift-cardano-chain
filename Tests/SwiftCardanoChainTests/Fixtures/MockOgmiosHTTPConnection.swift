@@ -355,16 +355,38 @@ enum OgmiosMockData {
         }
         """.data(using: .utf8)!
 
+    /// A complete `/health` body. Every field here is non-optional on `SwiftOgmios.Health`,
+    /// so omitting any of them makes the decode fail and `chainTip()` silently fall back to
+    /// the ledger-state epoch query.
     static let health = """
         {
+          "startTime": "2025-01-01T00:00:00.000000000Z",
           "currentEra": "conway",
           "lastKnownTip": {
             "slot": 90918798,
             "id": "4dc5188a99ce636e624ab72104f6f18031dcd849c151ce1c8ef4871b7c3913b9",
             "height": 3595887
           },
+          "lastTipUpdate": "2025-01-02T00:00:00.000000000Z",
+          "metrics": {
+            "activeConnections": 1,
+            "runtimeStats": {
+              "cpuTime": 1000,
+              "currentHeapSize": 2000,
+              "gcCpuTime": 3000,
+              "maxHeapSize": 4000
+            },
+            "sessionDurations": {"max": 10, "mean": 5.0, "min": 1},
+            "totalConnections": 2,
+            "totalMessages": 100,
+            "totalUnrouted": 0
+          },
           "connectionStatus": "connected",
-          "networkSynchronization": 1
+          "networkSynchronization": 1,
+          "currentEpoch": 1052,
+          "slotInEpoch": 40398,
+          "version": "v6.11.0",
+          "network": "testnet"
         }
         """.data(using: .utf8)!
 
