@@ -1,10 +1,10 @@
 # ``SwiftCardanoChain``
 
-Interact with the Cardano blockchain through a unified Swift interface backed by six pluggable chain context implementations.
+Interact with the Cardano blockchain through a unified Swift interface backed by seven pluggable chain context implementations.
 
 ## Overview
 
-SwiftCardanoChain provides a single ``ChainContext`` protocol and six concrete implementations, each suited to a different deployment scenario:
+SwiftCardanoChain provides a single ``ChainContext`` protocol and seven concrete implementations, each suited to a different deployment scenario:
 
 | Context | When to use |
 |---|---|
@@ -13,6 +13,7 @@ SwiftCardanoChain provides a single ``ChainContext`` protocol and six concrete i
 | ``CardanoCliChainContext`` | Local node via `cardano-cli` |
 | ``OgmiosChainContext`` | Local node via the Ogmios WebSocket bridge |
 | ``NodeSocketChainContext`` | Local node via the NtC Unix socket directly |
+| ``YaciDevkitChainContext`` | Local throw-away devnet run by Yaci DevKit |
 | ``OfflineTransferChainContext`` | Air-gapped / offline transaction signing |
 
 Every context provides the same interface for:
@@ -256,6 +257,7 @@ do {
     switch error {
     case .blockfrostError(let msg):      print("BlockFrost: \(msg ?? "")")
     case .koiosError(let msg):           print("Koios: \(msg ?? "")")
+    case .yaciDevkitError(let msg):      print("Yaci DevKit: \(msg ?? "")")
     case .cardanoCLIError(let msg):      print("CardanoCLI: \(msg ?? "")")
     case .operationError(let msg):       print("Operation: \(msg ?? "")")
     case .transactionFailed(let msg):    print("Tx failed: \(msg ?? "")")
@@ -272,13 +274,14 @@ do {
 
 ## Network Support
 
-| Network | BlockFrost | Koios | CardanoCLI | Ogmios | NodeSocket | OfflineTransfer |
-|---|:---:|:---:|:---:|:---:|:---:|:---:|
-| mainnet   | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| preprod   | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| preview   | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| guildnet  |   | ✓ |   |   |   |   |
-| sanchonet |   | ✓ |   |   |   |   |
+| Network | BlockFrost | Koios | CardanoCLI | Ogmios | NodeSocket | YaciDevkit | OfflineTransfer |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| mainnet      | ✓ | ✓ | ✓ | ✓ | ✓ |   | ✓ |
+| preprod      | ✓ | ✓ | ✓ | ✓ | ✓ |   | ✓ |
+| preview      | ✓ | ✓ | ✓ | ✓ | ✓ |   | ✓ |
+| guildnet     |   | ✓ |   |   |   |   |   |
+| sanchonet    |   | ✓ |   |   |   |   |   |
+| local devnet |   |   | ✓ | ✓ | ✓ | ✓ |   |
 
 ## Topics
 
@@ -298,6 +301,7 @@ do {
 - ``CardanoCliChainContext``
 - ``OgmiosChainContext``
 - ``NodeSocketChainContext``
+- ``YaciDevkitChainContext``
 
 ### Offline Context
 
@@ -310,6 +314,7 @@ do {
 - <doc:Using-CardanoCLI>
 - <doc:Using-Ogmios>
 - <doc:Using-NodeSocket>
+- <doc:Using-YaciDevkit>
 - <doc:Using-OfflineTransfer>
 
 ### Error Handling

@@ -4,7 +4,7 @@
 
 # SwiftCardanoChain
 
-A Swift library for interacting with the Cardano blockchain through a unified `ChainContext` protocol backed by six pluggable implementations.
+A Swift library for interacting with the Cardano blockchain through a unified `ChainContext` protocol backed by seven pluggable implementations.
 
 ## Installation
 
@@ -28,7 +28,7 @@ import SwiftCardanoChain
 
 ## Overview
 
-SwiftCardanoChain provides a single `ChainContext` protocol and six concrete implementations.
+SwiftCardanoChain provides a single `ChainContext` protocol and seven concrete implementations.
 Pick the one that matches your environment — the rest of your code stays the same.
 
 | Context | When to use |
@@ -38,6 +38,7 @@ Pick the one that matches your environment — the rest of your code stays the s
 | `CardanoCliChainContext` | Local node via `cardano-cli` |
 | `OgmiosChainContext` | Local node via the Ogmios WebSocket bridge |
 | `NodeSocketChainContext` | Local node via the NtC Unix socket directly |
+| `YaciDevkitChainContext` | Local throw-away devnet run by Yaci DevKit |
 | `OfflineTransferChainContext` | Air-gapped / offline transaction signing |
 
 All contexts support:
@@ -111,6 +112,26 @@ let context = NodeSocketChainContext(
     network: .mainnet
 )
 ```
+
+### Yaci DevKit (Local Devnet)
+
+Reads a [Yaci DevKit](https://github.com/bloxbean/yaci-devkit) devnet through its embedded
+Yaci Store API, and genesis through the DevKit admin API. No API key, no node socket.
+
+```swift
+// DevKit defaults: store on 8080, admin API on 10000
+let context = try YaciDevkitChainContext()
+
+// Custom endpoints
+let context = try YaciDevkitChainContext(
+    apiURL:   "http://devkit.local:8080",
+    adminURL: "http://devkit.local:10000",
+    network:  .custom(42)
+)
+```
+
+Yaci indexes certificates and outputs rather than ledger state, so some queries are
+reconstructions and a few are unavailable. See the `Using-YaciDevkit` guide for the details.
 
 ### OfflineTransfer (Air-Gapped Signing)
 
@@ -387,6 +408,7 @@ do {
     switch error {
     case .blockfrostError(let msg):      print("BlockFrost: \(msg ?? "")")
     case .koiosError(let msg):           print("Koios: \(msg ?? "")")
+    case .yaciDevkitError(let msg):      print("Yaci DevKit: \(msg ?? "")")
     case .cardanoCLIError(let msg):      print("CardanoCLI: \(msg ?? "")")
     case .operationError(let msg):       print("Operation: \(msg ?? "")")
     case .transactionFailed(let msg):    print("Tx failed: \(msg ?? "")")
@@ -403,13 +425,14 @@ do {
 
 ## Network Support
 
-| Network | BlockFrost | Koios | CardanoCLI | Ogmios | NodeSocket | OfflineTransfer |
-|---|:---:|:---:|:---:|:---:|:---:|:---:|
-| mainnet   | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| preprod   | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| preview   | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| guildnet  |   | ✓ |   |   |   |   |
-| sanchonet |   | ✓ |   |   |   |   |
+| Network | BlockFrost | Koios | CardanoCLI | Ogmios | NodeSocket | YaciDevkit | OfflineTransfer |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| mainnet      | ✓ | ✓ | ✓ | ✓ | ✓ |   | ✓ |
+| preprod      | ✓ | ✓ | ✓ | ✓ | ✓ |   | ✓ |
+| preview      | ✓ | ✓ | ✓ | ✓ | ✓ |   | ✓ |
+| guildnet     |   | ✓ |   |   |   |   |   |
+| sanchonet    |   | ✓ |   |   |   |   |   |
+| local devnet |   |   | ✓ | ✓ | ✓ | ✓ |   |
 
 ## Performance and Caching
 
@@ -420,6 +443,7 @@ do {
 | CardanoCLI | Genesis params (permanent), protocol params (per tip update), UTxOs (per slot+address), datums (LRU) |
 | Ogmios | Epoch + protocol params (60s TTL), genesis params (permanent) |
 | NodeSocket | Epoch (60s TTL), protocol params (per epoch), genesis params (permanent) |
+| YaciDevkit | Epoch (10s TTL), protocol params (per epoch), genesis params and files (permanent) |
 | OfflineTransfer | Everything read from file — no caching needed |
 
 Configure CardanoCLI cache sizes at initialisation:

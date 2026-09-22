@@ -12,6 +12,7 @@ public enum CardanoChainError: Error, CustomStringConvertible, Equatable {
     case unsupportedNetwork(String?)
     case valueError(String?)
     case notImplemented(String?)
+    case yaciDevkitError(String?)
     
     public var description: String {
         switch self {
@@ -37,6 +38,8 @@ public enum CardanoChainError: Error, CustomStringConvertible, Equatable {
                 return message ?? "The value is invalid."
             case .notImplemented(let message):
                 return message ?? "Not implemented yet."
+            case .yaciDevkitError(let message):
+                return message ?? "Failed to retrieve data from Yaci DevKit."
         }
     }
 }
