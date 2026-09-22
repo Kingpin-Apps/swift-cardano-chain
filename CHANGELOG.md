@@ -1,3 +1,13 @@
+## 0.8.0 (2026-09-22)
+
+### Feat
+
+- **yaci**: add Yaci DevKit chain context
+
+### Fix
+
+- **koios,blockfrost**: decode native reference scripts with fromJSON
+
 ## 0.7.4 (2026-09-16)
 
 ### Fix
