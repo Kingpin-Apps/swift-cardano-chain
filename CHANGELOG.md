@@ -1,3 +1,15 @@
+## 0.9.0 (2026-09-22)
+
+### Feat
+
+- **yaci**: read pools set up in the Shelley genesis
+
+### Fix
+
+- clear every build warning
+- **yaci**: recover stake-pool votes and SRV relays
+- **yaci**: read stake registration from the certificate log
+
 ## 0.8.0 (2026-09-22)
 
 ### Feat
