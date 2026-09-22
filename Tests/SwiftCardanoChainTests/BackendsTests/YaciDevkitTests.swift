@@ -628,6 +628,99 @@ struct YaciDevkitChainContextTests {
         #expect(epoch == 20)
     }
 
+    /// The per-epoch view rounds the margin to a decimal, while the registration certificate
+    /// carries the exact numerator and denominator. Re-serialised pool parameters have to match
+    /// the registered ratio, so the certificate wins for parameters and the per-epoch view for
+    /// status.
+    @Test("Test the certificate margin beats the per-epoch decimal")
+    func testStakePoolInfoPrefersCertificateMargin() async throws {
+        let context = try makeContext(transport: MockYaciTransport(servePoolDetails: true))
+
+        let info = try await context.stakePoolInfo(poolId: YaciMockData.poolABech32)
+
+        // Exactly as registered, not 50000/1000000.
+        #expect(info.poolParams.margin.numerator == 1)
+        #expect(info.poolParams.margin.denominator == 20)
+        // Relays and metadata also come from the certificate, which the per-epoch view lacks.
+        #expect(info.poolParams.relays?.count == 3)
+        // Status still comes from the per-epoch view.
+        guard case .retiring(let epoch) = info.status else {
+            Issue.record("Expected the per-epoch status, got \(String(describing: info.status))")
+            return
+        }
+        #expect(epoch == 99)
+    }
+
+    @Test("Test stakePools includes a pool set up in genesis")
+    func testStakePoolsIncludesGenesisPool() async throws {
+        // A devnet's own block producer has no registration certificate, so the certificate log
+        // alone cannot see it.
+        let admin = MockYaciDevkitAdmin(overrides: ["shelley": YaciMockData.shelleyGenesisWithPool()])
+        let context = try makeContext(admin: admin)
+
+        let ids = try await context.stakePools().map { $0.poolKeyHash.payload.toHex.lowercased() }
+
+        #expect(ids.contains(YaciMockData.genesisPoolHex))
+        // The certificate-registered pools are still there.
+        #expect(ids.contains(YaciMockData.poolAHex))
+    }
+
+    @Test("Test stakePoolInfo falls back to the genesis pool parameters")
+    func testStakePoolInfoFromGenesis() async throws {
+        let admin = MockYaciDevkitAdmin(overrides: ["shelley": YaciMockData.shelleyGenesisWithPool()])
+        let context = try makeContext(admin: admin)
+
+        let info = try await context.stakePoolInfo(poolId: YaciMockData.genesisPoolHex)
+
+        #expect(info.poolParams.poolOperator.payload.toHex.lowercased() == YaciMockData.genesisPoolHex)
+        #expect(info.poolParams.cost == 340_000_000)
+        #expect(info.poolParams.poolOwners.count == 1)
+        // Genesis writes the reward account as a credential plus a network, not the on-chain form.
+        #expect(info.poolParams.rewardAccount.payload.first == 0xE0)
+        #expect(info.poolParams.rewardAccount.payload.count == 29)
+        if case .registered = info.status {} else {
+            Issue.record("Expected a registered pool, got \(String(describing: info.status))")
+        }
+    }
+
+    @Test("Test genesis relay shapes are keyed by name")
+    func testGenesisRelayMapping() {
+        let addr = YaciDevkitChainContext.genesisRelay(
+            ["single host address": ["IPv4": "198.51.100.4", "IPv6": NSNull(), "port": 3001]])
+        guard case .singleHostAddr(let a)? = addr else {
+            Issue.record("Expected a single host address, got \(String(describing: addr))")
+            return
+        }
+        #expect(a.ipv4?.description == "198.51.100.4")
+        #expect(a.port == 3001)
+
+        let srv = YaciDevkitChainContext.genesisRelay(
+            ["multi host name": ["dnsName": "_cardano._tcp.genesis.example"]])
+        guard case .multiHostName? = srv else {
+            Issue.record("Expected a multi host name")
+            return
+        }
+
+        // An entry in a shape this mapping does not recognise is dropped, not guessed at.
+        #expect(YaciDevkitChainContext.genesisRelay(["something else": ["port": 1]]) == nil)
+    }
+
+    @Test("Test the genesis reward account gets its stake-address header")
+    func testGenesisRewardAccount() {
+        let keyHash = "11a14edf73b08a0a27cb98b2c57eb37c780df18fcfcf6785ed5df84a"
+        let testnet = YaciDevkitChainContext.genesisRewardAccount(
+            ["credential": ["keyHash": keyHash], "network": "Testnet"])
+        #expect(testnet.payload.first == 0xE0)
+
+        let mainnet = YaciDevkitChainContext.genesisRewardAccount(
+            ["credential": ["keyHash": keyHash], "network": "Mainnet"])
+        #expect(mainnet.payload.first == 0xE1)
+
+        let script = YaciDevkitChainContext.genesisRewardAccount(
+            ["credential": ["scriptHash": keyHash], "network": "Testnet"])
+        #expect(script.payload.first == 0xF0)
+    }
+
     @Test("Test stakePoolInfo throws for an unknown pool")
     func testStakePoolInfoUnknown() async throws {
         let context = try makeContext()

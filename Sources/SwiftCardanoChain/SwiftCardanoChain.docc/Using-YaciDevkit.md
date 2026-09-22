@@ -124,8 +124,9 @@ therefore reconstructions from the certificate log, and a few have no data sourc
 | Query | Source |
 |---|---|
 | Genesis parameters, cost models | DevKit admin API (genesis files) |
-| Stake pools | Folded from pool registration / retirement certificates |
-| Pool parameters and status | Per-epoch pool state, falling back to the certificate log |
+| Stake pools | Pool certificate log, merged with the pools set up in genesis |
+| Pool parameters | Registration certificate, then genesis, then per-epoch state |
+| Pool status | Per-epoch pool state, falling back to the certificate log |
 | DRep info | Folded from DRep registration / update / retirement certificates |
 | Governance actions, votes | Proposal and voting-procedure log |
 | Committee state | Current committee, with hot keys folded from the certificate log |
@@ -142,6 +143,10 @@ Three consequences are worth planning around:
 - **Pool stake figures are absent.** ``StakePoolInfo`` carries the registered parameters and
   the pool's status; `liveStake`, `activeStake` and `opcertCounter` are left `nil` rather than
   guessed at. The `pledge` inside `poolParams` is the declared pledge from the certificate.
+- **A devnet's own block producer is set up in genesis**, not by a registration certificate, so
+  it is read from the Shelley genesis instead of the certificate log. Its relays are parsed
+  best-effort, because genesis encodes them differently from the certificate log and a devnet
+  usually declares none.
 - **A pruned or still-syncing store misleads.** Reconstruction treats an unseen certificate as
   one that was never submitted.
 

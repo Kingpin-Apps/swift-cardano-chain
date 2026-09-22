@@ -48,6 +48,30 @@ enum YaciMockData {
     static let submittedTxHash = "d1662b24fa9fe985fc2dce47455df399cb2e31e1e1819339e885801cc3578908"
 
     static let currentEpoch = 12
+
+    /// The devnet's own block producer, set up in the Shelley genesis rather than by a
+    /// registration certificate, so Yaci's certificate log never sees it.
+    static let genesisPoolHex = "7301761068762f5900bde9eb7c1c15b09840285130f5b0f53606cc57"
+
+    /// A Shelley genesis carrying that pool under `staking.pools`.
+    static func shelleyGenesisWithPool() -> String {
+        let url = Bundle.module.url(
+            forResource: "shelley-genesis", withExtension: "json", subdirectory: "data")!
+        let base = String(decoding: try! Data(contentsOf: url), as: UTF8.self)
+        let staking = """
+            "staking":{"stake":{},"pools":{"\(genesisPoolHex)":{
+              "cost":340000000,"margin":0.02,"pledge":0,"metadata":null,
+              "owners":["\(ccHotHex)"],
+              "publicKey":"\(genesisPoolHex)",
+              "relays":[{"single host address":{"IPv4":"198.51.100.4","IPv6":null,"port":3001}},
+                        {"multi host name":{"dnsName":"_cardano._tcp.genesis.example"}}],
+              "rewardAccount":{"credential":{"keyHash":"\(ccColdHex)"},"network":"Testnet"},
+              "vrf":"c2b62ffa92ad18ffc117ea3abeb161a68885000a466f9c71db5e4731d6630061"}}},
+            """
+        // Splice the block in after the opening brace.
+        guard let brace = base.firstIndex(of: "{") else { return base }
+        return base.prefix(through: brace) + staking + base.suffix(from: base.index(after: brace))
+    }
 }
 
 // MARK: - Admin API mock
@@ -111,6 +135,8 @@ struct MockYaciTransport: ClientTransport {
     var referenceScript: (hash: String, type: String, cbor: String)? = nil
     /// Answer the indexed committee view with an empty member list, forcing the live fallback.
     var emptyIndexedCommittee = false
+    /// Serve Yaci's per-epoch pool view, which it only populates once a pool is active.
+    var servePoolDetails = false
     let log = YaciRequestLog()
 
     func send(
@@ -324,7 +350,18 @@ struct MockYaciTransport: ClientTransport {
                 """)
 
         case "getPoolDetails":
-            return (HTTPResponse(status: .notFound), nil)
+            // Yaci only serves this once a pool is active in the epoch, and it reports the
+            // margin as a rounded decimal rather than the registered ratio.
+            guard servePoolDetails, path.contains(YaciMockData.poolAHex) || path.contains(YaciMockData.poolABech32)
+            else { return (HTTPResponse(status: .notFound), nil) }
+            return json(
+                """
+                {"epoch": \(YaciMockData.currentEpoch), "pool_id": "\(YaciMockData.poolABech32)",
+                 "pool_hash": "\(YaciMockData.poolAHex)", "vrf_key_hash": "\(YaciMockData.vrfKeyHash)",
+                 "pledge": "2000000000", "cost": "345000000", "margin": "0.05",
+                 "reward_account": "\(YaciMockData.stakeAddress)", "pool_owners": [],
+                 "relays": [], "status": "RETIRING", "retire_epoch": 99}
+                """)
 
         case "getDRepRegistrations":
             guard page == 0 else { return json("[]") }

@@ -1032,9 +1032,6 @@ public actor YaciDevkitChainContext: ChainContext {
             try await api.client.getPoolRegistrations(query: .init(page: page, count: count))
                 .ok.body.json
         }
-        let retirements = try await paginate("get pool retirements") { page, count in
-            try await api.client.getRetirements(query: .init(page: page, count: count)).ok.body.json
-        }
 
         var latestRegistration: [String: Components.Schemas.PoolRegistration] = [:]
         for registration in registrations.sorted(by: {
@@ -1044,14 +1041,7 @@ public actor YaciDevkitChainContext: ChainContext {
                 latestRegistration[poolId] = registration
             }
         }
-        var latestRetirement: [String: Components.Schemas.PoolRetirement] = [:]
-        for retirement in retirements.sorted(by: {
-            Self.certificateOrder($0.slot, $0.certIndex) < Self.certificateOrder($1.slot, $1.certIndex)
-        }) {
-            if let poolId = retirement.poolId?.lowercased(), !poolId.isEmpty {
-                latestRetirement[poolId] = retirement
-            }
-        }
+        let latestRetirement = try await poolRetirements()
 
         var state: [String: PoolCertificates] = [:]
         for (poolId, registration) in latestRegistration {
@@ -1063,6 +1053,113 @@ public actor YaciDevkitChainContext: ChainContext {
             state[poolId] = PoolCertificates(registration: registration, retirement: outstanding)
         }
         return state
+    }
+
+    /// The latest retirement certificate for every pool that has one, keyed by lowercase hex
+    /// pool id.
+    private func poolRetirements() async throws -> [String: Components.Schemas.PoolRetirement] {
+        let rows = try await paginate("get pool retirements") { page, count in
+            try await api.client.getRetirements(query: .init(page: page, count: count)).ok.body.json
+        }
+        var latest: [String: Components.Schemas.PoolRetirement] = [:]
+        for retirement in rows.sorted(by: {
+            Self.certificateOrder($0.slot, $0.certIndex) < Self.certificateOrder($1.slot, $1.certIndex)
+        }) {
+            if let poolId = retirement.poolId?.lowercased(), !poolId.isEmpty {
+                latest[poolId] = retirement
+            }
+        }
+        return latest
+    }
+
+    /// Pools set up in the Shelley genesis rather than by a registration certificate, keyed by
+    /// lowercase hex pool id.
+    ///
+    /// A devnet's own block producer is one of these, so it never appears in Yaci's pool
+    /// certificate log and the certificate reconstruction alone cannot see it. Its parameters
+    /// come from the genesis document instead.
+    ///
+    /// Relays are parsed best-effort. The genesis encoding for them differs from the one Yaci
+    /// reports for certificates, and a devnet's genesis pool usually declares none, so an
+    /// unrecognised entry is dropped rather than guessed at.
+    private func genesisPools() async throws -> [String: PoolParams] {
+        guard let genesis = Self.jsonObject(try await genesisFile("shelley")),
+            let pools = (genesis["staking"] as? [String: Any])?["pools"] as? [String: Any]
+        else { return [:] }
+
+        var result: [String: PoolParams] = [:]
+        for (poolId, value) in pools {
+            guard let pool = value as? [String: Any] else { continue }
+            let id = ((pool["publicKey"] as? String) ?? poolId).lowercased()
+            guard let idData = Data(hexString: id), !idData.isEmpty else { continue }
+
+            let owners: [VerificationKeyHash] = ((pool["owners"] as? [String]) ?? [])
+                .compactMap { try? Self.poolOwner($0) }
+
+            var metadata: PoolMetadata? = nil
+            if let meta = pool["metadata"] as? [String: Any],
+                let url = (meta["url"] as? String).flatMap({ try? Url($0) }),
+                let hashHex = meta["hash"] as? String, let hash = Data(hexString: hashHex)
+            {
+                metadata = try? PoolMetadata(url: url, poolMetadataHash: PoolMetadataHash(payload: hash))
+            }
+
+            result[id] = PoolParams(
+                poolOperator: PoolKeyHash(payload: idData),
+                vrfKeyHash: VrfKeyHash(payload: Data(hex: (pool["vrf"] as? String) ?? "")),
+                pledge: (pool["pledge"] as? NSNumber)?.intValue ?? 0,
+                cost: (pool["cost"] as? NSNumber)?.intValue ?? 0,
+                margin: makeUnitInterval((pool["margin"] as? NSNumber)?.doubleValue ?? 0),
+                rewardAccount: Self.genesisRewardAccount(pool["rewardAccount"]),
+                poolOwners: .list(owners),
+                relays: ((pool["relays"] as? [Any]) ?? []).compactMap { Self.genesisRelay($0) },
+                poolMetadata: metadata
+            )
+        }
+        return result
+    }
+
+    /// The reward account of a genesis pool, which genesis writes as a credential plus a network
+    /// rather than as the 29-byte on-chain form.
+    static func genesisRewardAccount(_ any: Any?) -> RewardAccountHash {
+        guard let wrapper = any as? [String: Any],
+            let credential = wrapper["credential"] as? [String: Any]
+        else { return RewardAccountHash(payload: Data()) }
+
+        let isMainnet = (wrapper["network"] as? String)?.lowercased() == "mainnet"
+        let isScript = credential["scriptHash"] != nil
+        guard let hex = (credential["keyHash"] ?? credential["scriptHash"]) as? String,
+            let hash = Data(hexString: hex), !hash.isEmpty
+        else { return RewardAccountHash(payload: Data()) }
+
+        // Stake address header: high nibble 0b1110 for a key hash and 0b1111 for a script hash,
+        // low nibble the network id.
+        let header: UInt8 = (isScript ? 0xF0 : 0xE0) | (isMainnet ? 1 : 0)
+        return RewardAccountHash(payload: Data([header]) + hash)
+    }
+
+    /// One relay from a genesis pool, whose JSON tags the shape by key.
+    static func genesisRelay(_ any: Any) -> SwiftCardanoCore.Relay? {
+        guard let entry = any as? [String: Any], let (kind, raw) = entry.first,
+            let fields = raw as? [String: Any]
+        else { return nil }
+
+        let port = (fields["port"] as? NSNumber)?.intValue
+        switch kind.lowercased().replacingOccurrences(of: " ", with: "") {
+        case "singlehostaddr", "singlehostaddress":
+            let ipv4 = (fields["IPv4"] ?? fields["ipv4"]).flatMap { ($0 as? String).flatMap(IPv4Address.init) }
+            let ipv6 = (fields["IPv6"] ?? fields["ipv6"]).flatMap { ($0 as? String).flatMap(IPv6Address.init) }
+            guard ipv4 != nil || ipv6 != nil else { return nil }
+            return .singleHostAddr(SingleHostAddr(port: port, ipv4: ipv4, ipv6: ipv6))
+        case "singlehostname":
+            guard let dns = (fields["dnsName"] ?? fields["hostname"]) as? String else { return nil }
+            return .singleHostName(SingleHostName(port: port, dnsName: dns))
+        case "multihostname":
+            guard let dns = (fields["dnsName"] ?? fields["hostname"]) as? String else { return nil }
+            return .multiHostName(MultiHostName(dnsName: dns))
+        default:
+            return nil
+        }
     }
 
     /// A retirement takes effect at the start of its retirement epoch, so the pool is still
@@ -1079,14 +1176,25 @@ public actor YaciDevkitChainContext: ChainContext {
 
     /// Get every stake pool registered on the chain.
     ///
-    /// Reconstructed from Yaci's pool certificate log. Pools whose retirement epoch has already
+    /// Reconstructed from Yaci's pool certificate log, merged with the pools set up in the
+    /// Shelley genesis, which never appear in that log. Pools whose retirement epoch has already
     /// passed are excluded, so this is the set of pools that are live or still winding down.
     public func stakePools() async throws -> [PoolOperator] {
         let epoch = try await epoch()
         let certificates = try await poolCertificates()
-        return try certificates.keys.sorted().compactMap { poolId in
-            guard let entry = certificates[poolId] else { return nil }
-            if case .retired = Self.poolStatus(retirement: entry.retirement, epoch: epoch) {
+        let genesis = (try? await genesisPools()) ?? [:]
+        let retirements = (try? await poolRetirements()) ?? [:]
+
+        var ids = Set(certificates.keys)
+        ids.formUnion(genesis.keys)
+
+        return try ids.sorted().compactMap { poolId in
+            // For a pool in the certificate log the folded retirement is authoritative, since a
+            // later re-registration cancels an announced one. The raw retirement map is only for
+            // genesis pools, which have no registration certificate to fold against.
+            let retirement =
+                certificates[poolId].map { $0.retirement } ?? retirements[poolId]
+            if case .retired = Self.poolStatus(retirement: retirement, epoch: epoch) {
                 return nil
             }
             return try PoolOperator(from: Data(hex: poolId))
@@ -1103,8 +1211,9 @@ public actor YaciDevkitChainContext: ChainContext {
 
     /// Get a stake pool's registered parameters and status.
     ///
-    /// Read from Yaci's per-epoch pool state where that is available, and otherwise
-    /// reconstructed from the pool certificate log. Yaci indexes certificates rather than ledger
+    /// Read from Yaci's per-epoch pool state where that is available, otherwise reconstructed
+    /// from the pool certificate log, and failing that from the Shelley genesis, which is where
+    /// a devnet's own block producer is set up. Yaci indexes certificates rather than ledger
     /// state, so it reports no stake figures at all: `liveStake`, `livePledge`, `liveSize`,
     /// `activeStake`, `activeSize` and `opcertCounter` are left `nil` rather than guessed at.
     /// `pledge` inside `poolParams` is the *declared* pledge from the certificate, which is not
@@ -1120,20 +1229,38 @@ public actor YaciDevkitChainContext: ChainContext {
         let poolIdHex = poolOperator.poolKeyHash.payload.toHex.lowercased()
         let currentEpoch = try await epoch()
 
-        if let details = await poolDetails(poolOperator: poolOperator, epoch: currentEpoch) {
-            return StakePoolInfo(
-                poolParams: try await Self.poolParams(from: details, strict: strict),
-                status: Self.poolStatus(from: details, epoch: currentEpoch)
-            )
-        }
+        let details = await poolDetails(poolOperator: poolOperator, epoch: currentEpoch)
+        let certificate = try await poolCertificates()[poolIdHex]
 
-        guard let entry = try await poolCertificates()[poolIdHex] else {
+        // Parameters come from the registration certificate where there is one. It carries the
+        // margin as the exact numerator and denominator that were registered, where the
+        // per-epoch view reports it as a rounded decimal, and a re-serialised pool parameter
+        // set has to match the registered ratio byte for byte.
+        let params: PoolParams
+        if let certificate {
+            params = try await Self.poolParams(from: certificate.registration, strict: strict)
+        } else if let genesisParams = try await genesisPools()[poolIdHex] {
+            // A pool set up in genesis has no registration certificate for the log to carry.
+            params = genesisParams
+        } else if let details {
+            params = try await Self.poolParams(from: details, strict: strict)
+        } else {
             throw CardanoChainError.valueError("Pool \(poolId) was not found.")
         }
-        return StakePoolInfo(
-            poolParams: try await Self.poolParams(from: entry.registration, strict: strict),
-            status: Self.poolStatus(retirement: entry.retirement, epoch: currentEpoch)
-        )
+
+        // Status comes from the per-epoch view where Yaci serves one, since that is the
+        // ledger's own answer for the epoch rather than a fold of the certificate log.
+        let status: PoolStatus
+        if let details {
+            status = Self.poolStatus(from: details, epoch: currentEpoch)
+        } else if let certificate {
+            status = Self.poolStatus(retirement: certificate.retirement, epoch: currentEpoch)
+        } else {
+            status = Self.poolStatus(
+                retirement: (try? await poolRetirements())?[poolIdHex], epoch: currentEpoch)
+        }
+
+        return StakePoolInfo(poolParams: params, status: status)
     }
 
     /// Yaci's per-epoch view of a pool, or `nil` when the store cannot answer for either form of
