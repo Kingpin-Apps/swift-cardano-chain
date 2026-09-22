@@ -1,5 +1,5 @@
 {
-  "originHash" : "de5c7f6424d77ecb06cb10b12da5ae6b66fe0e6421db8c3a1815f6ac31a38068",
+  "originHash" : "2859a8939125b1035e204d1f2051b59e66a95f64aaaf5b78a33802cb6936ce8a",
   "pins" : [
     {
       "identity" : "base32",
@@ -15,17 +15,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/attaswift/BigInt.git",
       "state" : {
-        "revision" : "e07e00fa1fd435143a2dcf8b7eec9a7710b2fdfe",
-        "version" : "5.7.0"
-      }
-    },
-    {
-      "identity" : "command",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/tuist/Command.git",
-      "state" : {
-        "revision" : "557f412dd4fe757e304b9d75533fbd6bbbd9fed8",
-        "version" : "0.14.13"
+        "revision" : "63feef7820abb1a8fb08587d7da56bb0b7db8751",
+        "version" : "6.0.1"
       }
     },
     {
@@ -47,30 +38,12 @@
       }
     },
     {
-      "identity" : "mockable",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/Kolos65/Mockable",
-      "state" : {
-        "revision" : "0b239389c5fa6666fb30dc97fbb23fc3ca851a85",
-        "version" : "0.6.4"
-      }
-    },
-    {
       "identity" : "openapikit",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/mattpolzin/OpenAPIKit",
       "state" : {
         "revision" : "5b72eb9a6b23b1fec439d9a0bf38f115400421f9",
         "version" : "6.4.0"
-      }
-    },
-    {
-      "identity" : "path",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/tuist/Path",
-      "state" : {
-        "revision" : "7c74ac435e03a927c3a73134c48b61e60221abcb",
-        "version" : "0.3.8"
       }
     },
     {
@@ -96,8 +69,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/apple/swift-asn1.git",
       "state" : {
-        "revision" : "d9a5b37470adc940d22c3bcd5ca6953a516b727f",
-        "version" : "1.7.2"
+        "revision" : "3b6410f7dee09eb33cdd26260c5fd47fda19b0e2",
+        "version" : "1.7.3"
       }
     },
     {
@@ -123,8 +96,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/Kingpin-Apps/swift-base58.git",
       "state" : {
-        "revision" : "79043ca4d78560205e7790aec49962815e1190ed",
-        "version" : "0.1.4"
+        "revision" : "009c0635973723323ca04f30a1323e03d5952bd2",
+        "version" : "0.1.5"
       }
     },
     {
@@ -141,8 +114,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/Kingpin-Apps/swift-blst.git",
       "state" : {
-        "revision" : "318537bcb980cf8ae782cfe1a5f49dec0b3ee7eb",
-        "version" : "0.1.8"
+        "revision" : "54b95292ed7e1bf38d7ae307f403bd3f23c1f6f7",
+        "version" : "0.1.9"
       }
     },
     {
@@ -150,8 +123,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/Kingpin-Apps/swift-cardano-core.git",
       "state" : {
-        "revision" : "fca2190186b76629743a2807fd772a970ec9281d",
-        "version" : "0.5.1"
+        "revision" : "806ee4d296621652f6543986c719eb3f20d72950",
+        "version" : "0.5.3"
       }
     },
     {
@@ -168,17 +141,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/Kingpin-Apps/swift-cardano-uplc.git",
       "state" : {
-        "revision" : "ac59a040f0f941ecade908ad85ae87aefd1066c5",
-        "version" : "0.3.3"
-      }
-    },
-    {
-      "identity" : "swift-cardano-utils",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/Kingpin-Apps/swift-cardano-utils.git",
-      "state" : {
-        "revision" : "f1896865d13ed07a5276a8fbc576192bc7e43977",
-        "version" : "0.5.5"
+        "revision" : "a518fd1b7250156948c0cde75283596b6de4dc7c",
+        "version" : "0.3.4"
       }
     },
     {
@@ -186,8 +150,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/Kingpin-Apps/swift-cbor-codable.git",
       "state" : {
-        "revision" : "51e206ef4b68703fad6fe7133c3b29a6ae25929b",
-        "version" : "0.3.2"
+        "revision" : "e35f13077f893193fad30f869b28c372188398f3",
+        "version" : "0.3.3"
       }
     },
     {
@@ -206,24 +170,6 @@
       "state" : {
         "revision" : "a0cb0954ecb21e4e31b0070e6ed5674e8556685a",
         "version" : "1.6.0"
-      }
-    },
-    {
-      "identity" : "swift-configuration",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/apple/swift-configuration",
-      "state" : {
-        "revision" : "be76c4ad929eb6c4bcaf3351799f2adf9e6848a9",
-        "version" : "1.2.0"
-      }
-    },
-    {
-      "identity" : "swift-configuration-toml",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/mattt/swift-configuration-toml.git",
-      "state" : {
-        "revision" : "4ea16b4dfa4b023cecae5ae0368402c4d846d613",
-        "version" : "2.0.0"
       }
     },
     {
@@ -276,8 +222,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/Kingpin-Apps/swift-kes.git",
       "state" : {
-        "revision" : "1ec6d8782c3fcbad10abeb320f4e11049d830057",
-        "version" : "1.0.1"
+        "revision" : "c79b68762e420d181a9144c6b77c9b24d9bb33e3",
+        "version" : "1.0.2"
       }
     },
     {
@@ -321,8 +267,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/Kingpin-Apps/swift-nacl.git",
       "state" : {
-        "revision" : "31015115313f476e068ea57765fb295a2c1a6f01",
-        "version" : "1.0.2"
+        "revision" : "03f8a9e2a7626fdc56f100da78f101fe05002298",
+        "version" : "1.0.3"
       }
     },
     {
@@ -330,8 +276,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/apple/swift-nio.git",
       "state" : {
-        "revision" : "a931f2c1de8dd49381ce3bf2e279d033f68d8865",
-        "version" : "2.102.0"
+        "revision" : "21de5f08c1a166a6dd293d0e587ad977bf8dac5d",
+        "version" : "2.103.0"
       }
     },
     {
@@ -357,8 +303,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/apple/swift-nio-ssl",
       "state" : {
-        "revision" : "03827c1a9fdb2b6b00a4e93ede8861520263af8c",
-        "version" : "2.37.4"
+        "revision" : "322f3c2a4a21df31c84ca416bf65ee5e9059e440",
+        "version" : "2.37.5"
       }
     },
     {
@@ -384,8 +330,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/Kingpin-Apps/swift-ogmios.git",
       "state" : {
-        "revision" : "319b8dc637174ce1be58e00976394efb72d60487",
-        "version" : "0.3.1"
+        "revision" : "0279ebfcf0ec9a000380f152bf5eb35be36d3de0",
+        "version" : "0.3.2"
       }
     },
     {
@@ -434,15 +380,6 @@
       }
     },
     {
-      "identity" : "swift-syntax",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/swiftlang/swift-syntax.git",
-      "state" : {
-        "revision" : "79e4b74a295b6eb74a8b585e3a39d29e70c1dbd1",
-        "version" : "603.0.2"
-      }
-    },
-    {
       "identity" : "swift-system",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/apple/swift-system.git",
@@ -452,12 +389,12 @@
       }
     },
     {
-      "identity" : "swift-toml",
+      "identity" : "swift-yaci-api",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/mattt/swift-toml.git",
+      "location" : "https://github.com/Kingpin-Apps/swift-yaci-api.git",
       "state" : {
-        "revision" : "827506c90475e82d5a7f191f950fb3025cbdc0d6",
-        "version" : "2.0.0"
+        "revision" : "03f584419f39c7a901dd7f649edd6b4badb529ee",
+        "version" : "0.1.0"
       }
     },
     {
@@ -476,15 +413,6 @@
       "state" : {
         "revision" : "90bbbdab3ede12c803cfbe91646f291c092517a3",
         "version" : "2.16.2"
-      }
-    },
-    {
-      "identity" : "xctest-dynamic-overlay",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/pointfreeco/xctest-dynamic-overlay",
-      "state" : {
-        "revision" : "dfd70507def84cb5fb821278448a262c6ff2bbad",
-        "version" : "1.9.0"
       }
     },
     {
