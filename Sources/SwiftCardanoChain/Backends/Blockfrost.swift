@@ -265,19 +265,27 @@ public actor BlockFrostChainContext: ChainContext {
             let response = try await api.client.getEpochsLatestParameters()
             let protocolParams = try response.ok.body.json
 
-            let costModels = protocolParams.costModels.unsafelyUnwrapped.additionalProperties.value
+            // Read from `cost_models_raw` rather than the deprecated `cost_models` map. The raw
+            // form is the ledger-ordered list, and that ordering is load-bearing: the script
+            // data hash covers the costs in ledger order, which for Plutus V3 is not
+            // alphabetical, so costs taken from the name-keyed map and sorted would have the
+            // transaction refused with PPViewHashesDontMatch.
+            let rawCostModels = protocolParams.costModelsRaw?.additionalProperties.value ?? [:]
+            func costModel(_ language: String) -> [Int64] {
+                guard let value = rawCostModels[language].flatMap({ $0 }),
+                    let list = value as? [Any]
+                else { return [] }
+                return list.compactMap { ($0 as? NSNumber)?.int64Value }
+            }
 
             return ProtocolParameters(
                 collateralPercentage: Int64(protocolParams.collateralPercent!),
                 committeeMaxTermLength: Int64(protocolParams.committeeMaxTermLength!)!,
                 committeeMinSize: Int64(protocolParams.committeeMinSize!)!,
                 costModels: ProtocolParametersCostModels(
-                    PlutusV1: (costModels["PlutusV1"] as! [String: Int])
-                        .sorted { $0.key < $1.key }.map { Int64($0.value) },
-                    PlutusV2: (costModels["PlutusV2"] as! [String: Int])
-                        .sorted { $0.key < $1.key }.map { Int64($0.value) },
-                    PlutusV3: (costModels["PlutusV3"] as! [String: Int])
-                        .sorted { $0.key < $1.key }.map { Int64($0.value) }
+                    PlutusV1: costModel("PlutusV1"),
+                    PlutusV2: costModel("PlutusV2"),
+                    PlutusV3: costModel("PlutusV3")
                 ),
                 dRepActivity: Int64(protocolParams.drepActivity!)!,
                 dRepDeposit: Int64(protocolParams.drepDeposit!)!,

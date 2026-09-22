@@ -365,6 +365,27 @@ struct KoiosChainContextTests {
         #expect(tip.hash == "abcd1234efgh5678ijkl9012mnop3456qrst7890uvwx1234yzab5678cdef9012")
     }
 
+    /// Koios marks the tip's `block_no` deprecated but its tip schema offers no height field,
+    /// so the value is read back through the row's own encoding. A row without the key has an
+    /// unknown block number, which is not the same as block zero.
+    @Test("Test chainTip reports an absent block number as nil")
+    func testChainTipWithoutBlockNumber() async throws {
+        let chainContext = try await KoiosChainContext(
+            network: .preview,
+            client: Client(
+                serverURL: try SwiftKoios.Network.preview.url(),
+                transport: KoiosMockTransport(
+                    overrides: ["tip": #"[{"epoch_no": 500, "abs_slot": 123456789}]"#]
+                )
+            )
+        )
+
+        let tip = try await chainContext.chainTip()
+
+        #expect(tip.block == nil)
+        #expect(tip.epoch == 500)
+    }
+
     @Test("Test kesPeriodInfo")
     func testKESPeriodInfo() async throws {
         let chainContext = try await KoiosChainContext(

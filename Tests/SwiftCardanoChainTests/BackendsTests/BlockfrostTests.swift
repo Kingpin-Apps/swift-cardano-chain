@@ -91,6 +91,13 @@ struct BlockfrostChainContextTests {
         
         #expect(protocolParameters.txFeePerByte == 44)
         #expect(protocolParameters.txFeeFixed == 155381)
+
+        // Read from `cost_models_raw`, which is the ledger-ordered list. The deprecated
+        // `cost_models` map is keyed by operation name and sorts wrong for Plutus V3.
+        #expect(protocolParameters.costModels.PlutusV1.count == 166)
+        #expect(protocolParameters.costModels.PlutusV2.count == 175)
+        #expect(protocolParameters.costModels.PlutusV3.count == 297)
+        #expect(protocolParameters.costModels.PlutusV1.first == 100788)
     }
     
     @Test("Test utxos")

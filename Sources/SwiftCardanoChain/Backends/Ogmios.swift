@@ -1311,10 +1311,10 @@ public actor OgmiosChainContext: ChainContext {
     public func govActionsAll() async throws -> [GovActionVotes] {
         let proposals = try await client.ledgerStateQuery.governanceProposals.result()
         return try proposals.map { state in
-            let id = (try? GovActionID(
+            let id = GovActionID(
                 transactionID: TransactionId(payload: Data(hex: state.proposal.transaction.id)),
                 govActionIndex: UInt16(state.proposal.index)
-            )) ?? GovActionID(transactionID: TransactionId(payload: Data()), govActionIndex: 0)
+            )
             return try Self.mapProposalState(state, fallbackID: id)
         }
     }
@@ -1434,10 +1434,8 @@ public actor OgmiosChainContext: ChainContext {
         case .treasuryWithdrawals(let tw):
             var withdrawals: [SwiftCardanoCore.RewardAccount: Coin] = [:]
             for (stakeAddressBech32, delta) in tw.withdrawals.value {
-                guard let address = try? Address.fromBech32(stakeAddressBech32),
-                      let bytes = try? address.toBytes()
-                else { continue }
-                withdrawals[SwiftCardanoCore.RewardAccount(bytes)] =
+                guard let address = try? Address.fromBech32(stakeAddressBech32) else { continue }
+                withdrawals[SwiftCardanoCore.RewardAccount(address.toBytes())] =
                     Coin(UInt64(max(0, delta.ada.lovelace)))
             }
             return .treasuryWithdrawalsAction(TreasuryWithdrawalsAction(

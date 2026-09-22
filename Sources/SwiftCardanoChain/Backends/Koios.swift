@@ -300,7 +300,7 @@ public actor KoiosChainContext: ChainContext {
             }
 
             return ChainTip(
-                block: BlockNumber(exactly: tip.blockNo ?? 0),
+                block: Self.tipBlockNumber(tip),
                 epoch: (tip.epochNo?.value as? Int).map { EpochNumber($0) },
                 era: nil,
                 hash: tip.hash?.value as? String,
@@ -312,6 +312,21 @@ public actor KoiosChainContext: ChainContext {
         } catch {
             throw CardanoChainError.koiosError("Failed to get tip: \(error)")
         }
+    }
+
+    /// The block number from a Koios tip row.
+    ///
+    /// Koios marks `block_no` deprecated in favour of a block height, but its tip schema
+    /// exposes no height field, so this is still the only block number that endpoint returns.
+    /// It is read back through the row's own `Codable` conformance under the documented wire
+    /// key rather than off the deprecated property, which keeps the call site warning-free
+    /// without dropping the value. A row without the key yields `nil` rather than block zero.
+    static func tipBlockNumber(_ tip: Components.Schemas.TipPayload) -> BlockNumber? {
+        guard let data = try? JSONEncoder().encode(tip),
+            let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let raw = object["block_no"] as? NSNumber
+        else { return nil }
+        return BlockNumber(exactly: raw.doubleValue)
     }
 
     /// Query the current protocol parameters
