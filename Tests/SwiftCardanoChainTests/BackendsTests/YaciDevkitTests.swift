@@ -541,7 +541,10 @@ struct YaciDevkitChainContextTests {
             VerificationKeyHash(payload: Data(hex: YaciMockData.drepHex))))
     }
 
-    @Test("Test stakeAddressInfo for an unregistered account")
+    /// Regression: Yaci answers `/accounts/{stakeAddress}` with 200 and zeroed amounts for any
+    /// well-formed stake address, so a successful response says nothing about registration.
+    /// Registration has to come from the certificate log instead.
+    @Test("Test stakeAddressInfo for an account Yaci has never seen")
     func testStakeAddressInfoUnregistered() async throws {
         let context = try makeContext()
         let address = try Address(from: .string(YaciMockData.unknownStakeAddress))
@@ -552,6 +555,18 @@ struct YaciDevkitChainContextTests {
         #expect(info[0].active == false)
         #expect(info[0].rewardAccountBalance == 0)
         #expect(info[0].stakeDelegation == nil)
+    }
+
+    @Test("Test stakeAddressInfo reports a deregistered account as inactive")
+    func testStakeAddressInfoDeregistered() async throws {
+        let context = try makeContext()
+        let address = try Address(from: .string(YaciMockData.deregisteredStakeAddress))
+
+        let info = try await context.stakeAddressInfo(address: address)
+
+        // Registered at slot 70, deregistered at slot 90: the later certificate wins.
+        #expect(info.count == 1)
+        #expect(info[0].active == false)
     }
 
     // MARK: - Stake pools

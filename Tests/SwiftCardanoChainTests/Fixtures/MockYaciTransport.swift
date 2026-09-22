@@ -14,6 +14,9 @@ enum YaciMockData {
     static let stakeAddress = "stake_test1upyz3gk6mw5he20apnwfn96cn9rscgvmmsxc9r86dh0k66gswf59n"
     static let unknownStakeAddress =
         "stake_test1urxvenxvenxvenxvenxvenxvenxvenxvenxvenxvenxvenqyemcr5"
+    /// Registered, then deregistered again: the certificate log has both.
+    static let deregisteredStakeAddress =
+        "stake_test1urwamhwamhwamhwamhwamhwamhwamhwamhwamhwamhwamhg0lg529"
 
     static let poolABech32 = "pool1pu5jlj4q9w9jlxeu370a3c9myx47md5j5m2str0naunn2q3lkdy"
     static let poolAHex = "0f292fcaa02b8b2f9b3c8f9fd8e0bb21abedb692a6d5058df3ef2735"
@@ -260,13 +263,38 @@ struct MockYaciTransport: ClientTransport {
                 """)
 
         case "getStakeAccountDetails":
+            // Yaci answers 200 with zeroed amounts for any well-formed stake address, including
+            // one it has never seen, so the mock does the same rather than 404ing.
             guard path.contains(YaciMockData.stakeAddress) else {
-                return (HTTPResponse(status: .notFound), nil)
+                let unknown = path.split(separator: "/").last.map(String.init) ?? ""
+                return json(
+                    """
+                    {"stake_address": "\(unknown)", "controlled_amount": 0,
+                     "withdrawable_amount": 0, "pool_id": null}
+                    """)
             }
             return json(
                 """
                 {"stake_address": "\(YaciMockData.stakeAddress)", "controlled_amount": 619154618165,
                  "withdrawable_amount": 319154618165, "pool_id": "\(YaciMockData.poolABech32)"}
+                """)
+
+        case "getStakeRegistrations":
+            guard page == 0 else { return json("[]") }
+            return json(
+                """
+                [{"tx_hash": "s1", "cert_index": 0, "slot": 40, "type": "STAKE_REGISTRATION",
+                  "address": "\(YaciMockData.stakeAddress)", "epoch": 1},
+                 {"tx_hash": "s2", "cert_index": 0, "slot": 70, "type": "REG_CERT",
+                  "address": "\(YaciMockData.deregisteredStakeAddress)", "epoch": 1}]
+                """)
+
+        case "getStakeDeRegistrations":
+            guard page == 0 else { return json("[]") }
+            return json(
+                """
+                [{"tx_hash": "s3", "cert_index": 0, "slot": 90, "type": "UNREG_CERT",
+                  "address": "\(YaciMockData.deregisteredStakeAddress)", "epoch": 2}]
                 """)
 
         case "getDelegationsByAddress":

@@ -899,8 +899,9 @@ public actor YaciDevkitChainContext: ChainContext {
 
     /// Get the stake address information.
     ///
-    /// Yaci reports the delegated pool and the withdrawable rewards. Vote delegation is read from
-    /// the vote-delegation certificate log, on a best-effort basis.
+    /// Yaci reports the delegated pool and the withdrawable rewards. Registration is folded from
+    /// the stake certificate log, and vote delegation from the vote-delegation log, both on a
+    /// best-effort basis.
     public func stakeAddressInfo(address: Address) async throws -> [StakeAddressInfo] {
         let bech32 = try address.toBech32()
 
@@ -917,16 +918,48 @@ public actor YaciDevkitChainContext: ChainContext {
             stakeDelegation = try? Self.poolOperator(from: poolId)
         }
         let voteDelegation = try? await latestVoteDelegation(stakeAddress: bech32)
+        let active = (try? await isStakeRegistered(address: bech32)) ?? false
 
         return [
             StakeAddressInfo(
-                active: true,
+                active: active,
                 address: info.stakeAddress ?? bech32,
                 rewardAccountBalance: Int64(info.withdrawableAmount ?? 0),
                 stakeDelegation: stakeDelegation,
                 voteDelegation: voteDelegation
             )
         ]
+    }
+
+    /// Whether a stake address is currently registered, folded from the stake certificate log.
+    ///
+    /// The account endpoint cannot answer this. Yaci serves it with zeroed amounts and a null
+    /// pool for any well-formed stake address, including one it has never seen, so a successful
+    /// response says nothing about registration. Registrations and deregistrations are indexed
+    /// as separate certificate logs instead, and the latest certificate for the address wins.
+    private func isStakeRegistered(address: String) async throws -> Bool {
+        let registrations = try await paginate("get stake registrations") { page, count in
+            try await api.client.getStakeRegistrations(query: .init(page: page, count: count))
+                .ok.body.json
+        }
+        let deregistrations = try await paginate("get stake deregistrations") { page, count in
+            try await api.client.getStakeDeRegistrations(query: .init(page: page, count: count))
+                .ok.body.json
+        }
+
+        let rows = (registrations + deregistrations)
+            .filter { $0.address == address }
+            .sorted {
+                Self.certificateOrder($0.slot, $0.certIndex) < Self.certificateOrder($1.slot, $1.certIndex)
+            }
+
+        guard let latest = rows.last else { return false }
+        switch latest._type {
+        case .stakeDeregistration, .unregCert:
+            return false
+        default:
+            return true
+        }
     }
 
     private func latestVoteDelegation(stakeAddress: String) async throws -> DRep? {
