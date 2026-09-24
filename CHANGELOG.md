@@ -1,3 +1,9 @@
+## 0.9.1 (2026-09-23)
+
+### Fix
+
+- decode PlutusV3 reference scripts in the cardano-cli backend
+
 ## 0.9.0 (2026-09-22)
 
 ### Feat
