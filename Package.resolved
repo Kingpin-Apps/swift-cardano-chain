@@ -1,5 +1,5 @@
 {
-  "originHash" : "74fd0e61e04188124b3389636b4c19fd4c3ba3369a0f71a8f1cfc33602fd2156",
+  "originHash" : "060013e43d89127eef30fc3213d4af6f0e6968a9348c76ce1bf65fd38a446abf",
   "pins" : [
     {
       "identity" : "base32",
@@ -123,8 +123,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/Kingpin-Apps/swift-cardano-core.git",
       "state" : {
-        "revision" : "e62bd9364d5f0c0b357803b8abc1e36896bcef24",
-        "version" : "0.6.0"
+        "revision" : "9c10ea2da0978723aec8cf75ca6f96d3aed7aacd",
+        "version" : "0.7.0"
       }
     },
     {
@@ -141,8 +141,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/Kingpin-Apps/swift-cardano-uplc.git",
       "state" : {
-        "revision" : "bf156e5363f52d58236fe02e442da90f911be4fb",
-        "version" : "0.6.0"
+        "revision" : "60d058455d84e37593eb317592775c0f824252f5",
+        "version" : "0.6.1"
       }
     },
     {
