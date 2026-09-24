@@ -335,6 +335,16 @@ public actor CardanoCliChainContext: ChainContext {
             // Create PlutusV2Script from CBOR
             let v2script = PlutusV2Script(data: cborData)
             return .plutusV2Script(v2script)
+        } else if scriptType == "PlutusScriptV3" {
+            guard let cborHex = script["cborHex"] as? String,
+                let cborData = Data(hexString: cborHex)
+            else {
+                throw CardanoChainError.valueError("Invalid PlutusScriptV3 CBOR")
+            }
+
+            // Create PlutusV3Script from CBOR
+            let v3script = PlutusV3Script(data: cborData)
+            return .plutusV3Script(v3script)
         } else {
             // Create NativeScript from dictionary
             // Convert the dictionary to JSON data

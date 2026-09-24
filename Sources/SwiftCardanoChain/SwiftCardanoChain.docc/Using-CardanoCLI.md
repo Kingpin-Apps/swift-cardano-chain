@@ -87,6 +87,13 @@ for utxo in utxos {
 }
 ```
 
+A UTxO carrying a reference script returns it on `utxo.output.script`, for native
+scripts and for PlutusV1, V2 and V3 alike.
+
+> Note: `cardano-cli` only reports **unspent** outputs, so an input that has already
+> been consumed resolves to nothing. Validating a transaction that is already on
+> chain needs a backend with historical lookup, such as BlockFrost or Koios.
+
 ### Protocol and Genesis Parameters
 
 Genesis parameters are loaded once from the node config file and cached permanently.
