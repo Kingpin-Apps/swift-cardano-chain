@@ -1,5 +1,5 @@
 {
-  "originHash" : "2859a8939125b1035e204d1f2051b59e66a95f64aaaf5b78a33802cb6936ce8a",
+  "originHash" : "e19905223822c77ab6fb9388bfe6c070598073eafd3be23804606d1aeb5b0e02",
   "pins" : [
     {
       "identity" : "base32",
@@ -123,8 +123,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/Kingpin-Apps/swift-cardano-core.git",
       "state" : {
-        "revision" : "806ee4d296621652f6543986c719eb3f20d72950",
-        "version" : "0.5.3"
+        "revision" : "4275e193143724ea58a864afd7d080709317341f",
+        "version" : "0.5.4"
       }
     },
     {
@@ -141,8 +141,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/Kingpin-Apps/swift-cardano-uplc.git",
       "state" : {
-        "revision" : "a518fd1b7250156948c0cde75283596b6de4dc7c",
-        "version" : "0.3.4"
+        "revision" : "c3ec7a101a9ffd26423f7a762065848e8b0cdc25",
+        "version" : "0.4.0"
       }
     },
     {
@@ -159,8 +159,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/apple/swift-certificates.git",
       "state" : {
-        "revision" : "c8aece90ea05f9866bd392a5bf13b5cae56c0e03",
-        "version" : "1.20.0"
+        "revision" : "ff86b924ead66f853b8baf91f3c41926a8f36177",
+        "version" : "1.21.0"
       }
     },
     {
@@ -168,8 +168,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/apple/swift-collections.git",
       "state" : {
-        "revision" : "a0cb0954ecb21e4e31b0070e6ed5674e8556685a",
-        "version" : "1.6.0"
+        "revision" : "a66de878e87ef5a3d5d390e0f6d9002aa5541a43",
+        "version" : "1.7.0"
       }
     },
     {
