@@ -104,6 +104,18 @@ let context = try await OgmiosChainContext(
 )
 ```
 
+With a [Kupo](https://cardanosolutions.github.io/kupo) index running alongside, pass it to
+read address UTxOs from the index and to tell spent outputs from missing ones:
+
+```swift
+let context = try await OgmiosChainContext(
+    host: "localhost",
+    port: 1337,
+    network: .mainnet,
+    kupo: KupoClient(baseURL: URL(string: "http://localhost:1442")!)
+)
+```
+
 ### NodeSocket (Local Node — Direct NtC)
 
 ```swift
@@ -193,6 +205,16 @@ print("Epoch length   : \(genesis.epochLength) slots")
 print("Security param : \(genesis.securityParam)")
 ```
 
+### Transactions by Hash
+
+BlockFrost and Koios return a transaction already on chain, exactly as it was submitted.
+`transaction(hash:)` decodes it and checks that its id is the one asked for:
+
+```swift
+let cbor = try await context.transactionCBOR(hash: txId)
+let tx   = try await context.transaction(hash: txId)
+```
+
 ### Current Chain State
 
 ```swift
@@ -263,9 +285,13 @@ let params         = try await context.protocolParameters()
 let units = try await context.evaluateTx(
     tx: transaction,
     resolvedInputs: resolvedInputs,
-    protocolParameters: params
+    protocolParameters: params,
+    slotTimeline: try await context.slotTimeline()
 )
 ```
+
+A transaction with a validity interval needs the slot timeline: its scripts see the
+interval as POSIX time. `slotTimeline()` reads it from the chain's genesis.
 
 `OfflineTransferChainContext` returns execution units from `OfflineTransfer.evaluations`
 populated on the online machine — see the offline signing section below.
