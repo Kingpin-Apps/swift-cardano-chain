@@ -581,10 +581,15 @@ public actor CardanoCliChainContext: ChainContext {
 
         let pp = try await self.protocolParameters()
 
+        // A validity interval needs the chain's slot timeline; without one the
+        // script cannot be given its time range and evaluation refuses it.
+        let timeline = (try? await self.slotTimeline()) ?? nil
+
         return try await evaluateTx(
             tx: tx,
             resolvedInputs: resolved,
-            protocolParameters: pp
+            protocolParameters: pp,
+            slotTimeline: timeline
         )
     }
 

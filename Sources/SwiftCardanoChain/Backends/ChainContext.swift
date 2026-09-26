@@ -223,6 +223,13 @@ public extension ChainContext {
         return transaction
     }
 
+    /// How to turn this chain's slots into POSIX time, which a Plutus script
+    /// needs to see a validity interval — read from the genesis parameters, or
+    /// `nil` when they do not say enough to be sure.
+    func slotTimeline() async throws -> SlotTimeline? {
+        SlotTimeline.forChain(genesis: try await genesisParameters())
+    }
+
     /// Evaluate execution units of a transaction locally via the UPLC CEK machine.
     ///
     /// This is a backend-agnostic helper for chain contexts that don't expose a remote
@@ -235,45 +242,39 @@ public extension ChainContext {
     ///   - resolvedInputs: UTxOs corresponding to every regular and reference input
     ///     consumed by the transaction.
     ///   - protocolParameters: Current protocol parameters, used to seed `PhaseTwo`.
+    ///   - slotTimeline: How to turn slots into POSIX time. A transaction with a
+    ///     validity interval cannot be evaluated without one; see ``slotTimeline()``.
     /// - Returns: A dictionary mapping `"<tag>:<index>"` redeemer keys to consumed
     ///   `ExecutionUnits`. Failed redeemers are omitted.
     func evaluateTx(
         tx: Transaction,
         resolvedInputs: [UTxO],
-        protocolParameters: ProtocolParameters
+        protocolParameters: ProtocolParameters,
+        slotTimeline: SlotTimeline? = nil
     ) async throws -> [String: ExecutionUnits] {
-        let phaseTwo = try PhaseTwo(protocolParameters: protocolParameters)
+        let phaseTwo = try PhaseTwo(protocolParameters: protocolParameters, slotTimeline: slotTimeline)
         let result = try await phaseTwo.evaluate(transaction: tx, resolvedInputs: resolvedInputs)
 
         let redeemers: [Redeemer] = Self.extractRedeemers(from: tx)
 
         var out: [String: ExecutionUnits] = [:]
         for r in result.redeemers {
-            guard r.passed, r.index < redeemers.count else { continue }
+            guard r.passed, r.index < redeemers.count, let consumed = r.consumedBudget else { continue }
             let original = redeemers[r.index]
             let tag = original.tag.map { "\($0)" } ?? "unknown"
             let key = "\(tag):\(original.index)"
-            let consumedMem = Int64(ExBudget.restricted.mem - r.remainingBudget.mem)
-            let consumedSteps = Int64(ExBudget.restricted.cpu - r.remainingBudget.cpu)
             out[key] = ExecutionUnits(
-                mem: max(0, consumedMem),
-                steps: max(0, consumedSteps)
+                mem: max(0, consumed.mem),
+                steps: max(0, consumed.cpu)
             )
         }
         return out
     }
 
-    /// Extract the redeemer list from a transaction's witness set in canonical order.
+    /// The redeemers of a transaction's witness set, in the order `PhaseTwo`
+    /// evaluates them, each with its tag and index.
     static func extractRedeemers(from tx: Transaction) -> [Redeemer] {
-        guard let rs = tx.transactionWitnessSet.redeemers else { return [] }
-        switch rs {
-        case .list(let list):
-            return list.compactMap { $0 as? Redeemer }
-        case .map(let map):
-            return map.dictionary.values.compactMap { v in
-                Redeemer(tag: nil, index: 0, data: v.data, exUnits: v.exUnits)
-            }
-        }
+        PhaseTwo.redeemers(of: tx)
     }
     
     func chainTip() async throws -> ChainTip {
