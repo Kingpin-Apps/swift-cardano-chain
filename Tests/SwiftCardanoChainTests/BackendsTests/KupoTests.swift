@@ -30,6 +30,13 @@ struct KupoTests {
         TransactionInput(transactionId: try TransactionId(from: .string(txId)), index: index)
     }
 
+    /// What current Kupo returns for a spent output: the point, plus the
+    /// spending transaction, its input index and redeemer.
+    static let spentAt = """
+        {"slot_no": 200, "header_hash": "\(String(repeating: "02", count: 32))",
+         "transaction_id": "\(String(repeating: "03", count: 32))", "input_index": 0, "redeemer": "d87980"}
+        """
+
     static func match(
         index: Int, datumType: String?, datum: String?, scriptHash: String?, script: String?, spent: Bool
     ) -> String {
@@ -43,7 +50,7 @@ struct KupoTests {
          "script_hash": \(scriptHash.map { "\"\($0)\"" } ?? "null"),
          "script": \(script ?? "null"),
          "created_at": {"slot_no": 100, "header_hash": "\(String(repeating: "01", count: 32))"},
-         "spent_at": \(spent ? "{\"slot_no\": 200, \"header_hash\": \"\(String(repeating: "02", count: 32))\"}" : "null")}
+         "spent_at": \(spent ? spentAt : "null")}
         """
     }
 
