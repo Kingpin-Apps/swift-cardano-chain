@@ -1,5 +1,5 @@
 {
-  "originHash" : "bb5a19a0f956d52d6a7468e09dabbdd07daaa693b47dc660ce82675a40a30f59",
+  "originHash" : "b8f617bb39deefcf21dadf8ce32c26cc4440fc6419c160a36cdffe6f4ff07a28",
   "pins" : [
     {
       "identity" : "base32",
@@ -233,6 +233,15 @@
       "state" : {
         "revision" : "5a21e34fa4c181403eff599c3c5d93ed554814a6",
         "version" : "0.2.2"
+      }
+    },
+    {
+      "identity" : "swift-kupo",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/Kingpin-Apps/swift-kupo.git",
+      "state" : {
+        "revision" : "e0f4abafad9be9bcc9a823ad323cca0df0417594",
+        "version" : "0.1.1"
       }
     },
     {
