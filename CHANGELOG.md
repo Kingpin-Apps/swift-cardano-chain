@@ -1,3 +1,14 @@
+## 0.10.0 (2026-09-26)
+
+### Feat
+
+- **ogmios**: read outputs from a Kupo index
+- **chain**: add transaction lookup by hash
+
+### Fix
+
+- **chain**: give local evaluation the slot timeline and redeemer keys
+
 ## 0.9.2 (2026-09-24)
 
 ## 0.9.1 (2026-09-23)
