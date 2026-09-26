@@ -1,3 +1,17 @@
+## 0.11.0 (2026-09-26)
+
+### BREAKING CHANGE
+
+- OgmiosChainContext no longer takes kupo:, and KupoClient, KupoMatch and KupoScript are gone. Use KupoChainContext wrapping an OgmiosChainContext instead. Pre-1.0, so a minor bump.
+
+### Feat
+
+- **kupo**: add a Kupo chain context over swift-kupo
+
+### Refactor
+
+- **ogmios**: drop the built-in Kupo option
+
 ## 0.10.1 (2026-09-26)
 
 ### Fix
