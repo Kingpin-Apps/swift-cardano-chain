@@ -8,9 +8,9 @@ let package = Package(
     platforms: [
       .iOS(.v18), // bumped from v17: depends on swift-cardano-utils, now iOS 18
       .macOS(.v15),
-      .watchOS(.v9),
+      .watchOS(.v10),
       .tvOS(.v16),
-      .visionOS(.v1),
+      .visionOS(.v2),
     ],
     products: [
         .library(
