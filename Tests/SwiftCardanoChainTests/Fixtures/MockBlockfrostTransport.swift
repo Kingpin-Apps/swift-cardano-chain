@@ -11,6 +11,10 @@ struct MockTransport: ClientTransport {
     ) {
         var body: Data = Data()
         switch operationID {
+            case "get/txs/{hash}/cbor":
+                body = try JSONEncoder().encode(
+                    Components.Schemas.TxContentCbor(cbor: try ChainFixtures.mapRedeemerTransactionHex())
+                )
             case "get/txs/{hash}/utxos":
                 body = try JSONEncoder().encode(
                     Components.Schemas.TxContentUtxo(

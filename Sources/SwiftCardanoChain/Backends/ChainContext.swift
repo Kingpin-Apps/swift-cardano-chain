@@ -62,6 +62,17 @@ public protocol ChainContext: Sendable, CustomStringConvertible, CustomDebugStri
     ///   return `isSpent: false` when a result is returned, and `nil` for spent UTxOs.
     func utxo(input: TransactionInput) async throws -> (UTxO, isSpent: Bool)?
 
+    /// The bytes of a transaction already on chain, exactly as it was
+    /// submitted.
+    ///
+    /// Backends that only see the live ledger state — a node, Ogmios, Yaci
+    /// Store — cannot look transactions up and throw
+    /// `CardanoChainError.notImplemented`.
+    ///
+    /// - Parameter hash: The transaction id.
+    /// - Returns: The transaction's CBOR.
+    func transactionCBOR(hash: TransactionId) async throws -> Data
+
     /// Submit a serialized transaction to the blockchain.
     ///
     /// - Parameter cbor: The serialized transaction to be submitted.
@@ -194,6 +205,24 @@ public extension ChainContext {
         return try await evaluateTxCBOR(cbor: tx.toCBORData())
     }
 
+    /// A transaction already on chain, decoded, and checked to be the one asked
+    /// for: its id is the hash of the bytes the backend returned.
+    func transaction(hash: TransactionId) async throws -> Transaction {
+        let cbor = try await transactionCBOR(hash: hash)
+        let transaction: Transaction
+        do {
+            transaction = try Transaction.fromCBOR(data: cbor)
+        } catch {
+            throw CardanoChainError.valueError("Transaction \(hash) did not decode: \(error)")
+        }
+        guard transaction.id == hash else {
+            throw CardanoChainError.valueError(
+                "The backend returned transaction \(transaction.id?.description ?? "?") for \(hash)"
+            )
+        }
+        return transaction
+    }
+
     /// Evaluate execution units of a transaction locally via the UPLC CEK machine.
     ///
     /// This is a backend-agnostic helper for chain contexts that don't expose a remote
@@ -261,6 +290,10 @@ public extension ChainContext {
     
     func submitTxCBOR(cbor: Data) async throws -> String {
         throw CardanoChainError.notImplemented("submitTxCBOR(cbor:) is not implemented for \(Self.self).")
+    }
+
+    func transactionCBOR(hash: TransactionId) async throws -> Data {
+        throw CardanoChainError.notImplemented("transactionCBOR(hash:) is not implemented for \(Self.self).")
     }
     
     func evaluateTxCBOR(cbor: Data) async throws -> [String: ExecutionUnits] {

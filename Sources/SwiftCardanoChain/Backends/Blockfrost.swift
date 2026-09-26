@@ -1577,3 +1577,22 @@ internal func makeNonNegativeInterval(_ value: Double, precision: UInt64 = 1_000
     let scaled = (bounded * Double(precision)).rounded()
     return NonNegativeInterval(lowerBound: UInt64(scaled), upperBound: precision)
 }
+
+// MARK: - Transactions by hash
+
+extension BlockFrostChainContext {
+    /// The bytes of a transaction on chain, from `/txs/{hash}/cbor`.
+    public func transactionCBOR(hash: TransactionId) async throws -> Data {
+        let response = try await api.client.getTxsHashCbor(
+            Operations.GetTxsHashCbor.Input(path: .init(hash: hash.payload.toHex))
+        )
+        guard case .ok(let ok) = response else {
+            throw CardanoChainError.blockfrostError("Transaction \(hash) not found: \(response)")
+        }
+        let cbor = try ok.body.json.cbor
+        guard let data = Data(hexString: cbor) else {
+            throw CardanoChainError.blockfrostError("Transaction \(hash) CBOR is not hex")
+        }
+        return data
+    }
+}

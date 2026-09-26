@@ -1705,3 +1705,29 @@ public actor KoiosChainContext: ChainContext {
         return nil
     }
 }
+
+// MARK: - Transactions by hash
+
+extension KoiosChainContext {
+    /// The bytes of a transaction on chain, from `tx_cbor`.
+    public func transactionCBOR(hash: TransactionId) async throws -> Data {
+        let response = try await api.client.txCbor(
+            Operations.TxCbor.Input(
+                body: .json(.init(_txHashes: [hash.payload.toHex]))
+            )
+        )
+        let results: [Components.Schemas.TxCborPayload]
+        do {
+            results = try response.ok.body.json
+        } catch {
+            throw CardanoChainError.koiosError("Failed to get transaction \(hash): \(response)")
+        }
+        guard let cbor = results.first?.cbor else {
+            throw CardanoChainError.koiosError("Transaction \(hash) not found")
+        }
+        guard let data = Data(hexString: cbor) else {
+            throw CardanoChainError.koiosError("Transaction \(hash) CBOR is not hex")
+        }
+        return data
+    }
+}
