@@ -61,6 +61,13 @@ public actor OgmiosChainContext: ChainContext {
     /// The underlying Ogmios client used for all API calls.
     public let client: OgmiosClient
 
+    /// A Kupo index to read outputs from, when one runs alongside Ogmios.
+    ///
+    /// With it, ``utxos(address:)`` reads Kupo's index instead of scanning
+    /// the ledger, and ``utxo(input:)`` can tell a spent output from one that
+    /// never existed.
+    public let kupo: KupoClient?
+
     private var _epoch: Int?
     private var _epochFetch: Task<Int, Error>?
     private var _genesisParameters: GenesisParameters?
@@ -260,9 +267,11 @@ public actor OgmiosChainContext: ChainContext {
         httpOnly: Bool? = nil,
         rpcVersion: String? = nil,
         network: SwiftCardanoCore.Network = .mainnet,
-        client: OgmiosClient? = nil
+        client: OgmiosClient? = nil,
+        kupo: KupoClient? = nil
     ) async throws {
         self._network = network
+        self.kupo = kupo
 
         if let client = client {
             self.client = client
@@ -369,6 +378,13 @@ public actor OgmiosChainContext: ChainContext {
     /// }
     /// ```
     public func utxos(address: SwiftCardanoCore.Address) async throws -> [SwiftCardanoCore.UTxO] {
+        if let kupo {
+            var utxos: [SwiftCardanoCore.UTxO] = []
+            for match in try await kupo.matches(pattern: try address.toBech32(), unspent: true) {
+                utxos.append(try await match.utxo(client: kupo))
+            }
+            return utxos
+        }
         let ogmiosAddress = SwiftOgmios.Address(try address.toBech32())
         let response = try await client.ledgerStateQuery.utxo.result(
             addresses: [ogmiosAddress]
@@ -383,9 +399,17 @@ public actor OgmiosChainContext: ChainContext {
     ///
     /// - Parameter input: A transaction input identifying the UTxO by transaction hash and output index.
     /// - Returns: The UTxO if it exists and is unspent, or `nil` if it has been spent or does not exist.
-    ///   Ogmios only queries the live UTxO set, so spent UTxOs are indistinguishable from non-existent ones.
+    ///   Ogmios only queries the live UTxO set, so spent UTxOs are indistinguishable from non-existent ones
+    ///   — unless a ``kupo`` index is set that still holds the spent output.
     /// - Throws: `CardanoChainError` if the query fails.
     public func utxo(input: TransactionInput) async throws -> (UTxO, isSpent: Bool)? {
+        // Kupo keeps spent outputs unless it prunes them, so it can say an
+        // output was spent; when it has no record, ask the live ledger.
+        if let kupo,
+            let match = try await kupo.matches(pattern: "\(input.index)@\(input.transactionId.payload.toHex)").first
+        {
+            return (try await match.utxo(client: kupo), match.isSpent)
+        }
         let outputRef = SwiftOgmios.TransactionOutputReference(
             transaction: .init(id: input.transactionId.description),
             index: UInt64(input.index)
