@@ -4,7 +4,7 @@
 
 # SwiftCardanoChain
 
-A Swift library for interacting with the Cardano blockchain through a unified `ChainContext` protocol backed by seven pluggable implementations.
+A Swift library for interacting with the Cardano blockchain through a unified `ChainContext` protocol backed by eight pluggable implementations.
 
 ## Installation
 
@@ -28,7 +28,7 @@ import SwiftCardanoChain
 
 ## Overview
 
-SwiftCardanoChain provides a single `ChainContext` protocol and seven concrete implementations.
+SwiftCardanoChain provides a single `ChainContext` protocol and eight concrete implementations.
 Pick the one that matches your environment — the rest of your code stays the same.
 
 | Context | When to use |
@@ -37,6 +37,7 @@ Pick the one that matches your environment — the rest of your code stays the s
 | `KoiosChainContext` | Decentralised community API — no local node required |
 | `CardanoCliChainContext` | Local node via `cardano-cli` |
 | `OgmiosChainContext` | Local node via the Ogmios WebSocket bridge |
+| `KupoChainContext` | Kupo chain index, alone or wrapping another context |
 | `NodeSocketChainContext` | Local node via the NtC Unix socket directly |
 | `YaciDevkitChainContext` | Local throw-away devnet run by Yaci DevKit |
 | `OfflineTransferChainContext` | Air-gapped / offline transaction signing |
@@ -104,17 +105,39 @@ let context = try await OgmiosChainContext(
 )
 ```
 
-With a [Kupo](https://cardanosolutions.github.io/kupo) index running alongside, pass it to
-read address UTxOs from the index and to tell spent outputs from missing ones:
+### Kupo (Chain Index, Optionally Wrapping Ogmios)
+
+`KupoChainContext` reads outputs from a [Kupo](https://cardanosolutions.github.io/kupo)
+index through [swift-kupo](https://github.com/Kingpin-Apps/swift-kupo): every unspent output
+at an address, with datums and reference scripts, and whether an output was spent.
+
+On its own it answers only what Kupo indexes — `utxos(address:)`, `utxo(input:)`, and
+`datum(hash:)` / `datumCBOR(hash:)` / `script(hash:)`. Every other call throws
+`CardanoChainError.notImplemented`:
 
 ```swift
-let context = try await OgmiosChainContext(
-    host: "localhost",
-    port: 1337,
-    network: .mainnet,
-    kupo: KupoClient(baseURL: URL(string: "http://localhost:1442")!)
+let kupo = try KupoChainContext(
+    url: URL(string: "http://localhost:1442")!,
+    network: .preview
+)
+let utxos = try await kupo.utxos(address: address)
+```
+
+Wrap another context, usually Ogmios on the same node, and everything Kupo does not index —
+protocol parameters, the tip, submitting and evaluating transactions, stake and governance
+queries — goes to it. `utxo(input:)` also falls back to it when Kupo has no record of the output:
+
+```swift
+let ogmios = try await OgmiosChainContext(host: "localhost", port: 1337, network: .preview)
+let context = try KupoChainContext(
+    url: URL(string: "http://localhost:1442")!,
+    network: .preview,
+    wrapping: ogmios
 )
 ```
+
+To configure the HTTP client yourself, pass a swift-kupo `Kupo` or `Client` instead of a URL:
+`KupoChainContext(kupo: try Kupo(basePath: "http://localhost:1442"), network: .preview, wrapping: ogmios)`.
 
 ### NodeSocket (Local Node — Direct NtC)
 

@@ -1,10 +1,10 @@
 # ``SwiftCardanoChain``
 
-Interact with the Cardano blockchain through a unified Swift interface backed by seven pluggable chain context implementations.
+Interact with the Cardano blockchain through a unified Swift interface backed by eight pluggable chain context implementations.
 
 ## Overview
 
-SwiftCardanoChain provides a single ``ChainContext`` protocol and seven concrete implementations, each suited to a different deployment scenario:
+SwiftCardanoChain provides a single ``ChainContext`` protocol and eight concrete implementations, each suited to a different deployment scenario:
 
 | Context | When to use |
 |---|---|
@@ -12,6 +12,7 @@ SwiftCardanoChain provides a single ``ChainContext`` protocol and seven concrete
 | ``KoiosChainContext`` | Decentralised community API — no local node required |
 | ``CardanoCliChainContext`` | Local node via `cardano-cli` |
 | ``OgmiosChainContext`` | Local node via the Ogmios WebSocket bridge |
+| ``KupoChainContext`` | Kupo chain index, alone or wrapping another context |
 | ``NodeSocketChainContext`` | Local node via the NtC Unix socket directly |
 | ``YaciDevkitChainContext`` | Local throw-away devnet run by Yaci DevKit |
 | ``OfflineTransferChainContext`` | Air-gapped / offline transaction signing |
@@ -300,6 +301,7 @@ do {
 
 - ``CardanoCliChainContext``
 - ``OgmiosChainContext``
+- ``KupoChainContext``
 - ``NodeSocketChainContext``
 - ``YaciDevkitChainContext``
 
