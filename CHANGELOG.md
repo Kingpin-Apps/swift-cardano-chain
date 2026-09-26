@@ -1,3 +1,9 @@
+## 0.10.1 (2026-09-26)
+
+### Fix
+
+- **package**: declare watchOS 10 and visionOS 2 floors its dependencies need
+
 ## 0.10.0 (2026-09-26)
 
 ### Feat
