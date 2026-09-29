@@ -1,3 +1,9 @@
+## 0.12.0 (2026-09-28)
+
+### Feat
+
+- NodeSocket trait for the node-socket backend without SwiftCardanoUtils
+
 ## 0.11.0 (2026-09-26)
 
 ### BREAKING CHANGE
