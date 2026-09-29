@@ -3,6 +3,10 @@
 
 import PackageDescription
 
+/// Where the NodeSocket backend builds: a node's Unix socket is local, and
+/// iOS, tvOS, watchOS and visionOS have none to reach.
+let nodeSocketPlatforms: [Platform] = [.macOS, .linux]
+
 let package = Package(
     name: "SwiftCardanoChain",
     platforms: [
@@ -20,7 +24,12 @@ let package = Package(
     traits: [
         .trait(
             name: "CLIBackends",
-            description: "cardano-cli & node-socket chain backends. Pulls SwiftCardanoUtils' CLITools (tuist/Command, subprocess) — macOS/Linux only. Off by default; wallets use the Blockfrost/Koios/Ogmios backends instead."
+            description: "cardano-cli & node-socket chain backends. Pulls SwiftCardanoUtils (tuist/Command, subprocess) — macOS/Linux only. Off by default; wallets use the Blockfrost/Koios/Ogmios backends instead.",
+            enabledTraits: ["NodeSocket"]
+        ),
+        .trait(
+            name: "NodeSocket",
+            description: "The node-socket chain backend alone, without SwiftCardanoUtils, for apps that also target iOS or visionOS: it builds on macOS and Linux and is left out elsewhere."
         ),
     ],
     dependencies: [
@@ -46,8 +55,8 @@ let package = Package(
             dependencies: [
                 .product(name: "SwiftCardanoCore", package: "swift-cardano-core"),
                 // SwiftCardanoUtils is a macOS/Linux CLI toolkit (subprocess). Only the CardanoCLI
-                // & NodeSocket backends need it — pulled only when CLIBackends is enabled. The
-                // Ogmios client backend uses SwiftOgmios directly (no utils).
+                // backend, and NodeSocket's CardanoConfig initializer, need it — pulled only when
+                // CLIBackends is enabled. The Ogmios client backend uses SwiftOgmios directly (no utils).
                 .product(name: "SwiftCardanoUtils", package: "swift-cardano-utils", condition: .when(traits: ["CLIBackends"])),
                 .product(name: "SwiftBlockfrostAPI", package: "swift-blockfrost-api"),
                 .product(name: "SwiftHandlesAPI", package: "swift-handles-api"),
@@ -61,6 +70,7 @@ let package = Package(
             ],
             swiftSettings: [
                 .define("CLIBACKENDS", .when(traits: ["CLIBackends"])),
+                .define("NODESOCKET", .when(platforms: nodeSocketPlatforms, traits: ["NodeSocket"])),
             ]
         ),
         .testTarget(
@@ -71,6 +81,7 @@ let package = Package(
            ],
             swiftSettings: [
                 .define("CLIBACKENDS", .when(traits: ["CLIBackends"])),
+                .define("NODESOCKET", .when(platforms: nodeSocketPlatforms, traits: ["NodeSocket"])),
             ]
         ),
     ]

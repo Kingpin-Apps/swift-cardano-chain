@@ -1,8 +1,10 @@
-#if CLIBACKENDS
+#if NODESOCKET
 import Foundation
 import SwiftCardanoCore
 import SwiftCardanoNetwork
+#if CLIBACKENDS
 import SwiftCardanoUtils
+#endif
 import SystemPackage
 
 /// A chain context implementation that talks to a local `cardano-node` over its
@@ -190,6 +192,7 @@ public actor NodeSocketChainContext: ChainContext {
         self._networkConfig = config
     }
 
+#if CLIBACKENDS
     /// Builds a `NodeSocketChainContext` from a `CardanoConfig`, pulling the socket path
     /// and network off it.
     ///
@@ -217,6 +220,7 @@ public actor NodeSocketChainContext: ChainContext {
         self._network = cardanoConfig.network
         self._networkConfig = merged
     }
+#endif
 
     // MARK: - ChainContext: Chain tip
 

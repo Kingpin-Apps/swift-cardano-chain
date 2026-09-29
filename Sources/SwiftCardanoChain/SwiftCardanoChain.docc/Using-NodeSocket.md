@@ -24,11 +24,20 @@ automatically — even if the query throws. No explicit `close()` call is needed
 - The socket path (e.g. `/ipc/node.socket` inside a Docker container, or
   `~/.local/share/Daedalus/mainnet/cardano-node.socket` on desktop).
 
-Add the package to your `Package.swift`:
+Add the package to your `Package.swift` with the `NodeSocket` trait:
 
 ```swift
-.package(url: "https://github.com/Kingpin-Apps/swift-cardano-chain.git", from: "0.3.0")
+.package(
+    url: "https://github.com/Kingpin-Apps/swift-cardano-chain.git",
+    from: "0.12.0",
+    traits: [.defaults, "NodeSocket"]
+)
 ```
+
+`NodeSocket` builds the backend on macOS and Linux and leaves it out on iOS, tvOS, watchOS and
+visionOS, so an app for several platforms can enable it. It does not bring in
+`SwiftCardanoUtils`. The `CLIBackends` trait enables it too, and adds
+`init(cardanoConfig:networkConfig:)`, which reads the socket and network from a `CardanoConfig`.
 
 ## Creating a Context
 
