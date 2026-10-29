@@ -1,3 +1,13 @@
+## 0.13.0 (2026-10-28)
+
+### Feat
+
+- **governance**: list open governance actions without their votes
+
+### Fix
+
+- **koios**: read the current epoch from the tip
+
 ## 0.12.0 (2026-09-28)
 
 ### Feat
