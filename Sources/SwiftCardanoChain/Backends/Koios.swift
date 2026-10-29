@@ -112,7 +112,13 @@ public actor KoiosChainContext: ChainContext {
 
     private func fetchEpochInfoFromAPI() async throws -> Components.Schemas.EpochInfoPayload {
         do {
-            let response = try await api.client.epochInfo()
+            // Unfiltered, `epoch_info` returns every epoch in no set order, so
+            // its first row is not the current one: ask for the tip's epoch.
+            let tipEpoch = try await api.client.tip().ok.body.json.first?.epochNo?.value
+            guard let epochNo = (tipEpoch as? Int) ?? (tipEpoch as? Double).map({ Int($0) }) else {
+                throw CardanoChainError.koiosError("The tip has no epoch")
+            }
+            let response = try await api.client.epochInfo(.init(query: .init(_epochNo: String(epochNo))))
             guard let info = try response.ok.body.json.first else {
                 throw CardanoChainError.koiosError("Empty epoch info response")
             }
@@ -274,14 +280,7 @@ public actor KoiosChainContext: ChainContext {
         )
 
         // Initialize epoch info
-        do {
-            let response = try await api.client.epochInfo()
-            self.epochInfo = try response.ok.body.json.first
-        } catch {
-            throw
-                CardanoChainError
-                .koiosError("Failed to get epoch info: \(error)")
-        }
+        self.epochInfo = try await fetchEpochInfoFromAPI()
     }
 
     // MARK: - Public Methods
