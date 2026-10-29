@@ -162,6 +162,15 @@ public protocol ChainContext: Sendable, CustomStringConvertible, CustomDebugStri
     /// - Returns: One `GovActionVotes` per active proposal.
     func govActionsAll() async throws -> [GovActionVotes]
 
+    /// The governance actions that can still be voted on this epoch: not
+    /// ratified, enacted, dropped or expired, and not past their expiry.
+    /// Lighter than ``govActionsAll()``: no votes are fetched, so backends
+    /// that list proposals over HTTP do not make a request per proposal for
+    /// them.
+    /// - Returns: One `OpenGovAction` per open proposal, newest first where
+    ///   the backend orders them.
+    func openGovActions() async throws -> [OpenGovAction]
+
     /// Effective stake delegated to each DRep this epoch.
     /// Maps to `cardano-cli query drep-stake-distribution --all-dreps`.
     /// - Returns: One `DRepStakeEntry` (from SwiftCardanoNetwork) per DRep.
@@ -350,6 +359,24 @@ public extension ChainContext {
 
     func govActionsAll() async throws -> [GovActionVotes] {
         throw CardanoChainError.notImplemented("govActionsAll() is not implemented for \(Self.self).")
+    }
+
+    /// Filters ``govActionsAll()``: right for backends that read the ledger's
+    /// governance state in one query (a node, Ogmios, cardano-cli), where
+    /// listing every action costs no more than listing the open ones.
+    func openGovActions() async throws -> [OpenGovAction] {
+        let epoch = UInt64(max(try await self.epoch(), 0))
+        return try await govActionsAll().compactMap { action in
+            guard action.status == nil, OpenGovAction.isOpen(expiresAfter: action.expiresAfter, in: epoch) else { return nil }
+            return OpenGovAction(
+                govActionId: action.govActionId,
+                type: OpenGovAction.code(of: action.govAction),
+                deposit: action.deposit,
+                anchor: action.anchor,
+                proposedIn: action.proposedIn,
+                expiresAfter: action.expiresAfter
+            )
+        }
     }
 
     func drepStakeDistribution() async throws -> [SwiftCardanoNetwork.DRepStakeEntry] {

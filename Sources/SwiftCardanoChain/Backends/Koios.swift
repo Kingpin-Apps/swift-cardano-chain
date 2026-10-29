@@ -1369,6 +1369,60 @@ public actor KoiosChainContext: ChainContext {
         return results
     }
 
+    /// Lists the open governance actions without their votes, in one
+    /// `proposal_list` request that selects only the columns needed (not the
+    /// descriptions or anchor JSON) and is filtered here.
+    public func openGovActions() async throws -> [OpenGovAction] {
+        let epoch = UInt64(max(try await self.epoch(), 0))
+        let response = try await api.client.proposalList(
+            Operations.ProposalList.Input(
+                query: .init(select: [
+                    "proposal_tx_hash", "proposal_index", "proposal_type", "deposit", "proposed_epoch",
+                    "ratified_epoch", "enacted_epoch", "dropped_epoch", "expired_epoch", "expiration",
+                    "meta_url", "meta_hash",
+                ])
+            )
+        )
+        do {
+            return try response.ok.body.json.compactMap { proposal in
+                guard let txHash = proposal.proposalTxHash?.value as? String else { return nil }
+                let concluded = proposal.ratifiedEpoch != nil || proposal.enactedEpoch != nil
+                    || proposal.droppedEpoch != nil || proposal.expiredEpoch != nil
+                let expiresAfter = proposal.expiration.map { UInt64(max($0, 0)) }
+                guard !concluded, OpenGovAction.isOpen(expiresAfter: expiresAfter, in: epoch) else { return nil }
+                let type: GovActionCode = switch proposal.proposalType {
+                case .parameterChange?: .parameterChangeAction
+                case .hardForkInitiation?: .hardForkInitiationAction
+                case .treasuryWithdrawals?: .treasuryWithdrawalsAction
+                case .noConfidence?: .noConfidence
+                case .newCommittee?: .updateCommittee
+                case .newConstitution?: .newConstitution
+                default: .infoAction
+                }
+                let anchor: SwiftCardanoCore.Anchor? = {
+                    guard let urlStr = proposal.metaUrl?.value as? String,
+                          let hashStr = proposal.metaHash?.value as? String,
+                          let url = try? Url(urlStr)
+                    else { return nil }
+                    return SwiftCardanoCore.Anchor(anchorUrl: url, anchorDataHash: AnchorDataHash(payload: Data(hex: hashStr)))
+                }()
+                return OpenGovAction(
+                    govActionId: GovActionID(
+                        transactionID: TransactionId(payload: Data(hex: txHash)),
+                        govActionIndex: UInt16(proposal.proposalIndex.map(Int.init) ?? 0)
+                    ),
+                    type: type,
+                    deposit: GovernanceParsing.parseLovelace(proposal.deposit?.value).map { Coin($0) },
+                    anchor: anchor,
+                    proposedIn: proposal.proposedEpoch.map { UInt64(max($0, 0)) },
+                    expiresAfter: expiresAfter
+                )
+            }
+        } catch {
+            throw CardanoChainError.koiosError("Failed to list open proposals: \(error)")
+        }
+    }
+
     /// Shared mapping logic: given an already-fetched Koios proposal row, fetch its votes
     /// and assemble a `GovActionVotes`. Reused by both `govActionVotes(govActionID:)` and
     /// `govActionsAll()` to avoid the N+1 of refetching `proposalList()` per action.

@@ -977,6 +977,20 @@ struct YaciDevkitChainContextTests {
         #expect(votes.anchor?.anchorUrl.absoluteString == "https://example.com")
     }
 
+    @Test("openGovActions lists the proposals not past their expiry, without their votes")
+    func testOpenGovActions() async throws {
+        let context = try makeContext()
+        let epoch = UInt64(YaciMockData.currentEpoch)
+        let all = try await context.govActionsAll()
+        let open = try await context.openGovActions()
+
+        let expected = all.filter { ($0.expiresAfter ?? .max) >= epoch }.map(\.govActionId.transactionID.payload.toHex)
+        #expect(Set(open.map(\.govActionId.transactionID.payload.toHex)) == Set(expected))
+        #expect(open.allSatisfy { ($0.expiresAfter ?? .max) >= epoch })
+        #expect(open.first { $0.govActionId.transactionID.payload.toHex == YaciMockData.infoProposalTxHash }?.type
+            == (expected.contains(YaciMockData.infoProposalTxHash) ? .infoAction : nil))
+    }
+
     @Test("Test govActionsAll returns every indexed proposal")
     func testGovActionsAll() async throws {
         let context = try makeContext()

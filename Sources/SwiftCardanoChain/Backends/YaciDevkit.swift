@@ -1682,6 +1682,37 @@ public actor YaciDevkitChainContext: ChainContext {
         return results
     }
 
+    /// Lists the governance actions not yet past their expiry, without
+    /// their votes.
+    ///
+    /// As with ``govActionInfo(govActionID:)``, Yaci keeps no governance
+    /// state: an action ratified, enacted or dropped before its expiry is
+    /// still listed, and the expiry is the proposal's epoch plus the current
+    /// `govActionLifetime`.
+    public func openGovActions() async throws -> [OpenGovAction] {
+        let epoch = UInt64(max(try await self.epoch(), 0))
+        let lifetime = try await govActionLifetime()
+        let proposals = try await paginate("get the governance proposal list") { page, count in
+            try await api.client.getGovActionProposalList(
+                query: .init(page: page, count: count, order: .desc)
+            ).ok.body.json
+        }
+        return proposals.compactMap { proposal in
+            guard let id = Self.govActionID(of: proposal) else { return nil }
+            let proposedIn = proposal.epoch.map { UInt64($0) }
+            let expiresAfter = Self.expiresAfter(proposedIn: proposedIn, lifetime: lifetime)
+            guard OpenGovAction.isOpen(expiresAfter: expiresAfter, in: epoch) else { return nil }
+            return OpenGovAction(
+                govActionId: id,
+                type: OpenGovAction.code(of: Self.govAction(from: proposal, id: id)),
+                deposit: Coin(UInt64(max(0, proposal.deposit ?? 0))),
+                anchor: Self.anchor(url: proposal.anchorUrl, hash: proposal.anchorHash),
+                proposedIn: proposedIn,
+                expiresAfter: expiresAfter
+            )
+        }
+    }
+
     private func govActionVotes(
         proposal: Components.Schemas.GovActionProposal,
         id: GovActionID,

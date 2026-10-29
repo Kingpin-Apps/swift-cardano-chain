@@ -1516,6 +1516,77 @@ public actor BlockFrostChainContext: ChainContext {
         return results
     }
 
+    /// Lists the open governance actions without their votes.
+    ///
+    /// Blockfrost's proposal list carries no status, so each proposal's
+    /// detail is fetched to tell whether it is open. The list is read newest
+    /// first and the scan stops at the first proposal past its expiry: every
+    /// older one has expired too, since an action's expiry is the epoch it
+    /// was proposed in plus the governance action lifetime. That costs one
+    /// request per open action, plus the list and the epoch, instead of
+    /// three per proposal ever made.
+    public func openGovActions() async throws -> [OpenGovAction] {
+        let epoch = UInt64(max(try await self.epoch(), 0))
+        let pageSize = 100
+        var open: [OpenGovAction] = []
+        var page = 1
+        scan: while true {
+            let response = try await api.client.getGovernanceProposals(
+                Operations.GetGovernanceProposals.Input(query: .init(count: pageSize, page: page, order: .desc))
+            )
+            let proposals = try response.ok.body.json
+            // A few at a time: enough to be quick, few enough for the rate limit.
+            for start in stride(from: 0, to: proposals.count, by: 5) {
+                let batch = Array(proposals[start..<min(start + 5, proposals.count)])
+                let details = try await withThrowingTaskGroup(of: (Int, Components.Schemas.Proposal).self) { group in
+                    for (position, proposal) in batch.enumerated() {
+                        group.addTask {
+                            let detail = try await self.api.client.getGovernanceProposalsTxHashCertIndex(
+                                .init(path: .init(txHash: proposal.txHash, certIndex: proposal.certIndex))
+                            )
+                            return (position, try detail.ok.body.json)
+                        }
+                    }
+                    var found: [(Int, Components.Schemas.Proposal)] = []
+                    for try await result in group { found.append(result) }
+                    return found.sorted { $0.0 < $1.0 }.map(\.1)
+                }
+                for detail in details {
+                    let expiresAfter = UInt64(max(detail.expiration, 0))
+                    guard OpenGovAction.isOpen(expiresAfter: expiresAfter, in: epoch) else { break scan }
+                    let concluded = detail.ratifiedEpoch != nil || detail.enactedEpoch != nil
+                        || detail.droppedEpoch != nil || detail.expiredEpoch != nil
+                    guard !concluded else { continue }
+                    open.append(OpenGovAction(
+                        govActionId: GovActionID(
+                            transactionID: TransactionId(payload: Data(hex: detail.txHash)),
+                            govActionIndex: UInt16(detail.certIndex)
+                        ),
+                        type: Self.govActionCode(detail.governanceType),
+                        deposit: Coin(UInt64(detail.deposit) ?? 0),
+                        expiresAfter: expiresAfter
+                    ))
+                }
+            }
+            guard proposals.count == pageSize else { break }
+            page += 1
+        }
+        return open
+    }
+
+    private static func govActionCode(_ type: Components.Schemas.Proposal.GovernanceTypePayload) -> GovActionCode {
+        switch type {
+        case .parameterChange: .parameterChangeAction
+        case .hardForkInitiation: .hardForkInitiationAction
+        case .treasuryWithdrawals: .treasuryWithdrawalsAction
+        case .noConfidence: .noConfidence
+        case .newCommittee: .updateCommittee
+        case .newConstitution: .newConstitution
+        case .infoAction: .infoAction
+        @unknown default: .infoAction
+        }
+    }
+
     public func committeeState() async throws -> CommitteeStateInfo {
         let response = try await api.client.getGovernanceCommittee()
         let committee = try response.ok.body.json

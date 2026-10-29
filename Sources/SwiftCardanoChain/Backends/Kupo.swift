@@ -216,6 +216,10 @@ public struct KupoChainContext: ChainContext {
         try await forward("govActionsAll()").govActionsAll()
     }
 
+    public func openGovActions() async throws -> [OpenGovAction] {
+        try await forward("openGovActions()").openGovActions()
+    }
+
     public func drepStakeDistribution() async throws -> [SwiftCardanoNetwork.DRepStakeEntry] {
         try await forward("drepStakeDistribution()").drepStakeDistribution()
     }
