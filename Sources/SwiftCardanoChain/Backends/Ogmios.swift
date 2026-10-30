@@ -1419,14 +1419,130 @@ public actor OgmiosChainContext: ChainContext {
 
     // MARK: - Helpers
 
+    /// The parameters a proposal changes; a field Ogmios leaves out is unchanged.
+    ///
+    /// A field a Conway update cannot carry (extra entropy, the minimum UTxO
+    /// constant, the reference-scripts size limit) throws rather than being
+    /// dropped from the update.
+    static func proposedUpdate(_ p: ProposedProtocolParameters) throws -> ProtocolParamUpdate {
+        func what(_ field: String) -> String { "Ogmios proposed \(field)" }
+        func ratio(_ r: SwiftOgmios.Ratio?, _ field: String) throws -> UnitInterval? {
+            try r.map { try LedgerValues.unitInterval(text: $0.value, what(field)) }
+        }
+        func nni(_ r: SwiftOgmios.Ratio?, _ field: String) throws -> NonNegativeInterval? {
+            try r.map { try LedgerValues.nonNegativeInterval(text: $0.value, what(field)) }
+        }
+        func coin(_ v: ValueAdaOnly?, _ field: String) throws -> Coin? {
+            try v.map { try $0.ada.lovelace.checked(what(field)) }
+        }
+        func int<T: FixedWidthInteger, S: BinaryInteger>(_ v: S?, _ field: String) throws -> T? {
+            try v.map { try LedgerValues.integer($0, as: T.self, what(field)) }
+        }
+        func required(_ r: SwiftOgmios.Ratio, _ field: String) throws -> UnitInterval {
+            try LedgerValues.unitInterval(text: r.value, what(field))
+        }
+
+        if p.extraEntropy != nil { throw CardanoChainError.notImplemented("\(what("extraEntropy")) is not a Conway parameter") }
+        if p.minUtxoDepositConstant != nil {
+            throw CardanoChainError.notImplemented("\(what("minUtxoDepositConstant")) is not a Conway parameter")
+        }
+        if p.maxReferenceScriptsSize != nil {
+            throw CardanoChainError.notImplemented("\(what("maxReferenceScriptsSize")) is not an updatable parameter")
+        }
+
+        var u = ProtocolParamUpdate()
+        u.minFeeA = try int(p.minFeeCoefficient, "minFeeCoefficient")
+        u.minFeeB = try coin(p.minFeeConstant, "minFeeConstant")
+        u.minFeeRefScriptCoinsPerByte = try p.minFeeReferenceScripts.map {
+            try LedgerValues.nonNegativeInterval($0.base, what("minFeeReferenceScripts.base"))
+        }
+        u.adaPerUtxoByte = try int(p.minUtxoDepositCoefficient, "minUtxoDepositCoefficient")
+        u.maxBlockBodySize = try int(p.maxBlockBodySize?.bytes, "maxBlockBodySize")
+        u.maxBlockHeaderSize = try int(p.maxBlockHeaderSize?.bytes, "maxBlockHeaderSize")
+        u.maxTransactionSize = try int(p.maxTransactionSize?.bytes, "maxTransactionSize")
+        u.maxValueSize = try int(p.maxValueSize?.bytes, "maxValueSize")
+        u.keyDeposit = try coin(p.stakeCredentialDeposit, "stakeCredentialDeposit")
+        u.poolDeposit = try coin(p.stakePoolDeposit, "stakePoolDeposit")
+        u.maximumEpoch = try int(p.stakePoolRetirementEpochBound, "stakePoolRetirementEpochBound")
+        u.poolPledgeInfluence = try nni(p.stakePoolPledgeInfluence, "stakePoolPledgeInfluence")
+        u.minPoolCost = try coin(p.minStakePoolCost, "minStakePoolCost")
+        u.nOpt = try int(p.desiredNumberOfStakePools, "desiredNumberOfStakePools")
+        u.decentralizationConstant = try ratio(p.federatedBlockProductionRatio, "federatedBlockProductionRatio")
+        u.expansionRate = try ratio(p.monetaryExpansion, "monetaryExpansion")
+        u.treasuryGrowthRate = try ratio(p.treasuryExpansion, "treasuryExpansion")
+        u.collateralPercentage = try int(p.collateralPercentage, "collateralPercentage")
+        u.maxCollateralInputs = try int(p.maxCollateralInputs, "maxCollateralInputs")
+        if let models = p.plutusCostModels {
+            var byLanguage: [Int: [Int64]] = [:]
+            for (language, values) in models.costModels {
+                let id: Int
+                switch language {
+                case "plutus:v1": id = 0
+                case "plutus:v2": id = 1
+                case "plutus:v3": id = 2
+                default:
+                    throw CardanoChainError.valueError("\(what("plutusCostModels")): unknown language \(language)")
+                }
+                guard !values.isEmpty else {
+                    throw CardanoChainError.valueError("\(what("plutusCostModels")) \(language) is empty")
+                }
+                byLanguage[id] = values.map(Int64.init)
+            }
+            u.costModels = try CostModels(byLanguage)
+        }
+        u.executionCosts = try p.scriptExecutionPrices.map {
+            ExUnitPrices(
+                memPrice: try LedgerValues.nonNegativeInterval(text: $0.memory.value, what("scriptExecutionPrices.memory")),
+                stepPrice: try LedgerValues.nonNegativeInterval(text: $0.cpu.value, what("scriptExecutionPrices.cpu")))
+        }
+        u.maxTxExUnits = p.maxExecutionUnitsPerTransaction.map { ExUnits(mem: $0.memory, steps: $0.cpu) }
+        u.maxBlockExUnits = p.maxExecutionUnitsPerBlock.map { ExUnits(mem: $0.memory, steps: $0.cpu) }
+        u.poolVotingThresholds = try p.stakePoolVotingThresholds.map { t in
+            PoolVotingThresholds(
+                motionNoConfidence: try required(t.noConfidence, "stakePoolVotingThresholds.noConfidence"),
+                committeeNormal: try required(
+                    t.constitutionalCommittee.default, "stakePoolVotingThresholds.constitutionalCommittee.default"),
+                committeeNoConfidence: try required(
+                    t.constitutionalCommittee.stateOfNoConfidence,
+                    "stakePoolVotingThresholds.constitutionalCommittee.stateOfNoConfidence"),
+                hardForkInitiation: try required(t.hardForkInitiation, "stakePoolVotingThresholds.hardForkInitiation"),
+                ppSecurityGroup: try required(
+                    t.protocolParametersUpdate.security, "stakePoolVotingThresholds.protocolParametersUpdate.security"))
+        }
+        u.drepVotingThresholds = try p.delegateRepresentativeVotingThresholds.map { t in
+            // CDDL order.
+            try DrepVotingThresholds(thresholds: [
+                required(t.noConfidence, "dRepVotingThresholds.noConfidence"),
+                required(t.constitutionalCommittee.default, "dRepVotingThresholds.constitutionalCommittee.default"),
+                required(
+                    t.constitutionalCommittee.stateOfNoConfidence,
+                    "dRepVotingThresholds.constitutionalCommittee.stateOfNoConfidence"),
+                required(t.constitution, "dRepVotingThresholds.constitution"),
+                required(t.hardForkInitiation, "dRepVotingThresholds.hardForkInitiation"),
+                required(t.protocolParametersUpdate.network, "dRepVotingThresholds.protocolParametersUpdate.network"),
+                required(t.protocolParametersUpdate.economic, "dRepVotingThresholds.protocolParametersUpdate.economic"),
+                required(t.protocolParametersUpdate.technical, "dRepVotingThresholds.protocolParametersUpdate.technical"),
+                required(t.protocolParametersUpdate.governance, "dRepVotingThresholds.protocolParametersUpdate.governance"),
+                required(t.treasuryWithdrawals, "dRepVotingThresholds.treasuryWithdrawals"),
+            ])
+        }
+        u.minCommitteeSize = try int(p.constitutionalCommitteeMinSize, "constitutionalCommitteeMinSize")
+        u.committeeTermLimit = try int(p.constitutionalCommitteeMaxTermLength, "constitutionalCommitteeMaxTermLength")
+        u.governanceActionValidityPeriod = try int(p.governanceActionLifetime, "governanceActionLifetime")
+        u.governanceActionDeposit = try coin(p.governanceActionDeposit, "governanceActionDeposit")
+        u.drepDeposit = try coin(p.delegateRepresentativeDeposit, "delegateRepresentativeDeposit")
+        u.drepInactivityPeriod = try int(p.delegateRepresentativeMaxIdleTime, "delegateRepresentativeMaxIdleTime")
+        u.protocolVersion = try p.version.map {
+            ProtocolVersion(major: try LedgerValues.integer($0.major, as: Int.self, what("version.major")),
+                            minor: try LedgerValues.integer($0.minor, as: Int.self, what("version.minor")))
+        }
+        return u
+    }
+
     /// Map an Ogmios `GovernanceAction` into the SwiftCardanoCore `GovAction`
-    /// shape. Pulls real data from Ogmios's typed payload — no fabricated
-    /// thresholds, anchor URLs, or empty maps standing in for unparsed
-    /// content. The only exception is `protocolParametersUpdate`, whose
-    /// per-field mapping (`ProposedProtocolParameters` → `ProtocolParamUpdate`,
-    /// ~30 optional fields) is not yet implemented; that branch returns the
-    /// correct variant tag with an explicitly empty `ProtocolParamUpdate`
-    /// and a `nil`-guarded sentinel.
+    /// as the ledger holds it: each action's `id` is its `ancestor` (or `nil`),
+    /// guardrails become the policy or constitution script hash, and nothing is
+    /// filled in that Ogmios did not report.
     private static func mapOgmiosGovernanceAction(
         _ action: SwiftOgmios.GovernanceAction
     ) throws -> GovAction {
@@ -1447,13 +1563,9 @@ public actor OgmiosChainContext: ChainContext {
         }
         switch action {
         case .protocolParametersUpdate(let update):
-            // TODO: map ProposedProtocolParameters → ProtocolParamUpdate.
-            // Until that lands, the variant tag is correct but the payload
-            // is intentionally empty — callers must not read the inner
-            // ProtocolParamUpdate fields as authoritative.
             return .parameterChangeAction(LedgerGovActionJSON.parameterChange(
                 prev: try previous(update.ancestor),
-                update: ProtocolParamUpdate(),
+                update: try proposedUpdate(update.parameters),
                 policyHash: try guardrails(update.guardrails)
             ))
 

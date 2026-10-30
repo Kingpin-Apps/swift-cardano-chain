@@ -278,6 +278,47 @@ struct GovActionPreviousIDTests {
         }
     }
 
+    @Test("Ogmios reads a proposed parameter update instead of an empty one")
+    func ogmiosParameterUpdate() async throws {
+        let action = try await ogmios("""
+            {"type": "protocolParametersUpdate", \(Self.ogmiosAncestor(true))
+             "parameters": {"minFeeCoefficient": 44, "maxTransactionSize": {"bytes": 16384},
+               "plutusCostModels": {"plutus:v2": [1, 2, 3]},
+               "scriptExecutionPrices": {"memory": "577/10000", "cpu": "721/10000000"},
+               "maxExecutionUnitsPerTransaction": {"memory": 14000000, "cpu": 10000000000},
+               "governanceActionDeposit": {"ada": {"lovelace": 100000000000}},
+               "treasuryExpansion": "1/5"},
+             "guardrails": {"hash": "\(Self.guardrails)"}}
+            """)
+        guard case .parameterChangeAction(let change) = action else {
+            Issue.record("Expected a parameter change, got \(action)")
+            return
+        }
+        let u = change.protocolParamUpdate
+        #expect(change.id == Self.previousID)
+        #expect(change.policyHash?.payload.toHex == Self.guardrails)
+        #expect(u.minFeeA == 44 && u.maxTransactionSize == 16384)
+        #expect(u.costModels?.plutusV2.map { Array($0.values.prefix(3)) } == [1, 2, 3])
+        #expect(u.executionCosts?.stepPrice.denominator == 10_000_000)
+        #expect(u.maxTxExUnits?.steps == 10_000_000_000)
+        #expect(u.governanceActionDeposit == 100_000_000_000)
+        #expect(u.treasuryGrowthRate?.numerator == 1 && u.treasuryGrowthRate?.denominator == 5)
+        #expect(u.maxBlockBodySize == nil && u.drepVotingThresholds == nil)
+    }
+
+    static let unsupportedOgmiosUpdates: [String] = [
+        #"{"extraEntropy": "neutral"}"#,
+        #"{"minUtxoDepositConstant": {"ada": {"lovelace": 1}}}"#,
+        #"{"plutusCostModels": {"plutus:v9": [1]}}"#,
+    ]
+
+    @Test("An Ogmios update carrying a non-Conway or unknown field throws", arguments: unsupportedOgmiosUpdates)
+    func ogmiosUnsupportedUpdate(_ parameters: String) async throws {
+        await #expect(throws: (any Error).self) {
+            _ = try await self.ogmios(#"{"type": "protocolParametersUpdate", "parameters": \#(parameters)}"#)
+        }
+    }
+
     // MARK: Yaci
 
     private func yaci(_ type: String, _ details: String) throws -> GovAction {
