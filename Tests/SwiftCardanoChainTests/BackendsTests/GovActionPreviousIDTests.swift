@@ -248,6 +248,36 @@ struct GovActionPreviousIDTests {
         await #expect(throws: CardanoChainError.self) { _ = try await self.ogmios(action) }
     }
 
+    static let guardrails = "fa24fb305126805cf2164c161d852a0e7330cf988f1fe558cf7d4a64"
+
+    @Test("Ogmios reads a constitution's and a treasury withdrawal's guardrails script")
+    func ogmiosGuardrails() async throws {
+        guard case .newConstitution(let constitution) = try await ogmios("""
+            {"type": "constitution", "metadata": {"url": "ipfs://c", "hash": "\(String(repeating: "cd", count: 32))"},
+             "guardrails": {"hash": "\(Self.guardrails)"}}
+            """)
+        else { Issue.record("Expected a new constitution"); return }
+        #expect(constitution.constitution.scriptHash?.payload.toHex == Self.guardrails)
+        #expect(constitution.id == nil)
+
+        guard case .treasuryWithdrawalsAction(let treasury) = try await ogmios("""
+            {"type": "treasuryWithdrawals",
+             "withdrawals": {"stake_test1upyz3gk6mw5he20apnwfn96cn9rscgvmmsxc9r86dh0k66gswf59n": {"ada": {"lovelace": 7}}},
+             "guardrails": {"hash": "\(Self.guardrails)"}}
+            """)
+        else { Issue.record("Expected a treasury withdrawal"); return }
+        #expect(treasury.policyHash?.payload.toHex == Self.guardrails)
+        #expect(treasury.withdrawals.values.first == 7)
+    }
+
+    @Test("An Ogmios treasury transfer throws instead of reading as an info action")
+    func ogmiosTreasuryTransfer() async throws {
+        await #expect(throws: CardanoChainError.self) {
+            _ = try await self.ogmios(
+                #"{"type": "treasuryTransfer", "source": "reserves", "target": "treasury", "value": {"ada": {"lovelace": 1}}}"#)
+        }
+    }
+
     // MARK: Yaci
 
     private func yaci(_ type: String, _ details: String) throws -> GovAction {

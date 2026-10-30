@@ -1439,6 +1439,12 @@ public actor OgmiosChainContext: ChainContext {
                     govActionIndex: try $0.index.checked("Ogmios ancestor index"))
             }
         }
+        /// An action's `guardrails`: the constitution's guardrails script hash, or `nil`.
+        func guardrails(_ guardrails: Guardrails?) throws -> ScriptHash? {
+            try guardrails.map {
+                try LedgerValues.hash(hex: $0.hash.value, as: ScriptHash.self, "Ogmios guardrails script hash")
+            }
+        }
         switch action {
         case .protocolParametersUpdate(let update):
             // TODO: map ProposedProtocolParameters → ProtocolParamUpdate.
@@ -1448,7 +1454,7 @@ public actor OgmiosChainContext: ChainContext {
             return .parameterChangeAction(LedgerGovActionJSON.parameterChange(
                 prev: try previous(update.ancestor),
                 update: ProtocolParamUpdate(),
-                policyHash: nil
+                policyHash: try guardrails(update.guardrails)
             ))
 
         case .hardForkInitiation(let hf):
@@ -1461,10 +1467,10 @@ public actor OgmiosChainContext: ChainContext {
             ))
 
         case .treasuryTransfer:
-            // SwiftCardanoCore's GovAction has no treasuryTransfer variant —
-            // surface as InfoAction rather than misrepresenting it as a
-            // TreasuryWithdrawals with empty withdrawals.
-            return .infoAction(InfoAction())
+            // A pre-Conway transfer between the reserves and the treasury, which
+            // Conway has no governance action for. Reporting it as any Conway
+            // action would misrepresent it.
+            throw CardanoChainError.notImplemented("Ogmios reported a treasury transfer, which is not a Conway governance action")
 
         case .treasuryWithdrawals(let tw):
             var withdrawals: [SwiftCardanoCore.RewardAccount: Coin] = [:]
@@ -1475,7 +1481,7 @@ public actor OgmiosChainContext: ChainContext {
             }
             return .treasuryWithdrawalsAction(TreasuryWithdrawalsAction(
                 withdrawals: withdrawals,
-                policyHash: nil
+                policyHash: try guardrails(tw.guardrails)
             ))
 
         case .constitutionalCommittee(let cc):
@@ -1514,7 +1520,7 @@ public actor OgmiosChainContext: ChainContext {
                 url: c.metadata.url.absoluteString, hash: c.metadata.hash, "Ogmios constitution anchor")
             return .newConstitution(NewConstitution(
                 id: try previous(c.ancestor),
-                constitution: Constitution(anchor: anchor, scriptHash: nil)
+                constitution: Constitution(anchor: anchor, scriptHash: try guardrails(c.guardrails))
             ))
 
         case .noConfidence(let nc):
