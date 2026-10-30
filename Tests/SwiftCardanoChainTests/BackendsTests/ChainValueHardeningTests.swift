@@ -394,7 +394,7 @@ struct ChainValueHardeningTests {
             try LedgerValues.anchor(url: url, hash: Self.anchorHash, "anchor")
         }
         #expect(throws: CardanoChainError.self) {
-            try LedgerValues.anchor(json: ["url": url, "dataHash": Self.anchorHash], "anchor")
+            try LedgerValues.anchor(json: ["url": .string(url), "dataHash": .string(Self.anchorHash)], "anchor")
         }
         #expect(throws: CardanoChainError.self) {
             try YaciDevkitChainContext.anchor(url: url, hash: Self.anchorHash)

@@ -70,21 +70,21 @@ struct LedgerValuesHexTests {
 
     @Test("A credential that is malformed or the wrong length throws", arguments: badCredentials)
     func badCredential(_ text: String) {
-        #expect(throws: CardanoChainError.self) { try LedgerValues.credential(json: text, "credential") }
+        #expect(throws: CardanoChainError.self) { try LedgerValues.credential(json: ChainJSON.string(text), "credential") }
     }
 
     @Test("A reward account is read with its network and credential kind")
     func rewardAccount() throws {
         let hash = String(repeating: "11", count: 28)
         let testnetKey = try LedgerValues.rewardAccount(
-            json: ["network": "Testnet", "credential": ["keyHash": hash]], "account")
+            json: ["network": "Testnet", "credential": ["keyHash": .string(hash)]], "account")
         #expect(testnetKey.first == 0xE0)
         let mainnetScript = try LedgerValues.rewardAccount(
-            json: ["network": "Mainnet", "credential": ["scriptHash": hash]], "account")
+            json: ["network": "Mainnet", "credential": ["scriptHash": .string(hash)]], "account")
         #expect(mainnetScript.first == 0xF1)
         #expect(mainnetScript.count == 29)
         // A bare credential has no network, and one is not guessed.
-        #expect(throws: CardanoChainError.self) { try LedgerValues.rewardAccount(json: ["keyHash": hash], "account") }
+        #expect(throws: CardanoChainError.self) { try LedgerValues.rewardAccount(json: ["keyHash": .string(hash)], "account") }
     }
 
     static let badAssetUnits: [String] = [

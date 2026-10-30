@@ -39,82 +39,6 @@ enum LedgerValues {
         return NonNegativeInterval(numerator: n, denominator: d)
     }
 
-    // MARK: Untyped JSON
-
-    /// A unit interval from a value `JSONSerialization` read: a
-    /// `{"numerator", "denominator"}` object, a decimal number, or text.
-    /// `nil` when `any` is absent or `null`.
-    static func unitInterval(json any: Any?, _ what: @autoclosure () -> String) throws -> UnitInterval? {
-        guard let (n, d) = try fraction(json: any, what()) else { return nil }
-        return try unitInterval(n, d, what())
-    }
-
-    /// A non-negative interval from a value `JSONSerialization` read.
-    static func nonNegativeInterval(json any: Any?, _ what: @autoclosure () -> String) throws -> NonNegativeInterval? {
-        guard let (n, d) = try fraction(json: any, what()) else { return nil }
-        return NonNegativeInterval(numerator: n, denominator: d)
-    }
-
-    /// An integer from a value `JSONSerialization` read: a whole number, or
-    /// integer text. `nil` when `any` is absent or `null`.
-    static func integer<T: FixedWidthInteger>(
-        json any: Any?, as type: T.Type = T.self, _ what: @autoclosure () -> String
-    ) throws -> T? {
-        guard let any, !(any is NSNull) else { return nil }
-        try rejectBoolean(any, what())
-        if let value = any as? any BinaryInteger { return try integer(value, as: T.self, what()) }
-        // Bridging an NSNumber to Int64 or UInt64 succeeds only when it holds
-        // that whole number exactly.
-        if let value = any as? Int64 { return try integer(value, as: T.self, what()) }
-        if let value = any as? UInt64 { return try integer(value, as: T.self, what()) }
-        if let text = any as? String { return try integer(text: text, as: T.self, what()) }
-        // `JSONSerialization` (cardano-cli output) may read a number as a
-        // Double; it is accepted only when it is a whole number in range.
-        if let value = any as? Double { return try integer(value, as: T.self, what()) }
-        throw CardanoChainError.valueError("\(what()): \(any) is not a whole number")
-    }
-
-    /// A token quantity from a value `JSONSerialization` read, which may
-    /// exceed `Int64.max`. `nil` when `any` is absent or `null`.
-    static func bigInt(json any: Any?, _ what: @autoclosure () -> String) throws -> BigInt? {
-        guard let any, !(any is NSNull) else { return nil }
-        try rejectBoolean(any, what())
-        if let value = any as? any BinaryInteger { return BigInt(value) }
-        if let value = any as? Int64 { return BigInt(value) }
-        if let value = any as? UInt64 { return BigInt(value) }
-        if let text = any as? String { return try bigInt(text: text, what()) }
-        if let decimal = any as? NSDecimalNumber {
-            var value = decimal.decimalValue
-            var whole = Decimal()
-            NSDecimalRound(&whole, &value, 0, .plain)
-            if whole == decimal.decimalValue, let integer = BigInt(whole.description) { return integer }
-        }
-        throw CardanoChainError.valueError("\(what()): \(any) is not a whole number")
-    }
-
-    private static func fraction(json any: Any?, _ what: String) throws -> (UInt64, UInt64)? {
-        guard let any, !(any is NSNull) else { return nil }
-        try rejectBoolean(any, what)
-        if let object = any as? [String: Any] {
-            let n: UInt64? = try integer(json: object["numerator"], "\(what) numerator")
-            let d: UInt64? = try integer(json: object["denominator"], "\(what) denominator")
-            guard let n, let d else {
-                throw CardanoChainError.valueError("\(what): \(object) is not a fraction")
-            }
-            return try reduced(BigInt(n), BigInt(d), what)
-        }
-        if let text = any as? String { return try fraction(text: text, what) }
-        if let decimal = any as? NSDecimalNumber { return try fraction(decimal: decimal.decimalValue, what) }
-        if let value = any as? any BinaryInteger { return try reduced(BigInt(value), 1, what) }
-        if let value = any as? UInt64 { return try reduced(BigInt(value), 1, what) }
-        if let value = any as? Double {
-            // `JSONSerialization` reads a decimal as a Double; its shortest
-            // description is the decimal it read.
-            return try fraction(decimalText: try decimalText(value, what), what)
-        }
-        throw CardanoChainError.valueError("\(what): \(any) is not a number")
-    }
-
     // MARK: Ledger JSON
 
     /// A unit interval from ledger JSON: a `{"numerator", "denominator"}`
@@ -249,27 +173,6 @@ enum LedgerValues {
     }
 
     // MARK: - Implementation
-
-    /// A JSON `true` or `false` arrives as an `NSNumber` that bridges to 1 or
-    /// 0, so it is refused before it can be read as a number. `objCType` tells
-    /// a boolean apart on Darwin and on swift-corelibs-foundation alike.
-    private static func rejectBoolean(_ any: Any, _ what: @autoclosure () -> String) throws {
-        // A Swift `Int8` also reports "c", so only a Foundation number counts.
-        if !(type(of: any) is any BinaryInteger.Type), let number = any as? NSNumber,
-           String(cString: number.objCType) == "c" {
-            throw CardanoChainError.valueError("\(what()): \(number.boolValue) is not a number")
-        }
-    }
-
-    /// The JSON text a `Double` was read from: its shortest description reads
-    /// back as the same `Double`, so it is the decimal the API sent, unless
-    /// the API sent more digits than a `Double` holds.
-    private static func decimalText(_ value: Double, _ what: String) throws -> String {
-        guard value.isFinite else {
-            throw CardanoChainError.valueError("\(what): \(value) is not a number")
-        }
-        return String(value)
-    }
 
     /// `"n/d"` or decimal text, reduced to fit two `UInt64`s.
     private static func fraction(text: String, _ what: String) throws -> (UInt64, UInt64) {

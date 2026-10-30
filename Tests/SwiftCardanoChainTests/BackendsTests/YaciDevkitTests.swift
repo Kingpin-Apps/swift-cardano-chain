@@ -1340,16 +1340,25 @@ struct YaciDevkitChainContextTests {
         }
     }
 
-    @Test("Test threshold parsing accepts ratios, decimals and strings")
-    func testUnitIntervalParsing() {
-        let ratio = YaciDevkitChainContext.unitInterval(["numerator": 2, "denominator": 3])
-        #expect(ratio?.numerator == 2)
-        #expect(ratio?.denominator == 3)
+    @Test("Evaluation units are read exactly from both Ogmios response shapes")
+    func testEvaluationUnits() throws {
+        let v5 = try json(#"{"result": {"EvaluationResult": {"spend:0": {"memory": 1700, "steps": 476468}}}}"#)
+        let units5 = try YaciDevkitChainContext.evaluationUnits(v5)
+        #expect(units5.count == 1)
+        #expect(units5.values.first?.mem == 1700 && units5.values.first?.steps == 476468)
 
-        #expect(YaciDevkitChainContext.unitInterval(0.5) != nil)
-        #expect(YaciDevkitChainContext.unitInterval("0.5") != nil)
-        #expect(YaciDevkitChainContext.unitInterval(2.0) == nil)
-        #expect(YaciDevkitChainContext.unitInterval(nil) == nil)
+        let v6 = try json(#"{"result": [{"validator": {"purpose": "spend", "index": 1}, "budget": {"memory": 9007199254740993, "cpu": 2}}]}"#)
+        let units6 = try YaciDevkitChainContext.evaluationUnits(v6)
+        #expect(units6.values.first?.mem == 9_007_199_254_740_993)
+
+        for bad in [
+            #"{"result": {"EvaluationResult": {"spend:0": {"memory": 1.5, "steps": 1}}}}"#,
+            #"{"result": [{"validator": {"purpose": "spend"}, "budget": {"memory": 1, "cpu": 1}}]}"#,
+            #"{"result": [{"validator": {"purpose": "spend", "index": 0}, "budget": {"memory": -1, "cpu": 1}}]}"#,
+            #"{"error": "nope"}"#,
+        ] {
+            #expect(throws: CardanoChainError.self) { try YaciDevkitChainContext.evaluationUnits(json(bad)) }
+        }
     }
 
     @Test("Test anchor construction: absent is nil, half or invalid throws")

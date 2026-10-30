@@ -138,16 +138,15 @@ struct LedgerValuesTests {
         }
     }
 
-    // MARK: Untyped JSON
+    // MARK: Ledger JSON
 
-    @Test("Values JSONSerialization reads are converted exactly")
+    @Test("Values decoded as ChainJSON are converted exactly")
     func jsonSerializationValues() throws {
         let json = #"""
             {"price": 0.0577, "steps": 7.21e-05, "quorum": {"numerator": 2, "denominator": 3},
              "text": "0.51", "percent": 150, "big": 18446744073709551615, "half": 150.5, "none": null}
             """#
-        let object = try #require(
-            try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any])
+        let object = try #require(try ChainJSON.decode(Data(json.utf8), "test").object)
 
         #expect(try LedgerValues.nonNegativeInterval(json: object["price"], "price") == NonNegativeInterval(numerator: 577, denominator: 10_000))
         #expect(try LedgerValues.nonNegativeInterval(json: object["steps"], "steps") == NonNegativeInterval(numerator: 721, denominator: 10_000_000))
@@ -173,16 +172,14 @@ struct LedgerValuesTests {
     @Test("A JSON boolean is not read as 0 or 1")
     func jsonBooleans() throws {
         let object = try #require(
-            try JSONSerialization.jsonObject(with: Data(#"{"yes": true, "no": false, "one": 1}"#.utf8))
-                as? [String: Any])
+            try ChainJSON.decode(Data(#"{"yes": true, "no": false, "one": 1}"#.utf8), "test").object)
         for key in ["yes", "no"] {
             #expect(throws: CardanoChainError.self) { try LedgerValues.integer(json: object[key], as: UInt64.self, key) }
             #expect(throws: CardanoChainError.self) { try LedgerValues.bigInt(json: object[key], key) }
             #expect(throws: CardanoChainError.self) { try LedgerValues.unitInterval(json: object[key], key) }
         }
-        // A number 1, and a Swift Int8 (whose NSNumber also reports "c"), still read.
+        // A number 1 still reads.
         #expect(try LedgerValues.integer(json: object["one"], as: UInt64.self, "one") == 1)
-        #expect(try LedgerValues.integer(json: Int8(1), as: UInt64.self, "int8") == 1)
     }
 
     // MARK: Integers

@@ -932,59 +932,55 @@ public actor YaciDevkitChainContext: ChainContext {
             )
         }
 
-        let body = Self.jsonObject(container) ?? [:]
-        let result = body["result"] as? [String: Any]
+        return try Self.evaluationUnits(Self.chainJSON(container))
+    }
 
-        var units: [String: ExecutionUnits] = [:]
-        if let evaluation = result?["EvaluationResult"] as? [String: Any] {
-            for (key, value) in evaluation {
-                guard let cost = value as? [String: Any] else { continue }
+    /// The execution units in an evaluation response: Ogmios v5's
+    /// `{"result": {"EvaluationResult": {"spend:0": {memory, steps}}}}` or v6's
+    /// `{"result": [{"validator": {purpose, index}, "budget": {memory, cpu}}]}`.
+    /// An entry that does not read throws rather than being skipped.
+    static func evaluationUnits(_ body: ChainJSON) throws -> [String: ExecutionUnits] {
+        // A budget is never negative; read as unsigned, then fit to the Int64 `ExecutionUnits` holds.
+        func amount(_ value: ChainJSON?, _ what: String) throws -> Int64 {
+            try LedgerValues.required(LedgerValues.integer(json: value, as: UInt64.self, what), what).checked(what)
+        }
+        func units(_ budget: ChainJSON?, steps: String, _ what: String) throws -> ExecutionUnits {
+            ExecutionUnits(
+                mem: try amount(budget?["memory"], "\(what) memory"),
+                steps: try amount(budget?[steps] ?? budget?["steps"], "\(what) \(steps)"))
+        }
+
+        var result: [String: ExecutionUnits] = [:]
+        if let evaluation = body["result"]?["EvaluationResult"]?.object {
+            for (key, cost) in evaluation {
                 let parts = key.split(separator: ":", maxSplits: 1).map(String.init)
-                guard parts.count == 2 else { continue }
+                guard parts.count == 2 else {
+                    throw CardanoChainError.transactionFailed("Yaci evaluation key \(key) is not purpose:index")
+                }
                 let purpose = Self.ogmiosPurposes[parts[0]] ?? parts[0]
-                units["\(purpose):\(parts[1])"] = ExecutionUnits(
-                    mem: try LedgerValues.required(
-                        LedgerValues.integer(json: cost["memory"], "Yaci evaluation \(key) memory"),
-                        "Yaci evaluation \(key) memory"),
-                    steps: try LedgerValues.required(
-                        LedgerValues.integer(json: cost["steps"], "Yaci evaluation \(key) steps"),
-                        "Yaci evaluation \(key) steps")
-                )
+                result["\(purpose):\(parts[1])"] = try units(cost, steps: "steps", "Yaci evaluation \(key)")
             }
-        } else if let list = body["result"] as? [Any] {
+        } else if let list = body["result"]?.array {
             for entry in list {
-                guard let entry = entry as? [String: Any],
-                    let validator = entry["validator"] as? [String: Any],
-                    let purposeRaw = validator["purpose"] as? String,
-                    let index = (validator["index"] as? NSNumber)?.int64Value,
-                    let budget = entry["budget"] as? [String: Any]
-                else { continue }
+                guard let validator = entry["validator"], let purposeRaw = validator["purpose"]?.string,
+                    let index: UInt64 = try LedgerValues.integer(json: validator["index"], "Yaci evaluation index")
+                else {
+                    throw CardanoChainError.transactionFailed("Yaci evaluation entry \(entry) has no validator")
+                }
                 let purpose = Self.ogmiosPurposes[purposeRaw] ?? purposeRaw
-                units["\(purpose):\(index)"] = ExecutionUnits(
-                    mem: try LedgerValues.required(
-                        LedgerValues.integer(json: budget["memory"], "Yaci evaluation memory"),
-                        "Yaci evaluation memory"),
-                    steps: try LedgerValues.required(
-                        LedgerValues.integer(json: budget["cpu"] ?? budget["steps"], "Yaci evaluation cpu"),
-                        "Yaci evaluation cpu")
-                )
+                result["\(purpose):\(index)"] = try units(entry["budget"], steps: "cpu", "Yaci evaluation")
             }
         } else {
             throw CardanoChainError.transactionFailed("Failed to evaluate transaction: \(body)")
         }
-        return units
+        return result
     }
 
-    /// Re-encode an OpenAPI JSON container as a Foundation dictionary.
-    ///
-    /// The generated container stores its values as `(any Sendable)?`, so a JSON round-trip is
-    /// both shorter and safer than casting through that representation by hand.
-    static func jsonObject(_ container: OpenAPIObjectContainer?) -> [String: Any]? {
-        guard let container,
-            let data = try? JSONEncoder().encode(container),
-            let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-        else { return nil }
-        return object
+    /// An OpenAPI JSON container as ``ChainJSON``. The generated container
+    /// already holds numbers as `Double`, so this is exact only for integers up
+    /// to 2^53 — which covers execution units.
+    static func chainJSON(_ container: OpenAPIObjectContainer) throws -> ChainJSON {
+        try ChainJSON.decode(JSONEncoder().encode(container), "Yaci response")
     }
 
     /// The body of an undocumented response, for error messages.
@@ -2311,7 +2307,7 @@ public actor YaciDevkitChainContext: ChainContext {
     /// Jackson's rendering of a credential (`Credential(type=ADDR_KEYHASH, hash=<hex>)`).
     private static func committeeColdCredential(fromKey key: String) throws -> CommitteeColdCredential {
         if key.hasPrefix("keyHash-") || key.hasPrefix("scriptHash-") {
-            return CommitteeColdCredential(credential: try LedgerValues.credential(json: key, "Yaci committee member"))
+            return CommitteeColdCredential(credential: try LedgerValues.credential(json: ChainJSON.string(key), "Yaci committee member"))
         }
         if let range = key.range(of: "hash=") {
             let hex = key[range.upperBound...].prefix { $0 != ")" && $0 != "," }
@@ -2330,11 +2326,6 @@ public actor YaciDevkitChainContext: ChainContext {
             ? CommitteeColdCredential(credential: .scriptHash(ScriptHash(payload: payload)))
             : CommitteeColdCredential(
                 credential: .verificationKeyHash(VerificationKeyHash(payload: payload)))
-    }
-
-    /// Parse a threshold that may arrive as `{numerator, denominator}`, a decimal, or a string.
-    static func unitInterval(_ any: Any?) -> UnitInterval? {
-        try? LedgerValues.unitInterval(json: any, "Yaci threshold")
     }
 
     // MARK: - Constitutional committee

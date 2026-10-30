@@ -213,15 +213,60 @@ struct CardanoCLIContextTests {
         // CBOR tag 2 (positive bignum) of 2^136: 0x01 followed by 17 zero bytes.
         let bignum = "c252" + "01" + String(repeating: "00", count: 17)
         let datum = try #require(try CardanoCliChainContext.datumOption(
-            ["inlineDatumRaw": bignum, "inlineDatum": ["int": 1.0]], "test"))
+            ["inlineDatumRaw": .string(bignum), "inlineDatum": ["int": 1]], "test"))
         guard case .data(let data) = datum.datum else {
             Issue.record("Expected Plutus data")
             return
         }
         #expect(try data.toCBORHex() == bignum)
 
-        #expect(try CardanoCliChainContext.datumOption(["inlineDatum": NSNull()], "test") == nil)
+        #expect(try CardanoCliChainContext.datumOption(["inlineDatum": nil], "test") == nil)
         #expect(try CardanoCliChainContext.datumOption([:], "test") == nil)
+    }
+
+    @Test("Stake distributions are read exactly in both shapes, and a bad stake throws")
+    func testStakeDistributionExact() throws {
+        let pairs = try CardanoCliChainContext.stakeDistribution(
+            Data(#"[["drep-alwaysAbstain", 18446744073709551615]]"#.utf8), "test")
+        #expect(pairs.first?.stake == UInt64.max)
+        let object = try CardanoCliChainContext.stakeDistribution(
+            Data(#"{"keyHash-ab": {"lovelace": 9007199254740993}}"#.utf8), "test")
+        #expect(object.first?.stake == 9_007_199_254_740_993)
+        for bad in [#"[["k", 1.5]]"#, #"[["k", null]]"#, #"[["k"]]"#, #"{"k": true}"#, #""nope""#] {
+            #expect(throws: CardanoChainError.self) {
+                try CardanoCliChainContext.stakeDistribution(Data(bad.utf8), "test")
+            }
+        }
+    }
+
+    @Test("Committee state entries read their status, hot credential and shape strictly")
+    func testCommitteeStateReading() throws {
+        let hash = String(repeating: "ab", count: 28)
+        let data = Data(#"""
+            {"committee": {"scriptHash-\#(hash)": {"expiration": 726, "status": "Active",
+              "hotCredsAuthStatus": {"tag": "MemberAuthorized", "contents": {"keyHash": "\#(hash)"}}}},
+             "threshold": 0.6666666666666666667}
+            """#.utf8)
+        let (root, committee) = try CardanoCliChainContext.committeeMembers(data)
+        let entry = try #require(committee.values.first?.object)
+        #expect(CardanoCliChainContext.committeeStatus(entry) == .active)
+        #expect(try CardanoCliChainContext.authorizedHotCredential(entry)?.credential.payload.toHex == hash)
+        // The threshold keeps every digit a Double would round away.
+        let threshold = try #require(try GovernanceParsing.parseThreshold(root["threshold"]))
+        #expect(threshold.numerator == 6_666_666_666_666_666_667 && threshold.denominator == 10_000_000_000_000_000_000)
+
+        #expect(try CardanoCliChainContext.committeeMembers(Data(#"{"committee": null}"#.utf8)).committee.isEmpty)
+        #expect(throws: CardanoChainError.self) {
+            try CardanoCliChainContext.committeeMembers(Data(#"{"committee": []}"#.utf8))
+        }
+    }
+
+    @Test("A governance action id matches only its own transaction and index")
+    func testActionIdMatches() {
+        let id: ChainJSON = ["txId": "AB", "govActionIx": 2]
+        #expect(CardanoCliChainContext.actionIdMatches(id, txHash: "ab", index: 2))
+        #expect(!CardanoCliChainContext.actionIdMatches(id, txHash: "ab", index: 3))
+        #expect(!CardanoCliChainContext.actionIdMatches(["txId": "ab", "govActionIx": 2.5], txHash: "ab", index: 2))
     }
 
     @Test("An inline datum given only as JSON throws rather than being read through Double")

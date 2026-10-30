@@ -52,13 +52,11 @@ extension LedgerValues {
 
     /// An anchor from a URL and hex data hash that a backend may leave out.
     ///
-    /// Each half is a string, or `nil`/JSON null for absent. `nil` when both
+    /// Each half is a string, or `nil` for absent. `nil` when both
     /// halves are absent or empty; an error when only one is there, when either
     /// is not a string, or when either is invalid.
-    static func optionalAnchor(url: Any?, hash: Any?, _ what: @autoclosure () -> String) throws -> Anchor? {
+    static func optionalAnchor(url: String?, hash: String?, _ what: @autoclosure () -> String) throws -> Anchor? {
         let what = what()
-        let url = try optionalString(url, "\(what) URL")
-        let hash = try optionalString(hash, "\(what) data hash")
         switch (url, hash) {
         case (nil, nil), ("", ""), ("", nil), (nil, ""):
             return nil
@@ -69,27 +67,8 @@ extension LedgerValues {
         }
     }
 
-    /// An anchor written as JSON: `{"url": …, "dataHash": …}` (also read:
+    /// An anchor written as ledger JSON `{"url": …, "dataHash": …}` (also
     /// `anchorDataHash`, and Yaci's `anchor_url`/`anchor_data_hash` spellings).
-    ///
-    /// `nil` for no value or JSON null; an error for anything that is not such
-    /// an object with both fields valid.
-    static func anchor(json any: Any?, _ what: @autoclosure () -> String) throws -> Anchor? {
-        let what = what()
-        guard let any, !(any is NSNull) else { return nil }
-        guard let object = any as? [String: Any] else {
-            throw CardanoChainError.valueError("\(what) is not an object: \(any)")
-        }
-        let url = object["url"] ?? object["anchorUrl"] ?? object["anchor_url"]
-        let hash = object["dataHash"] ?? object["anchorDataHash"] ?? object["anchor_data_hash"] ?? object["hash"]
-        return try anchor(
-            url: required(optionalString(url, "\(what) URL"), "\(what) URL"),
-            hash: required(optionalString(hash, "\(what) data hash"), "\(what) data hash"),
-            what
-        )
-    }
-
-    /// An anchor written as ledger JSON (the same spellings as the untyped reader).
     /// `nil` for no value or JSON null.
     static func anchor(json value: ChainJSON?, _ what: @autoclosure () -> String) throws -> Anchor? {
         let what = what()
@@ -170,16 +149,5 @@ extension LedgerValues {
             return try multiHostName(dnsName: srvName, "\(what) SRV name")
         }
         return .singleHostAddr(SingleHostAddr(port: port, ipv4: nil, ipv6: nil))
-    }
-
-    // MARK: Helpers
-
-    /// `any` as a string: `nil` for no value or JSON null, an error for anything else.
-    private static func optionalString(_ any: Any?, _ what: @autoclosure () -> String) throws -> String? {
-        guard let any, !(any is NSNull) else { return nil }
-        guard let string = any as? String else {
-            throw CardanoChainError.valueError("\(what()) is not a string: \(any)")
-        }
-        return string
     }
 }

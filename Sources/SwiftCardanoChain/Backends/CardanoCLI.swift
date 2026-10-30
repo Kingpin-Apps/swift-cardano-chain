@@ -313,51 +313,27 @@ public actor CardanoCliChainContext: ChainContext {
     /// - Parameter referenceScript: The reference script dictionary
     /// - Returns: A script object
     /// - Throws: CardanoChainError if the script type is not supported
-    private func getScript(from referenceScript: [String: Any]) async throws -> ScriptType {
-        guard let script = referenceScript["script"] as? [String: Any],
-            let scriptType = script["type"] as? String
-        else {
+    static func getScript(from referenceScript: ChainJSON) throws -> ScriptType {
+        guard let script = referenceScript["script"], let scriptType = script["type"]?.string else {
             throw CardanoChainError.valueError("Invalid reference script")
         }
-
-        if scriptType == "PlutusScriptV1" {
-            guard let cborHex = script["cborHex"] as? String else {
-                throw CardanoChainError.valueError("Invalid PlutusScriptV1 CBOR")
+        func cbor(_ name: String) throws -> Data {
+            guard let hex = script["cborHex"]?.string else {
+                throw CardanoChainError.valueError("Invalid \(name) CBOR")
             }
-            let cborData = try LedgerValues.hexBytes(cborHex, "cardano-cli PlutusScriptV1 cborHex")
-
-            // Create PlutusV1Script from CBOR
-            let v1script = PlutusV1Script(data: cborData)
-            return .plutusV1Script(v1script)
-        } else if scriptType == "PlutusScriptV2" {
-            guard let cborHex = script["cborHex"] as? String else {
-                throw CardanoChainError.valueError("Invalid PlutusScriptV2 CBOR")
+            return try LedgerValues.hexBytes(hex, "cardano-cli \(name) cborHex")
+        }
+        switch scriptType {
+        case "PlutusScriptV1": return .plutusV1Script(PlutusV1Script(data: try cbor("PlutusScriptV1")))
+        case "PlutusScriptV2": return .plutusV2Script(PlutusV2Script(data: try cbor("PlutusScriptV2")))
+        case "PlutusScriptV3": return .plutusV3Script(PlutusV3Script(data: try cbor("PlutusScriptV3")))
+        default:
+            // A native script in cardano-cli's JSON form.
+            do {
+                return .nativeScript(try JSONDecoder().decode(NativeScript.self, from: JSONEncoder().encode(script)))
+            } catch {
+                throw CardanoChainError.valueError("Invalid native reference script: \(error)")
             }
-            let cborData = try LedgerValues.hexBytes(cborHex, "cardano-cli PlutusScriptV2 cborHex")
-
-            // Create PlutusV2Script from CBOR
-            let v2script = PlutusV2Script(data: cborData)
-            return .plutusV2Script(v2script)
-        } else if scriptType == "PlutusScriptV3" {
-            guard let cborHex = script["cborHex"] as? String else {
-                throw CardanoChainError.valueError("Invalid PlutusScriptV3 CBOR")
-            }
-            let cborData = try LedgerValues.hexBytes(cborHex, "cardano-cli PlutusScriptV3 cborHex")
-
-            // Create PlutusV3Script from CBOR
-            let v3script = PlutusV3Script(data: cborData)
-            return .plutusV3Script(v3script)
-        } else {
-            // Create NativeScript from dictionary
-            // Convert the dictionary to JSON data
-            guard let jsonData = try? JSONSerialization.data(withJSONObject: script, options: [])
-            else {
-                throw CardanoChainError.valueError("Failed to serialize NativeScript JSON")
-            }
-
-            // Decode the JSON data to a NativeScript object
-            let nativeScript = try JSONDecoder().decode(NativeScript.self, from: jsonData)
-            return .nativeScript(nativeScript)
         }
     }
 
@@ -368,13 +344,13 @@ public actor CardanoCliChainContext: ChainContext {
     /// Plutus data). `nil` when the output has neither.
     ///
     /// The JSON `inlineDatum` is never read: a datum integer is unbounded, and
-    /// JSON numbers do not survive `JSONSerialization` (or a `Decimal`'s 38
-    /// digits) exactly. An entry with an inline datum but no CBOR for it throws.
-    static func datumOption(_ entry: [String: Any], _ what: String) throws -> DatumOption? {
-        if let datum = entry["datum"] as? String {
+    /// a JSON number (a `Decimal`'s 38 digits) does not hold it exactly. An
+    /// entry with an inline datum but no CBOR for it throws.
+    static func datumOption(_ entry: ChainJSON, _ what: String) throws -> DatumOption? {
+        if let datum = entry["datum"]?.string {
             return try DatumOption.fromCBOR(data: LedgerValues.hexBytes(datum, "\(what) datum"))
         }
-        if let raw = entry["inlineDatumRaw"] as? String {
+        if let raw = entry["inlineDatumRaw"]?.string {
             let data = try LedgerValues.hexBytes(raw, "\(what) inlineDatumRaw")
             do {
                 return DatumOption(datum: try PlutusData.fromCBOR(data: data))
@@ -382,7 +358,7 @@ public actor CardanoCliChainContext: ChainContext {
                 throw CardanoChainError.valueError("\(what) inlineDatumRaw is not Plutus data: \(error)")
             }
         }
-        if let inline = entry["inlineDatum"], !(inline is NSNull) {
+        if entry["inlineDatum"].nonNull != nil {
             throw CardanoChainError.valueError(
                 "\(what) has an inline datum only as JSON (no inlineDatumRaw), whose integers cannot be read exactly")
         }
@@ -426,8 +402,7 @@ public actor CardanoCliChainContext: ChainContext {
         ])
 
         guard let data = result.data(using: .utf8),
-            let rawUtxos = try? JSONSerialization.jsonObject(with: data, options: [])
-                as? [String: [String: Any]]
+            let rawUtxos = try ChainJSON.decode(data, "cardano-cli UTxO JSON").object
         else {
             throw CardanoChainError.valueError("Failed to parse UTxO JSON")
         }
@@ -436,8 +411,8 @@ public actor CardanoCliChainContext: ChainContext {
             return nil  // Not in UTXO set: either spent or never existed
         }
 
-        guard let utxoValue = utxoEntry["value"] as? [String: Any] else {
-            return nil
+        guard let utxoValue = utxoEntry["value"]?.object else {
+            throw CardanoChainError.valueError("cardano-cli UTxO \(txInStr) has no value")
         }
 
         var value = Value(coin: 0)
@@ -445,20 +420,23 @@ public actor CardanoCliChainContext: ChainContext {
 
         for (asset, amount) in utxoValue {
             if asset == "lovelace" {
-                if let lovelace = try LedgerValues.bigInt(json: amount, "cardano-cli lovelace") {
-                    value.coin = lovelace
-                }
+                value.coin = try LedgerValues.required(
+                    LedgerValues.bigInt(json: amount, "cardano-cli lovelace"), "cardano-cli lovelace")
             } else {
                 let policyId = asset
-                guard let assets = amount as? [String: Any] else { continue }
+                guard let assets = amount.object else {
+                    throw CardanoChainError.valueError(
+                        "cardano-cli UTxO \(txInStr) assets of \(policyId) are not an object")
+                }
                 for (assetHexName, assetAmount) in assets {
                     let policy = try LedgerValues.hash(hex: policyId, as: ScriptHash.self, "cardano-cli ScriptHash")
                     let assetName = AssetName(from: assetHexName)
                     if multiAsset[policy] == nil {
                         multiAsset[policy] = Asset([:])
                     }
-                    multiAsset[policy]?[assetName] = try LedgerValues.bigInt(
-                        json: assetAmount, "cardano-cli asset quantity")
+                    multiAsset[policy]?[assetName] = try LedgerValues.required(
+                        LedgerValues.bigInt(json: assetAmount, "cardano-cli asset quantity"),
+                        "cardano-cli asset quantity")
                 }
             }
         }
@@ -466,18 +444,18 @@ public actor CardanoCliChainContext: ChainContext {
         value.multiAsset = multiAsset
 
         var datumHash: DatumHash? = nil
-        if let datumHashStr = utxoEntry["datumhash"] as? String {
+        if let datumHashStr = utxoEntry["datumhash"]?.string {
             datumHash = try LedgerValues.hash(hex: datumHashStr, as: DatumHash.self, "cardano-cli DatumHash")
         }
 
         let datumOption = try Self.datumOption(utxoEntry, "cardano-cli UTxO \(txInStr)")
 
         var script: ScriptType? = nil
-        if let referenceScript = utxoEntry["referenceScript"] as? [String: Any] {
-            script = try await getScript(from: referenceScript)
+        if let referenceScript = utxoEntry["referenceScript"].nonNull {
+            script = try Self.getScript(from: referenceScript)
         }
 
-        guard let addressText = utxoEntry["address"] as? String else {
+        guard let addressText = utxoEntry["address"]?.string else {
             throw CardanoChainError.valueError("cardano-cli UTxO \(txInStr) has no address")
         }
         let address = try Address(from: .string(addressText))
@@ -666,8 +644,7 @@ public actor CardanoCliChainContext: ChainContext {
         )
 
         let data = try Data(contentsOf: URL(fileURLWithPath: tempQueryFile.path))
-        let obj = try JSONSerialization.jsonObject(with: data, options: [])
-        guard let dict = obj as? [String: Any] else {
+        guard let dict = try ChainJSON.decode(data, "cardano-cli kes-period-info").object else {
             throw CardanoChainError.valueError("Top-level JSON is not a dictionary")
         }
 
@@ -786,7 +763,7 @@ public actor CardanoCliChainContext: ChainContext {
 
         func parseDRepStateResult(_ result: String, drep: DRep) throws -> DRepInfo {
             guard let data = result.data(using: .utf8),
-                let entries = try? JSONSerialization.jsonObject(with: data) as? [[Any]]
+                let entries = try ChainJSON.decode(data, "cardano-cli drep-state").array
             else {
                 throw CardanoChainError.valueError("cardano-cli drep-state output is not a JSON list")
             }
@@ -803,7 +780,7 @@ public actor CardanoCliChainContext: ChainContext {
                 )
             }
 
-            guard firstEntry.count == 2, let stateDict = firstEntry[1] as? [String: Any] else {
+            guard let pair = firstEntry.array, pair.count == 2, let stateDict = pair[1].object else {
                 throw CardanoChainError.valueError("cardano-cli drep-state entry is not [drep, state]")
             }
 
@@ -842,7 +819,7 @@ public actor CardanoCliChainContext: ChainContext {
                 ])
 
             guard let distData = distResult.data(using: .utf8),
-                let distDict = try? JSONSerialization.jsonObject(with: distData) as? [String: Any]
+                let distDict = try ChainJSON.decode(distData, "cardano-cli drep-stake-distribution").object
             else {
                 throw CardanoChainError.valueError("cardano-cli drep-stake-distribution output is not a JSON object")
             }
@@ -880,10 +857,11 @@ public actor CardanoCliChainContext: ChainContext {
     public func govActionInfo(govActionID: GovActionID) async throws -> GovActionInfo {
         let result = try await cli.query.govState(arguments: ["--output-json"])
 
-        guard let data = result.data(using: .utf8),
-            let govState = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-            let proposals = govState["proposals"] as? [[String: Any]]
-        else {
+        guard let data = result.data(using: .utf8) else {
+            throw CardanoChainError.valueError("Failed to parse gov-state JSON or missing proposals")
+        }
+        let govState = try ChainJSON.decode(data, "cardano-cli gov-state")
+        guard let proposals = govState["proposals"]?.array else {
             throw CardanoChainError.valueError(
                 "Failed to parse gov-state JSON or missing proposals")
         }
@@ -891,56 +869,31 @@ public actor CardanoCliChainContext: ChainContext {
         let txHash = govActionID.transactionID.payload.toHex.lowercased()
         let index = govActionID.govActionIndex
 
-        // The actions themselves are read from the same JSON decoded exactly.
-        let govActionsJSON = try Self.proposalGovActions(data)
-        guard govActionsJSON.count == proposals.count else {
-            throw CardanoChainError.valueError("cardano-cli gov-state proposals did not decode alike")
-        }
-
-        let nextRatifyState = govState["nextRatifyState"] as? [String: Any]
-        let enactedGovActions = nextRatifyState?["enactedGovActions"] as? [[String: Any]] ?? []
-        let expiredGovActions = nextRatifyState?["expiredGovActions"] as? [[String: Any]] ?? []
+        let nextRatifyState = govState["nextRatifyState"]
+        let enactedGovActions = nextRatifyState?["enactedGovActions"]?.array ?? []
+        let expiredGovActions = nextRatifyState?["expiredGovActions"]?.array ?? []
         let currentEpoch: UInt64 = try await self.epoch().checked("cardano-cli epoch")
 
-        func actionIdMatches(_ actionId: [String: Any]) -> Bool {
-            guard let pTxId = actionId["txId"] as? String else {
-                return false
-            }
-
-            let pIndex: Int
-            if let idx = actionId["govActionIx"] as? Int {
-                pIndex = idx
-            } else if let idx = actionId["govActionIx"] as? NSNumber {
-                pIndex = idx.intValue
-            } else {
-                return false
-            }
-
-            return pTxId.lowercased() == txHash && pIndex == index
+        func actionIdMatches(_ actionId: ChainJSON) -> Bool {
+            Self.actionIdMatches(actionId, txHash: txHash, index: index)
         }
 
-        func actionExists(in entries: [[String: Any]]) -> Bool {
+        func actionExists(in entries: [ChainJSON]) -> Bool {
             entries.contains { entry in
-                if let nestedActionId = entry["actionId"] as? [String: Any] {
+                if let nestedActionId = entry["actionId"], nestedActionId.object != nil {
                     return actionIdMatches(nestedActionId)
                 }
                 return actionIdMatches(entry)
             }
         }
 
-        let proposalPosition = proposals.firstIndex(where: {
-            guard let actionId = $0["actionId"] as? [String: Any] else {
-                return false
-            }
-            return actionIdMatches(actionId)
-        })
-        let proposal = proposalPosition.map { proposals[$0] }
+        let proposal = proposals.first(where: { $0["actionId"].map(actionIdMatches) ?? false })
 
-        func extractGovAction(at position: Int) throws -> GovAction {
-            guard proposals[position]["proposalProcedure"] is [String: Any] else {
+        func extractGovAction(_ proposal: ChainJSON) throws -> GovAction {
+            guard let procedure = proposal["proposalProcedure"], procedure.object != nil else {
                 throw CardanoChainError.valueError("Missing proposalProcedure in proposal")
             }
-            return try parseGovAction(govActionsJSON[position])
+            return try parseGovAction(procedure["govAction"])
         }
 
         let inEnactedSet = actionExists(in: enactedGovActions)
@@ -965,7 +918,7 @@ public actor CardanoCliChainContext: ChainContext {
 
         // A proposal no longer in the gov state has no body to read: report its
         // status without an action rather than standing in a different one.
-        let parsedGovAction: GovAction? = try proposalPosition.map { try extractGovAction(at: $0) }
+        let parsedGovAction: GovAction? = try proposal.map(extractGovAction)
 
         return GovActionInfo(
             govActionId: govActionID,
@@ -979,6 +932,47 @@ public actor CardanoCliChainContext: ChainContext {
         )
     }
 
+    /// Whether `actionId` (`{txId, govActionIx}`) names `txHash#index`.
+    static func actionIdMatches(_ actionId: ChainJSON, txHash: String, index: some BinaryInteger) -> Bool {
+        guard let pTxId = actionId["txId"]?.string,
+              let pIndex = try? LedgerValues.integer(json: actionId["govActionIx"], as: UInt64.self, "govActionIx")
+        else { return false }
+        return pTxId.lowercased() == txHash && UInt64(exactly: index) == pIndex
+    }
+
+    /// The `committee` object of `query committee-state` output.
+    static func committeeMembers(_ data: Data) throws -> (root: [String: ChainJSON], committee: [String: ChainJSON]) {
+        guard let root = try ChainJSON.decode(data, "cardano-cli committee-state").object else {
+            throw CardanoChainError.valueError("Failed to parse committee state JSON")
+        }
+        switch root["committee"].nonNull {
+        case nil: return (root, [:])
+        case let committee?:
+            guard let members = committee.object else {
+                throw CardanoChainError.valueError("cardano-cli committee-state committee is not an object")
+            }
+            return (root, members)
+        }
+    }
+
+    /// A committee member's status: `Active`, `Expired`, or `nil` for anything else.
+    static func committeeStatus(_ entry: [String: ChainJSON]) -> CommitteeMemberStatus? {
+        switch entry["status"]?.string?.lowercased() {
+        case "active": .active
+        case "expired": .expired
+        default: nil
+        }
+    }
+
+    /// The hot credential a member has authorized (`hotCredsAuthStatus` tagged
+    /// `MemberAuthorized`), or `nil` when it has none.
+    static func authorizedHotCredential(_ entry: [String: ChainJSON]) throws -> CommitteeHotCredential? {
+        guard let auth = entry["hotCredsAuthStatus"], auth["tag"]?.string == "MemberAuthorized",
+              let contents = auth["contents"]
+        else { return nil }
+        return CommitteeHotCredential(credential: try LedgerValues.credential(json: contents, "cardano-cli hot credential"))
+    }
+
     /// Get the committee member information for a given committee member credential.
     /// - Parameter cold: The `CommitteeColdCredential` object representing the committee member.
     /// - Returns: The `CommitteeMemberInfo` object containing information about the committee member.
@@ -988,8 +982,7 @@ public actor CardanoCliChainContext: ChainContext {
         // Branch on the credential type: a script-hash committee member must be
         // queried with --cold-script-hash and is keyed as "scriptHash-<hex>" in the
         // committee-state JSON (key-hash members use --cold-verification-key-hash /
-        // "keyHash-<hex>"). Treating every cold credential as a key hash makes
-        // script-based members — e.g. preview's entire committee — unfindable.
+        // "keyHash-<hex>").
         let coldHashFlag: String
         let coldKeyPrefix: String
         switch cold.credential {
@@ -1009,60 +1002,22 @@ public actor CardanoCliChainContext: ChainContext {
             ]
         )
 
-        guard let data = result.data(using: .utf8),
-            let committeeState = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-            let committee = committeeState["committee"] as? [String: Any]
-        else {
+        guard let data = result.data(using: .utf8) else {
             throw CardanoChainError.valueError("Failed to parse committee state JSON")
         }
+        let committee = try Self.committeeMembers(data).committee
 
-        // Find the committee member entry for the given cold credential.
-        let coldKeyHexPrefix = cold.credential.payload.toHex
-        let memberKey = "\(coldKeyPrefix)\(coldKeyHexPrefix)"
-
-        guard let memberEntry = committee[memberKey] as? [String: Any] else {
+        let memberKey = "\(coldKeyPrefix)\(cold.credential.payload.toHex)"
+        guard let memberEntry = committee[memberKey]?.object else {
             throw CardanoChainError.valueError(
                 "Committee member not found for cold credential: \(memberKey)")
         }
 
-        // Extract expiration epoch
-        guard let expiration = memberEntry["expiration"] as? Int else {
-            throw CardanoChainError.valueError("Missing expiration in committee member entry")
-        }
+        let expiration: UInt64 = try LedgerValues.required(
+            LedgerValues.integer(json: memberEntry["expiration"], "cardano-cli committee member expiration"),
+            "cardano-cli committee member expiration")
 
-        // Parse status
-        let statusStr = memberEntry["status"] as? String ?? "Unknown"
-        let status: CommitteeMemberStatus
-        switch statusStr.lowercased() {
-        case "active":
-            status = .active
-        case "expired":
-            status = .expired
-        default:
-            status = .unrecognized
-        }
-
-        // Extract hot credential from hotCredsAuthStatus. The authorized hot
-        // credential may be a key hash or a script hash — use whichever field is
-        // present and build the matching credential type (the entry previously
-        // always read "keyHash" yet labelled it a scriptHash).
-        var hotCredential: CommitteeHotCredential?
-        if let hotCredsAuthStatus = memberEntry["hotCredsAuthStatus"] as? [String: Any],
-            let tag = hotCredsAuthStatus["tag"] as? String,
-            tag == "MemberAuthorized",
-            let contents = hotCredsAuthStatus["contents"] as? [String: Any]
-        {
-            if let hotKeyHash = contents["keyHash"] as? String {
-                hotCredential = CommitteeHotCredential(
-                    credential: .verificationKeyHash(
-                        try LedgerValues.hash(hex: hotKeyHash, as: VerificationKeyHash.self, "cardano-cli VerificationKeyHash")))
-            } else if let hotScriptHash = contents["scriptHash"] as? String {
-                hotCredential = CommitteeHotCredential(
-                    credential: .scriptHash(try LedgerValues.hash(hex: hotScriptHash, as: ScriptHash.self, "cardano-cli ScriptHash")))
-            }
-        }
-
-        guard let hotCred = hotCredential else {
+        guard let hotCred = try Self.authorizedHotCredential(memberEntry) else {
             throw CardanoChainError.valueError(
                 "Failed to parse hot credential from committee member entry")
         }
@@ -1070,8 +1025,8 @@ public actor CardanoCliChainContext: ChainContext {
         return CommitteeMemberInfo(
             coldCredential: cold,
             hotCredential: hotCred,
-            expiration: try expiration.checked("cardano-cli committee member expiration"),
-            status: status
+            expiration: expiration,
+            status: Self.committeeStatus(memberEntry) ?? .unrecognized
         )
     }
 
@@ -1097,60 +1052,27 @@ public actor CardanoCliChainContext: ChainContext {
             ]
         )
 
-        guard let data = result.data(using: .utf8),
-            let committeeState = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-            let committee = committeeState["committee"] as? [String: Any]
-        else {
+        guard let data = result.data(using: .utf8) else {
             throw CardanoChainError.valueError("Failed to parse committee state JSON")
         }
+        let committee = try Self.committeeMembers(data).committee
 
         // cardano-cli returns the matching committee entries keyed by the cold credential
         // ("keyHash-<hex>" or "scriptHash-<hex>"). Pick the first (or only) entry.
-        guard let (coldKey, anyEntry) = committee.first,
-            let memberEntry = anyEntry as? [String: Any]
-        else {
+        guard let (coldKey, anyEntry) = committee.first, let memberEntry = anyEntry.object else {
             throw CardanoChainError.valueError(
                 "Committee member not found for hot credential: \(hot.credential.payload.toHex)")
         }
 
-        // Parse the cold credential from the entry key ("keyHash-<hex>" / "scriptHash-<hex>").
-        let coldCredential: CommitteeColdCredential
-        if coldKey.hasPrefix("keyHash-") {
-            let hex = String(coldKey.dropFirst("keyHash-".count))
-            coldCredential = CommitteeColdCredential(
-                credential: .verificationKeyHash(
-                    try LedgerValues.hash(hex: hex, as: VerificationKeyHash.self, "cardano-cli VerificationKeyHash"))
-            )
-        } else if coldKey.hasPrefix("scriptHash-") {
-            let hex = String(coldKey.dropFirst("scriptHash-".count))
-            coldCredential = CommitteeColdCredential(
-                credential: .scriptHash(try LedgerValues.hash(hex: hex, as: ScriptHash.self, "cardano-cli ScriptHash"))
-            )
-        } else {
-            throw CardanoChainError.valueError(
-                "Unexpected committee entry key format: \(coldKey)")
-        }
-
-        guard let expiration = memberEntry["expiration"] as? Int else {
-            throw CardanoChainError.valueError("Missing expiration in committee member entry")
-        }
-
-        let statusStr = memberEntry["status"] as? String ?? "Unknown"
-        let status: CommitteeMemberStatus
-        switch statusStr.lowercased() {
-        case "active":
-            status = .active
-        case "expired":
-            status = .expired
-        default:
-            status = .unrecognized
-        }
+        let expiration: UInt64 = try LedgerValues.required(
+            LedgerValues.integer(json: memberEntry["expiration"], "cardano-cli committee member expiration"),
+            "cardano-cli committee member expiration")
 
         return CommitteeMemberInfo(
-            coldCredential: coldCredential,
+            coldCredential: try parseCommitteeColdKey(coldKey),
             hotCredential: hot,
-            expiration: try expiration.checked("cardano-cli committee member expiration"),
-            status: status
+            expiration: expiration,
+            status: Self.committeeStatus(memberEntry) ?? .unrecognized
         )
     }
 
@@ -1161,9 +1083,11 @@ public actor CardanoCliChainContext: ChainContext {
         let currentEpoch: UInt64 = try await self.epoch().checked("cardano-cli epoch")
 
         let txHash = govActionID.transactionID.payload.toHex.lowercased()
-        let index = Int(govActionID.govActionIndex)
+        let index = govActionID.govActionIndex
 
-        guard let proposal = proposals.first(where: { proposalMatchesActionId($0.fields, txHash: txHash, index: index) }) else {
+        guard let proposal = proposals.first(where: {
+            $0["actionId"].map { Self.actionIdMatches($0, txHash: txHash, index: index) } ?? false
+        }) else {
             throw CardanoChainError.valueError(
                 "Governance action not found in gov-state: \(txHash)#\(index)")
         }
@@ -1182,9 +1106,32 @@ public actor CardanoCliChainContext: ChainContext {
         return try proposals.map { proposal in
             try buildGovActionVotes(
                 proposal: proposal,
-                actionID: try parseActionId(from: proposal.fields),
+                actionID: try parseActionId(from: proposal),
                 currentEpoch: currentEpoch
             )
+        }
+    }
+
+    /// A stake distribution as cardano-cli prints it: a list of `[key, stake]`
+    /// pairs or an object keyed by key. Every entry carries its stake.
+    static func stakeDistribution(_ data: Data, _ what: String) throws -> [(key: ChainJSON, stake: UInt64)] {
+        let json = try ChainJSON.decode(data, "cardano-cli \(what)")
+        func stake(_ value: ChainJSON) throws -> UInt64 {
+            // The ledger keeps a stake for every entry; a null one is not 0.
+            try LedgerValues.required(GovernanceParsing.parseLovelace(value), "cardano-cli \(what) stake")
+        }
+        switch json {
+        case .array(let pairs):
+            return try pairs.map { pair in
+                guard let pair = pair.array, pair.count == 2 else {
+                    throw CardanoChainError.valueError("cardano-cli \(what) entry \(pair) is not [key, stake]")
+                }
+                return (pair[0], try stake(pair[1]))
+            }
+        case .object(let members):
+            return try members.map { (ChainJSON.string($0.key), try stake($0.value)) }
+        default:
+            throw CardanoChainError.valueError("Unexpected \(what) JSON shape")
         }
     }
 
@@ -1192,129 +1139,51 @@ public actor CardanoCliChainContext: ChainContext {
         let result = try await cli.query.drepStakeDistribution(
             arguments: ["--all-dreps", "--output-json"]
         )
-
         guard let data = result.data(using: .utf8) else {
             throw CardanoChainError.valueError("Failed to parse drep-stake-distribution as UTF-8")
         }
-
-        // cardano-cli returns either a JSON array of pairs [[drepKey, lovelace], ...] or
-        // a JSON object keyed by drepKey. Handle both shapes.
-        let json = try? JSONSerialization.jsonObject(with: data)
-        var entries: [SwiftCardanoNetwork.DRepStakeEntry] = []
-
-        if let pairs = json as? [[Any]] {
-            for pair in pairs {
-                guard pair.count == 2 else {
-                    throw CardanoChainError.valueError("cardano-cli stake distribution entry \(pair) is not [key, stake]")
-                }
-                let drep = try parseDRepKey(pair[0])
-                // The ledger keeps a stake for every entry; a null one is not 0.
-                let stake = try LedgerValues.required(parseLovelaceUInt(pair[1]), "cardano-cli stake distribution stake")
-                entries.append(SwiftCardanoNetwork.DRepStakeEntry(drep: drep, stake: stake))
-            }
-        } else if let dict = json as? [String: Any] {
-            for (key, value) in dict {
-                let drep = try parseDRepKey(key)
-                // The ledger keeps a stake for every entry; a null one is not 0.
-                let stake = try LedgerValues.required(parseLovelaceUInt(value), "cardano-cli stake distribution stake")
-                entries.append(SwiftCardanoNetwork.DRepStakeEntry(drep: drep, stake: stake))
-            }
-        } else {
-            throw CardanoChainError.valueError(
-                "Unexpected drep-stake-distribution JSON shape")
+        return try Self.stakeDistribution(data, "drep-stake-distribution").map {
+            SwiftCardanoNetwork.DRepStakeEntry(drep: try parseDRepKey($0.key), stake: $0.stake)
         }
-
-        return entries
     }
 
     public func spoStakeDistribution() async throws -> [SwiftCardanoNetwork.SPOStakeEntry] {
         let result = try await cli.query.spoStakeDistribution(
             arguments: ["--all-spos", "--output-json"]
         )
-
         guard let data = result.data(using: .utf8) else {
             throw CardanoChainError.valueError("Failed to parse spo-stake-distribution as UTF-8")
         }
-
-        let json = try? JSONSerialization.jsonObject(with: data)
-        var entries: [SwiftCardanoNetwork.SPOStakeEntry] = []
-
-        if let pairs = json as? [[Any]] {
-            for pair in pairs {
-                guard pair.count == 2 else {
-                    throw CardanoChainError.valueError("cardano-cli stake distribution entry \(pair) is not [key, stake]")
-                }
-                let pool = try parsePoolKey(pair[0])
-                // The ledger keeps a stake for every entry; a null one is not 0.
-                let stake = try LedgerValues.required(parseLovelaceUInt(pair[1]), "cardano-cli stake distribution stake")
-                entries.append(SwiftCardanoNetwork.SPOStakeEntry(poolOperator: pool, stake: stake))
-            }
-        } else if let dict = json as? [String: Any] {
-            for (key, value) in dict {
-                let pool = try parsePoolKey(key)
-                // The ledger keeps a stake for every entry; a null one is not 0.
-                let stake = try LedgerValues.required(parseLovelaceUInt(value), "cardano-cli stake distribution stake")
-                entries.append(SwiftCardanoNetwork.SPOStakeEntry(poolOperator: pool, stake: stake))
-            }
-        } else {
-            throw CardanoChainError.valueError(
-                "Unexpected spo-stake-distribution JSON shape")
+        return try Self.stakeDistribution(data, "spo-stake-distribution").map {
+            SwiftCardanoNetwork.SPOStakeEntry(poolOperator: try parsePoolKey($0.key), stake: $0.stake)
         }
-
-        return entries
     }
 
     public func committeeState() async throws -> CommitteeStateInfo {
         let result = try await cli.query.committeeState(arguments: ["--output-json"])
 
-        guard let data = result.data(using: .utf8),
-              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-        else {
+        guard let data = result.data(using: .utf8) else {
             throw CardanoChainError.valueError("Failed to parse committee-state JSON")
         }
+        let (root, committee) = try Self.committeeMembers(data)
 
-        let committeeDict = root["committee"] as? [String: Any] ?? [:]
         var members: [CommitteeStateInfo.Member] = []
-
-        for (coldKey, anyEntry) in committeeDict {
-            guard let entry = anyEntry as? [String: Any] else { continue }
-            let cold = try parseCommitteeColdKey(coldKey)
-
-            var hot: CommitteeHotCredential? = nil
-            if let hotKey = entry["hotCredsAuthStatus"] as? [String: Any] {
-                if let memberAuthorizedHotCredential = hotKey["contents"] as? [String: Any] {
-                    if let hexStr = memberAuthorizedHotCredential["keyHash"] as? String {
-                        hot = CommitteeHotCredential(
-                            credential: .verificationKeyHash(
-                                try LedgerValues.hash(hex: hexStr, as: VerificationKeyHash.self, "cardano-cli VerificationKeyHash")
-                            )
-                        )
-                    } else if let hexStr = memberAuthorizedHotCredential["scriptHash"] as? String {
-                        hot = CommitteeHotCredential(
-                            credential: .scriptHash(
-                                try LedgerValues.hash(hex: hexStr, as: ScriptHash.self, "cardano-cli ScriptHash")
-                            )
-                        )
-                    }
-                }
+        for (coldKey, value) in committee {
+            guard let entry = value.object else {
+                throw CardanoChainError.valueError("cardano-cli committee member \(coldKey) is not an object")
             }
-
-            let expiration: EpochNumber? = try LedgerValues.integer(json: entry["expiration"], "cardano-cli committee member expiration")
-
-            let statusStr = entry["status"] as? String ?? ""
-            let status: CommitteeMemberStatus? = {
-                switch statusStr.lowercased() {
-                case "active": return .active
-                case "expired": return .expired
-                default: return nil
-                }
-            }()
-
+            // Any credential in `contents` counts, whatever the tag says, as before.
+            var hot: CommitteeHotCredential? = nil
+            if let contents = entry["hotCredsAuthStatus"]?["contents"],
+               contents["keyHash"] != nil || contents["scriptHash"] != nil {
+                hot = CommitteeHotCredential(
+                    credential: try LedgerValues.credential(json: contents, "cardano-cli hot credential"))
+            }
             members.append(CommitteeStateInfo.Member(
-                coldCredential: cold,
+                coldCredential: try parseCommitteeColdKey(coldKey),
                 hotCredential: hot,
-                expiration: expiration,
-                status: status
+                expiration: try LedgerValues.integer(json: entry["expiration"], "cardano-cli committee member expiration"),
+                status: Self.committeeStatus(entry)
             ))
         }
 
@@ -1322,30 +1191,18 @@ public actor CardanoCliChainContext: ChainContext {
         return CommitteeStateInfo(members: members, threshold: threshold)
     }
 
-    private func parseLovelaceUInt(_ any: Any) throws -> UInt64? {
-        try GovernanceParsing.parseLovelace(any)
-    }
-
     // MARK: - Vote-query helpers (private)
 
-    /// A gov-state proposal: its fields, and its governance action read
-    /// exactly as ``ChainJSON``.
-    private typealias GovStateProposal = (fields: [String: Any], govAction: ChainJSON?)
-
-    private func fetchProposalsFromGovState() async throws -> [GovStateProposal] {
+    private func fetchProposalsFromGovState() async throws -> [ChainJSON] {
         let result = try await cli.query.govState(arguments: ["--output-json"])
-        guard let data = result.data(using: .utf8),
-              let govState = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let proposals = govState["proposals"] as? [[String: Any]]
-        else {
+        guard let data = result.data(using: .utf8) else {
+            throw CardanoChainError.valueError("Failed to parse gov-state JSON or missing proposals")
+        }
+        guard let proposals = try ChainJSON.decode(data, "cardano-cli gov-state")["proposals"]?.array else {
             throw CardanoChainError.valueError(
                 "Failed to parse gov-state JSON or missing proposals")
         }
-        let govActions = try Self.proposalGovActions(data)
-        guard govActions.count == proposals.count else {
-            throw CardanoChainError.valueError("cardano-cli gov-state proposals did not decode alike")
-        }
-        return Array(zip(proposals, govActions)).map { (fields: $0.0, govAction: $0.1) }
+        return proposals
     }
 
     /// Each gov-state proposal's `proposalProcedure.govAction`, in proposal
@@ -1358,29 +1215,9 @@ public actor CardanoCliChainContext: ChainContext {
         return proposals.map { $0["proposalProcedure"]?["govAction"] }
     }
 
-    private func proposalMatchesActionId(
-        _ proposal: [String: Any],
-        txHash: String,
-        index: Int
-    ) -> Bool {
-        guard let actionId = proposal["actionId"] as? [String: Any],
-              let pTxId = actionId["txId"] as? String else { return false }
-        let pIndex: Int
-        if let i = actionId["govActionIx"] as? Int {
-            pIndex = i
-        } else if let n = actionId["govActionIx"] as? NSNumber {
-            pIndex = n.intValue
-        } else {
-            return false
-        }
-        return pTxId.lowercased() == txHash && pIndex == index
-    }
-
     /// A proposal's own id, which every proposal in the gov state carries.
-    private func parseActionId(from proposal: [String: Any]) throws -> GovActionID {
-        guard let actionId = proposal["actionId"] as? [String: Any],
-              let txId = actionId["txId"] as? String
-        else {
+    private func parseActionId(from proposal: ChainJSON) throws -> GovActionID {
+        guard let actionId = proposal["actionId"], let txId = actionId["txId"]?.string else {
             throw CardanoChainError.valueError("cardano-cli proposal has no actionId: \(proposal)")
         }
         return GovActionID(
@@ -1391,15 +1228,16 @@ public actor CardanoCliChainContext: ChainContext {
     }
 
     private func buildGovActionVotes(
-        proposal entry: GovStateProposal,
+        proposal: ChainJSON,
         actionID: GovActionID,
         currentEpoch: UInt64
     ) throws -> GovActionVotes {
-        let proposal = entry.fields
-        let proposalProcedure = proposal["proposalProcedure"] as? [String: Any] ?? [:]
+        guard let proposalProcedure = proposal["proposalProcedure"], proposalProcedure.object != nil else {
+            throw CardanoChainError.valueError("cardano-cli proposal \(actionID) has no proposalProcedure")
+        }
 
         // Parse govAction fully from the proposal procedure.
-        let govAction = try parseGovAction(entry.govAction)
+        let govAction = try parseGovAction(proposalProcedure["govAction"])
 
         // Parse deposit + return address.
         let deposit: Coin = try LedgerValues.required(
@@ -1411,7 +1249,7 @@ public actor CardanoCliChainContext: ChainContext {
             parseRewardAccount(proposalProcedure["returnAddr"]), "cardano-cli proposal returnAddr")
 
         // Parse anchor (optional).
-        let anchor = try parseAnchor(proposalProcedure["anchor"])
+        let anchor = try LedgerValues.anchor(json: proposalProcedure["anchor"], "cardano-cli proposal anchor")
 
         // Parse vote arrays.
         let committeeVotes = try parseCommitteeVotes(proposal["committeeVotes"])
@@ -1419,10 +1257,8 @@ public actor CardanoCliChainContext: ChainContext {
         let stakePoolVotes = try parseStakePoolVotes(proposal["stakePoolVotes"])
 
         // Epochs.
-        let proposedIn = (proposal["proposedIn"] as? NSNumber)?.uint64Value
-            ?? (proposal["proposedIn"] as? Int).map(UInt64.init)
-        let expiresAfter = (proposal["expiresAfter"] as? NSNumber)?.uint64Value
-            ?? (proposal["expiresAfter"] as? Int).map(UInt64.init)
+        let proposedIn: UInt64? = try LedgerValues.integer(json: proposal["proposedIn"], "cardano-cli proposedIn")
+        let expiresAfter: UInt64? = try LedgerValues.integer(json: proposal["expiresAfter"], "cardano-cli expiresAfter")
         let expiredByEpoch = expiresAfter.map { currentEpoch > $0 } ?? false
         let expiredEpoch: UInt64? = expiredByEpoch ? currentEpoch : nil
 
@@ -1455,27 +1291,23 @@ public actor CardanoCliChainContext: ChainContext {
 
     /// A reward account: the ledger's `{network, credential}` object, or its
     /// 29 bytes in hex.
-    private func parseRewardAccount(_ any: Any?) throws -> RewardAccount? {
-        guard let any, !(any is NSNull) else { return nil }
-        if let hex = any as? String {
+    private func parseRewardAccount(_ json: ChainJSON?) throws -> RewardAccount? {
+        guard let json = json.nonNull else { return nil }
+        if let hex = json.string {
             let bytes = try LedgerValues.hexBytes(hex, "cardano-cli reward account")
             guard bytes.count == 29 else {
                 throw CardanoChainError.valueError("cardano-cli reward account \(hex) is not 29 bytes")
             }
             return bytes
         }
-        return try LedgerValues.rewardAccount(json: any, "cardano-cli reward account")
-    }
-
-    private func parseAnchor(_ any: Any?) throws -> Anchor? {
-        try LedgerValues.anchor(json: any, "cardano-cli proposal anchor")
+        return try LedgerValues.rewardAccount(json: json, "cardano-cli reward account")
     }
 
     /// A DRep as cardano-cli writes one: a `keyHash-<hex>` / `scriptHash-<hex>`
     /// key (with or without a `drep-` prefix), `alwaysAbstain` /
     /// `alwaysNoConfidence`, or a `{keyHash | scriptHash}` object.
-    private func parseDRepKey(_ any: Any) throws -> DRep {
-        if let s = any as? String {
+    private func parseDRepKey(_ json: ChainJSON) throws -> DRep {
+        if let s = json.string {
             // `cardano-cli query drep-stake-distribution` emits keys with a
             // `drep-` prefix (`drep-keyHash-...`, `drep-alwaysAbstain`, etc).
             let stripped = s.hasPrefix("drep-") ? String(s.dropFirst("drep-".count)) : s
@@ -1483,10 +1315,10 @@ public actor CardanoCliChainContext: ChainContext {
             case "alwaysAbstain", "AlwaysAbstain": return DRep(credential: .alwaysAbstain)
             case "alwaysNoConfidence", "AlwaysNoConfidence": return DRep(credential: .alwaysNoConfidence)
             default:
-                return try drep(LedgerValues.credential(json: stripped, "cardano-cli DRep"))
+                return try drep(LedgerValues.credential(json: ChainJSON.string(stripped), "cardano-cli DRep"))
             }
         }
-        return try drep(LedgerValues.credential(json: any, "cardano-cli DRep"))
+        return try drep(LedgerValues.credential(json: json, "cardano-cli DRep"))
     }
 
     private func drep(_ credential: CredentialType) -> DRep {
@@ -1498,14 +1330,14 @@ public actor CardanoCliChainContext: ChainContext {
 
     /// A stake pool: bech32 `pool…` (the gov-state proposal body), or the pool
     /// key hash in hex, bare or as `keyHash-<hex>` (the stake distribution).
-    private func parsePoolKey(_ any: Any) throws -> PoolOperator {
+    private func parsePoolKey(_ json: ChainJSON) throws -> PoolOperator {
         let text: String
-        if let s = any as? String {
+        if let s = json.string {
             text = s.hasPrefix("keyHash-") ? String(s.dropFirst("keyHash-".count)) : s
-        } else if let dict = any as? [String: Any], dict.count == 1, let hex = dict["keyHash"] as? String {
+        } else if let dict = json.object, dict.count == 1, let hex = dict["keyHash"]?.string {
             text = hex
         } else {
-            throw CardanoChainError.valueError("cardano-cli stake pool \(any) is not a pool id")
+            throw CardanoChainError.valueError("cardano-cli stake pool \(json) is not a pool id")
         }
         if text.hasPrefix("pool") {
             return try PoolOperator(from: .string(text))
@@ -1514,44 +1346,47 @@ public actor CardanoCliChainContext: ChainContext {
     }
 
     private func parseCommitteeColdKey(_ key: String) throws -> CommitteeColdCredential {
-        CommitteeColdCredential(credential: try LedgerValues.credential(json: key, "cardano-cli committee cold key"))
+        CommitteeColdCredential(credential: try LedgerValues.credential(json: ChainJSON.string(key), "cardano-cli committee cold key"))
     }
 
     private func parseCommitteeHotKey(_ key: String) throws -> CommitteeHotCredential {
-        CommitteeHotCredential(credential: try LedgerValues.credential(json: key, "cardano-cli committee hot key"))
+        CommitteeHotCredential(credential: try LedgerValues.credential(json: ChainJSON.string(key), "cardano-cli committee hot key"))
     }
 
-    private func parseLovelace(_ any: Any) throws -> Coin? {
-        try GovernanceParsing.parseLovelace(any)
-    }
-
-    private func parseVoteValue(_ any: Any) throws -> Vote {
-        guard let vote = GovernanceParsing.parseVote(any) else {
-            throw CardanoChainError.valueError("cardano-cli vote \(any) is not a vote")
+    private func parseVoteValue(_ json: ChainJSON) throws -> Vote {
+        guard let vote = GovernanceParsing.parseVote(json.string) else {
+            throw CardanoChainError.valueError("cardano-cli vote \(json) is not a vote")
         }
         return vote
     }
 
-    private func parseCommitteeVotes(_ any: Any?) throws -> [CommitteeVote] {
-        guard let dict = any as? [String: Any] else { return [] }
-        return try dict.map { (k, v) in
+    /// A vote map, `{voter: vote}`; none when absent or null.
+    private func votes(_ json: ChainJSON?, _ what: String) throws -> [String: ChainJSON] {
+        guard let json = json.nonNull else { return [:] }
+        guard let object = json.object else {
+            throw CardanoChainError.valueError("cardano-cli \(what) is not an object: \(json)")
+        }
+        return object
+    }
+
+    private func parseCommitteeVotes(_ json: ChainJSON?) throws -> [CommitteeVote] {
+        try votes(json, "committeeVotes").map { (k, v) in
             CommitteeVote(credential: try parseCommitteeHotKey(k), vote: try parseVoteValue(v))
         }
     }
 
-    private func parseDRepVotes(_ any: Any?) throws -> [DRepVote] {
-        guard let dict = any as? [String: Any] else { return [] }
-        return try dict.map { (k, v) in
+    private func parseDRepVotes(_ json: ChainJSON?) throws -> [DRepVote] {
+        try votes(json, "dRepVotes").map { (k, v) in
             DRepVote(
-                credential: DRepCredential(credential: try LedgerValues.credential(json: k, "cardano-cli DRep voter")),
+                credential: DRepCredential(
+                    credential: try LedgerValues.credential(json: ChainJSON.string(k), "cardano-cli DRep voter")),
                 vote: try parseVoteValue(v))
         }
     }
 
-    private func parseStakePoolVotes(_ any: Any?) throws -> [StakePoolVote] {
-        guard let dict = any as? [String: Any] else { return [] }
-        return try dict.map { (k, v) in
-            StakePoolVote(poolOperator: try parsePoolKey(k), vote: try parseVoteValue(v))
+    private func parseStakePoolVotes(_ json: ChainJSON?) throws -> [StakePoolVote] {
+        try votes(json, "stakePoolVotes").map { (k, v) in
+            StakePoolVote(poolOperator: try parsePoolKey(.string(k)), vote: try parseVoteValue(v))
         }
     }
 }

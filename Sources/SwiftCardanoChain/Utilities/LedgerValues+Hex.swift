@@ -79,56 +79,17 @@ extension LedgerValues {
             : .verificationKeyHash(try hash(hex: hex, as: VerificationKeyHash.self, what()))
     }
 
-    /// A credential written as JSON the ledger's way: `{"keyHash": hex}` or
-    /// `{"scriptHash": hex}`, or as a map key `keyHash-<hex>` / `scriptHash-<hex>`.
-    static func credential(json any: Any?, _ what: @autoclosure () -> String) throws -> CredentialType {
+    /// A credential written as ledger JSON: `{"keyHash": hex}` or
+    /// `{"scriptHash": hex}`, or a map key `keyHash-<hex>` / `scriptHash-<hex>`.
+    static func credential(json value: ChainJSON?, _ what: @autoclosure () -> String) throws -> CredentialType {
         let what = what()
-        if let key = any as? String {
+        if let key = value?.string {
             if key.hasPrefix("keyHash-") {
                 return try credential(isScript: false, hex: String(key.dropFirst("keyHash-".count)), what)
             }
             if key.hasPrefix("scriptHash-") {
                 return try credential(isScript: true, hex: String(key.dropFirst("scriptHash-".count)), what)
             }
-        } else if let object = any as? [String: Any], object.count == 1 {
-            if let hex = object["keyHash"] as? String {
-                return try credential(isScript: false, hex: hex, what)
-            }
-            if let hex = object["scriptHash"] as? String {
-                return try credential(isScript: true, hex: hex, what)
-            }
-        }
-        throw CardanoChainError.valueError("\(what): \(String(describing: any)) is not a credential")
-    }
-
-    /// A reward account written as JSON the ledger's way:
-    /// `{"network": "Mainnet" | "Testnet", "credential": {"keyHash" | "scriptHash": hex}}`.
-    static func rewardAccount(json any: Any?, _ what: @autoclosure () -> String) throws -> RewardAccount {
-        let what = what()
-        guard let object = any as? [String: Any],
-            let network = object["network"] as? String
-        else {
-            throw CardanoChainError.valueError("\(what): \(String(describing: any)) is not a reward account")
-        }
-        let networkBit: UInt8
-        switch network.lowercased() {
-        case "mainnet": networkBit = 1
-        case "testnet": networkBit = 0
-        default: throw CardanoChainError.valueError("\(what): unknown network \(network)")
-        }
-        // Header: high nibble 0xE for a key hash, 0xF for a script hash; low nibble the network.
-        switch try credential(json: object["credential"], "\(what) credential") {
-        case .verificationKeyHash(let hash): return Data([0xE0 | networkBit]) + hash.payload
-        case .scriptHash(let hash): return Data([0xF0 | networkBit]) + hash.payload
-        }
-    }
-
-    /// A credential written as ledger JSON: `{"keyHash": hex}` or
-    /// `{"scriptHash": hex}`, or a map key `keyHash-<hex>` / `scriptHash-<hex>`.
-    static func credential(json value: ChainJSON?, _ what: @autoclosure () -> String) throws -> CredentialType {
-        let what = what()
-        if let key = value?.string {
-            return try credential(json: key as Any?, what)
         }
         if let object = value?.object, object.count == 1 {
             if let hex = object["keyHash"]?.string {

@@ -1,11 +1,8 @@
 import Foundation
 import SwiftCardanoCore
 
-/// Shared parsing helpers used by every backend that decodes governance JSON
-/// from cardano-cli, Koios, or Blockfrost. Lifting these out keeps each
-/// backend's mapping code focused on the response shape rather than the
-/// recurring "is this number a `Double`, a rational, or a quoted string"
-/// detail.
+/// Shared parsing helpers used by the backends that decode governance JSON
+/// (cardano-cli, Koios, Yaci). Numbers are read exactly from ``ChainJSON``.
 enum GovernanceParsing {
     /// Parse a quorum / voting threshold that may arrive as:
     /// - a JSON number (e.g. `0.51`)
@@ -18,13 +15,13 @@ enum GovernanceParsing {
     /// - Returns: `nil` when the value is absent or `null` (no committee).
     /// - Throws: ``CardanoChainError/valueError(_:)`` when the value is
     ///   present but is not a unit interval.
-    static func parseThreshold(_ any: Any?) throws -> UnitInterval? {
-        var value = any
-        if let arr = any as? [Any] {
-            guard arr.count == 2 else {
-                throw CardanoChainError.valueError("Threshold \(arr) is not a [numerator, denominator] pair")
+    static func parseThreshold(_ json: ChainJSON?) throws -> UnitInterval? {
+        var value = json
+        if let pair = json?.array {
+            guard pair.count == 2 else {
+                throw CardanoChainError.valueError("Threshold \(pair) is not a [numerator, denominator] pair")
             }
-            value = ["numerator": arr[0], "denominator": arr[1]] as [String: Any]
+            value = .object(["numerator": pair[0], "denominator": pair[1]])
         }
         return try LedgerValues.unitInterval(json: value, "threshold")
     }
@@ -32,13 +29,12 @@ enum GovernanceParsing {
     /// Parse a Vote enum from a string ("yes" / "no" / "abstain") or the
     /// `voteyes` / `voteno` / `voteabstain` variants seen in cardano-cli JSON.
     /// Case-insensitive. Returns `nil` for unrecognized input.
-    static func parseVote(_ any: Any?) -> Vote? {
-        guard let s = (any as? String)?.lowercased() else { return nil }
-        switch s {
-        case "yes", "voteyes": return .yes
-        case "no", "voteno": return .no
-        case "abstain", "voteabstain": return .abstain
-        default: return nil
+    static func parseVote(_ text: String?) -> Vote? {
+        switch text?.lowercased() {
+        case "yes", "voteyes": .yes
+        case "no", "voteno": .no
+        case "abstain", "voteabstain": .abstain
+        default: nil
         }
     }
 
@@ -48,13 +44,18 @@ enum GovernanceParsing {
     /// - Returns: `nil` when the value is absent (`nil` or `null`).
     /// - Throws: ``CardanoChainError/valueError(_:)`` when it is present but
     ///   negative, fractional, too large or not a number.
-    static func parseLovelace(_ any: Any?) throws -> UInt64? {
-        if let dict = any as? [String: Any] {
-            guard let lovelace = dict["lovelace"] else {
-                throw CardanoChainError.valueError("Lovelace object \(dict) has no lovelace key")
+    static func parseLovelace(_ json: ChainJSON?) throws -> UInt64? {
+        if let object = json?.object {
+            guard let lovelace = object["lovelace"] else {
+                throw CardanoChainError.valueError("Lovelace object \(object) has no lovelace key")
             }
             return try parseLovelace(lovelace)
         }
-        return try LedgerValues.integer(json: any, as: UInt64.self, "lovelace")
+        return try LedgerValues.integer(json: json, as: UInt64.self, "lovelace")
+    }
+
+    /// Parse lovelace written as integer text; `nil` when absent.
+    static func parseLovelace(_ text: String?) throws -> UInt64? {
+        try text.map { try LedgerValues.integer(text: $0, as: UInt64.self, "lovelace") }
     }
 }
