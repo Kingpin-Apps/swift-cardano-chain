@@ -585,4 +585,38 @@ struct ChainValueHardeningTests {
             _ = try await context.govActionInfo(govActionID: govActionID)
         }
     }
+
+    // MARK: Koios pool margin
+
+    static let missingMargins: [String] = [#""margin": null,"#, ""]
+
+    @Test("A Koios pool with no margin throws instead of reading as 0", arguments: missingMargins)
+    func koiosMissingMargin(_ margin: String) async throws {
+        await #expect(throws: CardanoChainError.self) { _ = try await self.koiosPool(margin: margin) }
+    }
+
+    @Test("A Koios pool's margin is read exactly")
+    func koiosMargin() async throws {
+        let info = try await koiosPool(margin: #""margin": 0.05,"#)
+        #expect(info.poolParams.margin.numerator == 1 && info.poolParams.margin.denominator == 20)
+    }
+
+    private func koiosPool(margin: String) async throws -> StakePoolInfo {
+        let poolInfo = """
+            [{"pool_id_bech32": "pool1pu5jlj4q9w9jlxeu370a3c9myx47md5j5m2str0naunn2q3lkdy",
+              "pool_id_hex": "0f292fcaa02b8b2f9b3c8f9fd8e0bb21abedb692a6d5058df3ef2735",
+              "vrf_key_hash": "d8b3d6c4f6c76d1e3a4c0f2e2bcd4f2a1d1f4b37c8e9b5a6d7c8e9f0a1b2c3d4",
+              \(margin) "fixed_cost": "340000000", "pledge": "1000000000000",
+              "reward_addr": "stake_test1upyz3gk6mw5he20apnwfn96cn9rscgvmmsxc9r86dh0k66gswf59n",
+              "owners": [], "relays": [], "meta_url": null, "meta_hash": null,
+              "pool_status": "registered", "op_cert_counter": 42,
+              "active_stake": "1000000000000", "live_stake": "1000000000000"}]
+            """
+        let context = try await KoiosChainContext(
+            network: .preview,
+            client: SwiftKoios.Client(
+                serverURL: try SwiftKoios.Network.preview.url(),
+                transport: KoiosMockTransport(overrides: ["pool_info": poolInfo])))
+        return try await context.stakePoolInfo(poolId: "pool1pu5jlj4q9w9jlxeu370a3c9myx47md5j5m2str0naunn2q3lkdy")
+    }
 }

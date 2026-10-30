@@ -903,8 +903,9 @@ public actor KoiosChainContext: ChainContext {
 
         // Koios's client reads the margin as a Double; its shortest
         // description is the decimal Koios sent, read here exactly.
-        let margin = try pool.margin.map { try LedgerValues.unitInterval($0, "Koios pool margin") }
-            ?? UnitInterval(numerator: 0, denominator: 1)
+        // Every registered pool has a margin; a missing one is not 0.
+        let margin = try LedgerValues.unitInterval(
+            LedgerValues.required(pool.margin, "Koios pool margin"), "Koios pool margin")
 
         let poolOperator = try PoolOperator(from: poolId)
         let vrfKeyHash = try LedgerValues.hash(
