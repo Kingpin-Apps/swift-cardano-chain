@@ -1,5 +1,5 @@
 {
-  "originHash" : "03b2be4375d766accf495797c5121194154fff3bca6152ddf5f7b71a4a72066c",
+  "originHash" : "8efb6e930a220ffd3f6109819dec550c740ceb55ce4f254a69ea1e3fe183df4b",
   "pins" : [
     {
       "identity" : "base32",
@@ -132,8 +132,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/Kingpin-Apps/swift-blockfrost-api.git",
       "state" : {
-        "revision" : "b7ade6420034b41606c8a55753588cf0a765f67a",
-        "version" : "0.2.1"
+        "revision" : "991ce563a1989b4b482a9ec8e7210d1a7337a032",
+        "version" : "0.3.0"
       }
     },
     {
@@ -177,8 +177,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/Kingpin-Apps/swift-cardano-utils.git",
       "state" : {
-        "revision" : "efce998a23c255704d4ea2869cdcc24268515827",
-        "version" : "0.5.9"
+        "revision" : "c0186b058830f46bf2826d9fdae8f4d75f07aeaf",
+        "version" : "0.5.10"
       }
     },
     {
@@ -285,8 +285,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/Kingpin-Apps/swift-koios.git",
       "state" : {
-        "revision" : "5a21e34fa4c181403eff599c3c5d93ed554814a6",
-        "version" : "0.2.2"
+        "revision" : "575eed85ac0b22084bdce732c2d750446b68f30a",
+        "version" : "0.3.0"
       }
     },
     {
@@ -294,8 +294,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/Kingpin-Apps/swift-kupo.git",
       "state" : {
-        "revision" : "dd996fb3b90ecee7bc4df2e688d61ca17c27ef5e",
-        "version" : "0.1.2"
+        "revision" : "bf0c747fbd38dc17fc515bb177187bc0e041afcf",
+        "version" : "0.2.0"
       }
     },
     {
@@ -393,8 +393,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/Kingpin-Apps/swift-ogmios.git",
       "state" : {
-        "revision" : "0279ebfcf0ec9a000380f152bf5eb35be36d3de0",
-        "version" : "0.3.2"
+        "revision" : "8edbf544a35950ad193a41c3708f165c24b57a06",
+        "version" : "0.4.0"
       }
     },
     {
@@ -474,8 +474,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/Kingpin-Apps/swift-yaci-api.git",
       "state" : {
-        "revision" : "03f584419f39c7a901dd7f649edd6b4badb529ee",
-        "version" : "0.1.0"
+        "revision" : "f804ac39683eafb625f7a666ae3eab83ed1c942e",
+        "version" : "0.2.0"
       }
     },
     {
