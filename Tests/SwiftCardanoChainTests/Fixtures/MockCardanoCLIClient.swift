@@ -66,7 +66,8 @@ func createMockConfig() -> Config {
 }
 
 func createCardaonCLIMockCommandRunner(
-    config: Config
+    config: Config,
+    govState: String = CLIResponse.govState
 ) -> MockCommandRunning {
     let commandRunner = MockCommandRunning()
     given(commandRunner)
@@ -176,7 +177,7 @@ func createCardaonCLIMockCommandRunner(
         .willReturn(
             AsyncThrowingStream<CommandEvent, any Error> { continuation in
                 continuation.yield(
-                    .standardOutput([UInt8](CLIResponse.govState.utf8))
+                    .standardOutput([UInt8](govState.utf8))
                 )
                 continuation.finish()
             }

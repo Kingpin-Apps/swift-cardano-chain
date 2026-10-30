@@ -1359,8 +1359,9 @@ public actor CardanoCliChainContext: ChainContext {
             LedgerValues.integer(json: proposalProcedure["deposit"], "cardano-cli proposal deposit"),
             "cardano-cli proposal deposit")
 
-        let returnAddr: RewardAccount = (try? parseRewardAccount(proposalProcedure["returnAddr"]))
-            ?? RewardAccount(Data())
+        // Every proposal names the account its deposit is returned to.
+        let returnAddr: RewardAccount = try LedgerValues.required(
+            parseRewardAccount(proposalProcedure["returnAddr"]), "cardano-cli proposal returnAddr")
 
         // Parse anchor (optional).
         let anchor = try parseAnchor(proposalProcedure["anchor"])

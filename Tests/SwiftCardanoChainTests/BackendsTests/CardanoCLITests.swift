@@ -809,6 +809,39 @@ struct CardanoCLIContextTests {
         }
     }
 
+    static let brokenReturnAddrs: [String] = [
+        // No return account at all: every proposal has one.
+        #""returnAddr": null,"#,
+        // A credential with no network, which is not guessed.
+        #""returnAddr": {"credential": {"keyHash": "9139e5c0a42f0f2389634c3dd18dc621f5594c5ba825d9a8883c6627"}},"#,
+        // A key hash that is not 28 bytes.
+        #""returnAddr": {"credential": {"keyHash": "9139e5"}, "network": "Testnet"},"#,
+    ]
+
+    @Test("A cardano-cli proposal with a missing or invalid return account throws instead of reading as empty",
+          arguments: brokenReturnAddrs)
+    func testGovActionVotesBadReturnAddr(_ returnAddr: String) async throws {
+        let govState = CLIResponse.govState.replacingOccurrences(
+            of: #""returnAddr":\s*\{[^{}]*\{[^{}]*\}[^{}]*\},"#, with: returnAddr, options: .regularExpression)
+        #expect(govState != CLIResponse.govState)
+        let config = createMockConfig()
+        let runner = createCardaonCLIMockCommandRunner(config: config, govState: govState)
+        let cli = try await CardanoCLI(configuration: config, commandRunner: runner)
+        let chainContext = try await CardanoCliChainContext(
+            nodeConfig: FilePath(configFilePath!),
+            network: .preview,
+            cli: cli
+        )
+        let govActionID = GovActionID(
+            transactionID: TransactionId(
+                payload: Data(hex: "2dd15e0ef6e6a17841cb9541c27724072ce4d4b79b91e58432fbaa32d9572531")),
+            govActionIndex: 1
+        )
+        await #expect(throws: CardanoChainError.self) {
+            _ = try await chainContext.govActionVotes(govActionID: govActionID)
+        }
+    }
+
     @Test("Test govActionsAll")
     func testGovActionsAll() async throws {
         let config = createMockConfig()
