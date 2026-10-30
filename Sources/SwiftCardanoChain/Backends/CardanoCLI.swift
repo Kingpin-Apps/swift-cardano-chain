@@ -914,7 +914,7 @@ public actor CardanoCliChainContext: ChainContext {
             else {
                 throw CardanoChainError.valueError("Missing proposalProcedure in proposal")
             }
-            return try parseGovAction(actionDict: proposalProcedure["govAction"], id: govActionID)
+            return try parseGovAction(actionDict: proposalProcedure["govAction"])
         }
 
         let inEnactedSet = actionExists(in: enactedGovActions)
@@ -1352,7 +1352,7 @@ public actor CardanoCliChainContext: ChainContext {
         let proposalProcedure = proposal["proposalProcedure"] as? [String: Any] ?? [:]
 
         // Parse govAction fully from the proposal procedure.
-        let govAction = try parseGovAction(actionDict: proposalProcedure["govAction"], id: actionID)
+        let govAction = try parseGovAction(actionDict: proposalProcedure["govAction"])
 
         // Parse deposit + return address.
         let deposit: Coin = try LedgerValues.required(
@@ -1405,8 +1405,8 @@ public actor CardanoCliChainContext: ChainContext {
     /// than fabricated data — and where the tag itself is missing, we
     /// return `.infoAction` so consumers can detect "unparseable" via the
     /// variant tag.
-    private func parseGovAction(actionDict any: Any?, id: GovActionID) throws -> GovAction {
-        try LedgerGovActionJSON.govAction(any, id: id, "cardano-cli governance action") {
+    private func parseGovAction(actionDict any: Any?) throws -> GovAction {
+        try LedgerGovActionJSON.govAction(any, "cardano-cli governance action") {
             try LedgerGovActionJSON.protocolParamUpdate($0, "cardano-cli")
         }
     }

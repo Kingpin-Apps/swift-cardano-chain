@@ -11,11 +11,12 @@ import SwiftCardanoCore
 /// `InfoAction` maps to `.infoAction`.
 enum LedgerGovActionJSON {
 
-    /// The action `any` describes. `id` is passed through to the action's
-    /// `id` field as every backend does; `protocolParamUpdate` reads a
-    /// parameter change's update object.
+    /// The action `any` describes. Each action's `id` is its previous
+    /// governance action of the same purpose (`prev_gov_action_id`), read
+    /// from the JSON, or `nil` when it has none — never the proposal's own id.
+    /// `protocolParamUpdate` reads a parameter change's update object.
     static func govAction(
-        _ any: Any?, id: GovActionID, _ what: String,
+        _ any: Any?, _ what: String,
         protocolParamUpdate: ([String: Any]) throws -> ProtocolParamUpdate
     ) throws -> GovAction {
         guard let object = any as? [String: Any] else {
@@ -37,7 +38,8 @@ enum LedgerGovActionJSON {
             return .infoAction(InfoAction())
 
         case "NoConfidence":
-            return .noConfidence(NoConfidence(id: id))
+            // A constructor with one field: `contents` is the previous action id itself.
+            return .noConfidence(NoConfidence(id: try prevActionID(object["contents"], "\(what) previous action")))
 
         case "ParameterChange":
             // [prevGovActionId, ProtocolParamUpdate, policyHash]
@@ -45,11 +47,10 @@ enum LedgerGovActionJSON {
             guard let update = c[1] as? [String: Any] else {
                 throw CardanoChainError.valueError("\(what) parameter update is not an object: \(c[1])")
             }
-            return .parameterChangeAction(ParameterChangeAction(
-                id: id,
-                protocolParamUpdate: try protocolParamUpdate(update),
-                policyHash: try policyHash(c[2], "\(what) policy hash")
-            ))
+            return .parameterChangeAction(parameterChange(
+                prev: try prevActionID(c[0], "\(what) previous action"),
+                update: try protocolParamUpdate(update),
+                policyHash: try policyHash(c[2], "\(what) policy hash")))
 
         case "HardForkInitiation":
             // [prevGovActionId, {major, minor}]
@@ -62,7 +63,8 @@ enum LedgerGovActionJSON {
             let minor: Int = try LedgerValues.required(
                 LedgerValues.integer(json: version["minor"], "\(what) minor version"), "\(what) minor version")
             return .hardForkInitiationAction(HardForkInitiationAction(
-                id: nil, protocolVersion: ProtocolVersion(major: major, minor: minor)))
+                id: try prevActionID(c[0], "\(what) previous action"),
+                protocolVersion: ProtocolVersion(major: major, minor: minor)))
 
         case "TreasuryWithdrawals":
             // [[[rewardAccount, coin], ...], policyHash]
@@ -83,7 +85,7 @@ enum LedgerGovActionJSON {
                 withdrawals: withdrawals, policyHash: try policyHash(c[1], "\(what) policy hash")))
 
         case "UpdateCommittee":
-            return .updateCommittee(try updateCommittee(contents(4), id: id, what))
+            return .updateCommittee(try updateCommittee(contents(4), what))
 
         case "NewConstitution":
             // [prevGovActionId, {anchor, script}]
@@ -91,19 +93,19 @@ enum LedgerGovActionJSON {
             guard let constitution = c[1] as? [String: Any] else {
                 throw CardanoChainError.valueError("\(what) constitution is not an object: \(c[1])")
             }
-            return .newConstitution(NewConstitution(id: id, constitution: try self.constitution(constitution, what)))
+            return .newConstitution(NewConstitution(
+                id: try prevActionID(c[0], "\(what) previous action"),
+                constitution: try self.constitution(constitution, what)))
 
         default:
             throw CardanoChainError.valueError("\(what) has an unknown tag \(tag)")
         }
     }
 
-    /// `[prevGovActionId, [removed cold credentials], {added cold credential: expiry epoch}, quorum]`.
-    ///
-    /// The members to remove and the members to add both go in
-    /// `coldCredentials`, with the added members' terms in
-    /// `credentialEpochs`, as every backend in this library reports them.
-    static func updateCommittee(_ contents: [Any], id: GovActionID, _ what: String) throws -> UpdateCommittee {
+    /// `[prevGovActionId, [members to remove], {member to add: expiry epoch}, quorum]`,
+    /// mapped as the ledger holds it: `coldCredentials` is the set of members
+    /// to remove, `credentialEpochs` the members to add with their terms.
+    static func updateCommittee(_ contents: [Any], _ what: String) throws -> UpdateCommittee {
         guard contents.count == 4 else {
             throw CardanoChainError.valueError("\(what) UpdateCommittee contents are not 4 fields: \(contents)")
         }
@@ -113,23 +115,62 @@ enum LedgerGovActionJSON {
         guard let added = contents[2] as? [String: Any] else {
             throw CardanoChainError.valueError("\(what) members to add are not an object: \(contents[2])")
         }
-        var coldCredentials: Set<CommitteeColdCredential> = []
-        var credentialEpochs: [CommitteeColdCredential: UInt64] = [:]
+        var toRemove: Set<CommitteeColdCredential> = []
         for entry in removed {
-            coldCredentials.insert(CommitteeColdCredential(
+            toRemove.insert(CommitteeColdCredential(
                 credential: try LedgerValues.credential(json: entry, "\(what) member to remove")))
         }
+        var toAdd: [CommitteeColdCredential: UInt64] = [:]
         for (key, epoch) in added {
             let credential = CommitteeColdCredential(
                 credential: try LedgerValues.credential(json: key, "\(what) member to add"))
-            coldCredentials.insert(credential)
-            credentialEpochs[credential] = try LedgerValues.required(
+            toAdd[credential] = try LedgerValues.required(
                 LedgerValues.integer(json: epoch, "\(what) member term"), "\(what) member term")
         }
         let quorum = try LedgerValues.required(
             LedgerValues.unitInterval(json: contents[3], "\(what) quorum"), "\(what) quorum")
         return UpdateCommittee(
-            id: id, coldCredentials: coldCredentials, credentialEpochs: credentialEpochs, interval: quorum)
+            id: try prevActionID(contents[0], "\(what) previous action"),
+            coldCredentials: toRemove, credentialEpochs: toAdd, interval: quorum)
+    }
+
+    /// `value` (a generated client's JSON container) as `JSONSerialization`
+    /// reads JSON, so a JSON null is `NSNull` throughout, not a boxed `nil`;
+    /// `nil` when there is no value.
+    static func foundationJSON<T: Encodable>(_ value: T?, _ what: String) throws -> Any? {
+        guard let value else { return nil }
+        do {
+            return try JSONSerialization.jsonObject(
+                with: JSONEncoder().encode(value), options: .fragmentsAllowed)
+        } catch {
+            throw CardanoChainError.valueError("\(what) is not JSON: \(error)")
+        }
+    }
+
+    /// A previous governance action id as the ledger writes it,
+    /// `{"txId": hex, "govActionIx": n}`, or `nil` for no value or JSON null.
+    static func prevActionID(_ any: Any?, _ what: String) throws -> GovActionID? {
+        guard let any, !(any is NSNull) else { return nil }
+        guard let object = any as? [String: Any], let txId = object["txId"] as? String else {
+            throw CardanoChainError.valueError("\(what): \(any) is not a governance action id")
+        }
+        return GovActionID(
+            transactionID: try LedgerValues.hash(hex: txId, as: TransactionId.self, "\(what) txId"),
+            govActionIndex: try LedgerValues.required(
+                LedgerValues.integer(json: object["govActionIx"], "\(what) govActionIx"), "\(what) govActionIx"))
+    }
+
+    /// A parameter change with `prev` as its previous action, which may be
+    /// `nil`. (Core's initialiser takes a non-optional id; its `id` property
+    /// is optional, so it is set after.)
+    static func parameterChange(
+        prev: GovActionID?, update: ProtocolParamUpdate, policyHash: ScriptHash?
+    ) -> ParameterChangeAction {
+        var action = ParameterChangeAction(
+            id: GovActionID(transactionID: TransactionId(payload: Data(count: 32)), govActionIndex: 0),
+            protocolParamUpdate: update, policyHash: policyHash)
+        action.id = prev
+        return action
     }
 
     /// `{anchor: {url, dataHash}, script: hash | null}`; the anchor is required.

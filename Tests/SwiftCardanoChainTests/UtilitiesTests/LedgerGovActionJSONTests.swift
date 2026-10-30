@@ -15,7 +15,7 @@ struct LedgerGovActionJSONTests {
 
     private func parse(_ json: String) throws -> GovAction {
         let any = try JSONSerialization.jsonObject(with: Data(json.utf8), options: .fragmentsAllowed)
-        return try LedgerGovActionJSON.govAction(any, id: Self.id, "test") {
+        return try LedgerGovActionJSON.govAction(any, "test") {
             try LedgerGovActionJSON.protocolParamUpdate($0, "test")
         }
     }
@@ -71,8 +71,11 @@ struct LedgerGovActionJSONTests {
         guard case .updateCommittee(let committee) = try parse(
             #"{"tag": "UpdateCommittee", "contents": [null, [{"keyHash": "\#(Self.keyHash)"}], {"scriptHash-\#(Self.keyHash)": 500}, {"numerator": 2, "denominator": 3}]}"#)
         else { Issue.record("Expected a committee update"); return }
-        #expect(committee.coldCredentials.count == 2)
-        #expect(committee.credentialEpochs.values.first == 500)
+        // The member to remove and the member to add are kept apart.
+        #expect(committee.coldCredentials == [
+            CommitteeColdCredential(credential: .verificationKeyHash(VerificationKeyHash(payload: Data(hex: Self.keyHash))))])
+        #expect(committee.credentialEpochs == [
+            CommitteeColdCredential(credential: .scriptHash(ScriptHash(payload: Data(hex: Self.keyHash)))): 500])
         #expect(committee.interval.numerator == 2 && committee.interval.denominator == 3)
 
         guard case .newConstitution(let constitution) = try parse(

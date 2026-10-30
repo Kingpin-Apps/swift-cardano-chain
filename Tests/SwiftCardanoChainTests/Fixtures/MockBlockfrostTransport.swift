@@ -566,6 +566,14 @@ struct BlockfrostPoolMockTransport: ClientTransport {
 struct ParameterChangeMockTransport: ClientTransport {
     private let fallback = MockTransport()
 
+    /// The proposal's previous parameter change, as db-sync records it.
+    static let previousTxHash = "c75bb221606687aa858ec89c7a15c88e9c17054f2e045ae31ecc8a9687cd206e"
+    static let policyHash = "fa24fb305126805cf2164c161d852a0e7330cf988f1fe558cf7d4a64"
+    static let description = """
+        {"tag": "ParameterChange", "contents": [
+          {"txId": "\(previousTxHash)", "govActionIx": 3}, {"minPoolCost": 75000000}, "\(policyHash)"]}
+        """
+
     func send(
         _ request: HTTPTypes.HTTPRequest,
         body: OpenAPIRuntime.HTTPBody?,
@@ -579,7 +587,9 @@ struct ParameterChangeMockTransport: ClientTransport {
                     txHash: "2dd15e0ef6e6a17841cb9541c27724072ce4d4b79b91e58432fbaa32d9572531",
                     certIndex: 1,
                     governanceType: .parameterChange,
-                    governanceDescription: Components.Schemas.Proposal.GovernanceDescriptionPayload(),
+                    governanceDescription: try JSONDecoder().decode(
+                        Components.Schemas.Proposal.GovernanceDescriptionPayload.self,
+                        from: Data(Self.description.utf8)),
                     deposit: "12000",
                     returnAddress: "stake_test1urd3hs7rlxwwdzthe6hj026dmyt3y0heuulctscyydh2kgck6nkmz",
                     ratifiedEpoch: nil,

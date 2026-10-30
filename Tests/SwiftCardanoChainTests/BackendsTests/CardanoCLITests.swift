@@ -842,6 +842,42 @@ struct CardanoCLIContextTests {
         }
     }
 
+    /// The gov-state fixture with its proposal's action replaced by `action` (ledger JSON).
+    private func cliContext(govAction action: String) async throws -> CardanoCliChainContext {
+        var root = try #require(
+            try JSONSerialization.jsonObject(with: Data(CLIResponse.govState.utf8)) as? [String: Any])
+        var proposals = try #require(root["proposals"] as? [[String: Any]])
+        var procedure = try #require(proposals[0]["proposalProcedure"] as? [String: Any])
+        procedure["govAction"] = try JSONSerialization.jsonObject(with: Data(action.utf8))
+        proposals[0]["proposalProcedure"] = procedure
+        root["proposals"] = proposals
+        let govState = String(decoding: try JSONSerialization.data(withJSONObject: root), as: UTF8.self)
+        let config = createMockConfig()
+        let cli = try await CardanoCLI(
+            configuration: config, commandRunner: createCardaonCLIMockCommandRunner(config: config, govState: govState))
+        return try await CardanoCliChainContext(nodeConfig: FilePath(configFilePath!), network: .preview, cli: cli)
+    }
+
+    private static let cliProposal = GovActionID(
+        transactionID: TransactionId(payload: Data(hex: "2dd15e0ef6e6a17841cb9541c27724072ce4d4b79b91e58432fbaa32d9572531")),
+        govActionIndex: 1)
+
+    static let withAndWithoutPrevious: [Bool] = [true, false]
+
+    @Test("cardano-cli reads a hard fork's previous action, or none", arguments: withAndWithoutPrevious)
+    func testGovActionPreviousID(_ previous: Bool) async throws {
+        let context = try await cliContext(govAction: GovActionPreviousIDTests.ledgerHardFork(previous))
+        let votes = try await context.govActionVotes(govActionID: Self.cliProposal)
+        GovActionPreviousIDTests.check(votes.govAction, previous: previous)
+    }
+
+    @Test("cardano-cli keeps a committee update's removals and additions apart")
+    func testGovActionCommitteeApart() async throws {
+        let context = try await cliContext(govAction: GovActionPreviousIDTests.ledgerCommittee)
+        let votes = try await context.govActionVotes(govActionID: Self.cliProposal)
+        GovActionPreviousIDTests.check(votes.govAction, previous: true)
+    }
+
     @Test("Test govActionsAll")
     func testGovActionsAll() async throws {
         let config = createMockConfig()

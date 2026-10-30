@@ -1175,7 +1175,7 @@ public actor OgmiosChainContext: ChainContext {
             throw CardanoChainError.valueError("Governance action not found: \(govActionID)")
         }
 
-        let govAction = try Self.mapOgmiosGovernanceAction(entry.action, fallbackID: govActionID)
+        let govAction = try Self.mapOgmiosGovernanceAction(entry.action)
 
         return GovActionInfo(
             govActionId: govActionID,
@@ -1335,7 +1335,7 @@ public actor OgmiosChainContext: ChainContext {
             throw CardanoChainError.valueError("Governance action not found: \(govActionID)")
         }
 
-        return try Self.mapProposalState(entry, fallbackID: govActionID)
+        return try Self.mapProposalState(entry, proposalID: govActionID)
     }
 
     public func govActionsAll() async throws -> [GovActionVotes] {
@@ -1345,7 +1345,7 @@ public actor OgmiosChainContext: ChainContext {
                 transactionID: try LedgerValues.hash(hex: state.proposal.transaction.id, as: TransactionId.self, "Ogmios TransactionId"),
                 govActionIndex: try state.proposal.index.checked("Ogmios proposal index")
             )
-            return try Self.mapProposalState(state, fallbackID: id)
+            return try Self.mapProposalState(state, proposalID: id)
         }
     }
 
@@ -1428,24 +1428,32 @@ public actor OgmiosChainContext: ChainContext {
     /// correct variant tag with an explicitly empty `ProtocolParamUpdate`
     /// and a `nil`-guarded sentinel.
     private static func mapOgmiosGovernanceAction(
-        _ action: SwiftOgmios.GovernanceAction,
-        fallbackID: GovActionID
+        _ action: SwiftOgmios.GovernanceAction
     ) throws -> GovAction {
+        /// An action's `ancestor`: the previous action of its purpose, or `nil` for none.
+        func previous(_ ancestor: GovernanceProposalReference?) throws -> GovActionID? {
+            try ancestor.map {
+                GovActionID(
+                    transactionID: try LedgerValues.hash(
+                        hex: $0.transaction.id, as: TransactionId.self, "Ogmios ancestor transaction"),
+                    govActionIndex: try $0.index.checked("Ogmios ancestor index"))
+            }
+        }
         switch action {
-        case .protocolParametersUpdate:
+        case .protocolParametersUpdate(let update):
             // TODO: map ProposedProtocolParameters → ProtocolParamUpdate.
             // Until that lands, the variant tag is correct but the payload
             // is intentionally empty — callers must not read the inner
             // ProtocolParamUpdate fields as authoritative.
-            return .parameterChangeAction(ParameterChangeAction(
-                id: fallbackID,
-                protocolParamUpdate: ProtocolParamUpdate(),
+            return .parameterChangeAction(LedgerGovActionJSON.parameterChange(
+                prev: try previous(update.ancestor),
+                update: ProtocolParamUpdate(),
                 policyHash: nil
             ))
 
         case .hardForkInitiation(let hf):
             return .hardForkInitiationAction(HardForkInitiationAction(
-                id: nil,
+                id: try previous(hf.ancestor),
                 protocolVersion: ProtocolVersion(
                     major: Int(hf.version.major),
                     minor: Int(hf.version.minor)
@@ -1471,24 +1479,31 @@ public actor OgmiosChainContext: ChainContext {
             ))
 
         case .constitutionalCommittee(let cc):
-            var coldCredentials: Set<CommitteeColdCredential> = []
+            // SwiftOgmios decodes each removed member as a `Members` value, which
+            // has no room for the member's id, so who is removed cannot be read.
+            // Reporting no removals would be a different action; refuse instead.
+            if let removed = cc.members.removed, !removed.isEmpty {
+                throw CardanoChainError.notImplemented(
+                    "Ogmios committee update removes \(removed.count) member(s), which SwiftOgmios cannot decode")
+            }
+            // `coldCredentials` holds the members to remove (none here); the
+            // members to add go in `credentialEpochs` with their terms.
+            let coldCredentials: Set<CommitteeColdCredential> = []
             var credentialEpochs: [CommitteeColdCredential: UInt64] = [:]
             for member in cc.members.added ?? [] {
                 let cred = try makeCommitteeColdCredential(
                     idHex: member.id.value,
                     from: member.from
                 )
-                coldCredentials.insert(cred)
-                if let mandate = member.mandate {
-                    credentialEpochs[cred] = mandate.epoch
-                }
+                credentialEpochs[cred] = try LedgerValues.required(
+                    member.mandate, "Ogmios committee member to add \(member.id.value) term").epoch
             }
             // Ogmios's schema requires the quorum; a missing one is not 0.
             let interval = try LedgerValues.unitInterval(
                 text: LedgerValues.required(cc.quorum?.value, "Ogmios committee update quorum"),
                 "Ogmios committee update quorum")
             return .updateCommittee(UpdateCommittee(
-                id: fallbackID,
+                id: try previous(cc.ancestor),
                 coldCredentials: coldCredentials,
                 credentialEpochs: credentialEpochs,
                 interval: interval
@@ -1498,12 +1513,12 @@ public actor OgmiosChainContext: ChainContext {
             let anchor = try LedgerValues.anchor(
                 url: c.metadata.url.absoluteString, hash: c.metadata.hash, "Ogmios constitution anchor")
             return .newConstitution(NewConstitution(
-                id: fallbackID,
+                id: try previous(c.ancestor),
                 constitution: Constitution(anchor: anchor, scriptHash: nil)
             ))
 
-        case .noConfidence:
-            return .noConfidence(NoConfidence(id: fallbackID))
+        case .noConfidence(let nc):
+            return .noConfidence(NoConfidence(id: try previous(nc.ancestor)))
 
         case .information:
             return .infoAction(InfoAction())
@@ -1523,7 +1538,7 @@ public actor OgmiosChainContext: ChainContext {
 
     private static func mapProposalState(
         _ state: SwiftOgmios.GovernanceProposalState,
-        fallbackID: GovActionID
+        proposalID: GovActionID
     ) throws -> GovActionVotes {
         var committeeVotes: [SwiftCardanoNetwork.CommitteeVote] = []
         var dRepVotes: [SwiftCardanoNetwork.DRepVote] = []
@@ -1583,10 +1598,10 @@ public actor OgmiosChainContext: ChainContext {
             url: state.metadata.url.absoluteString, hash: state.metadata.hash.description,
             "Ogmios proposal anchor")
 
-        let govAction = try mapOgmiosGovernanceAction(state.action, fallbackID: fallbackID)
+        let govAction = try mapOgmiosGovernanceAction(state.action)
 
         return GovActionVotes(
-            govActionId: fallbackID,
+            govActionId: proposalID,
             govAction: govAction,
             committeeVotes: committeeVotes,
             dRepVotes: dRepVotes,

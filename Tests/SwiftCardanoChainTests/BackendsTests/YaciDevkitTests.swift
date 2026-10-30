@@ -1143,8 +1143,13 @@ struct YaciDevkitChainContextTests {
             Issue.record("Expected an update committee action")
             return
         }
-        #expect(update.coldCredentials.count == 2)
+        // Only the member to remove is in `coldCredentials`; the member to add is in the map.
+        #expect(update.coldCredentials.map { $0.credential.payload.toHex } == [YaciMockData.ccColdHex])
+        #expect(update.credentialEpochs.count == 1)
+        #expect(update.credentialEpochs.keys.first?.credential.payload.toHex == YaciMockData.ccColdResignedHex)
         #expect(update.credentialEpochs.values.first == 500)
+        // No `govActionId` in the details: the first action of its purpose.
+        #expect(update.id == nil)
         #expect(update.interval.numerator == 2)
         #expect(update.interval.denominator == 3)
 

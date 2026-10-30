@@ -1999,6 +1999,24 @@ public actor YaciDevkitChainContext: ChainContext {
             }
             return nil
         }
+        /// The action's previous action of the same purpose, Yaci's `govActionId`
+        /// (`{transactionId, gov_action_index}`), or `nil` when it has none.
+        func previous() throws -> GovActionID? {
+            guard let raw = details?["govActionId"] ?? details?["gov_action_id"], !(raw is NSNull) else {
+                return nil
+            }
+            guard let prev = raw as? [String: Any],
+                let txHash = (prev["transactionId"] ?? prev["transaction_id"]) as? String
+            else {
+                throw CardanoChainError.valueError("Yaci previous governance action \(raw) is not an id")
+            }
+            return GovActionID(
+                transactionID: try LedgerValues.hash(hex: txHash, as: TransactionId.self, "Yaci previous action"),
+                govActionIndex: try LedgerValues.required(
+                    LedgerValues.integer(
+                        json: prev["gov_action_index"] ?? prev["govActionIndex"], "Yaci previous action index"),
+                    "Yaci previous action index"))
+        }
         func policyHash() throws -> ScriptHash? {
             guard let hex = string("policyHash", "policy_hash") else { return nil }
             return try LedgerValues.hash(hex: hex, as: ScriptHash.self, "Yaci ScriptHash")
@@ -2009,7 +2027,7 @@ public actor YaciDevkitChainContext: ChainContext {
             return .infoAction(InfoAction())
 
         case "NO_CONFIDENCE":
-            return .noConfidence(NoConfidence(id: id))
+            return .noConfidence(NoConfidence(id: try previous()))
 
         case "HARD_FORK_INITIATION_ACTION":
             let version = try LedgerValues.required(
@@ -2022,7 +2040,7 @@ public actor YaciDevkitChainContext: ChainContext {
                 "Yaci hard fork minor version")
             return .hardForkInitiationAction(
                 HardForkInitiationAction(
-                    id: nil, protocolVersion: ProtocolVersion(major: major, minor: minor)
+                    id: try previous(), protocolVersion: ProtocolVersion(major: major, minor: minor)
                 ))
 
         case "TREASURY_WITHDRAWALS_ACTION":
@@ -2056,10 +2074,12 @@ public actor YaciDevkitChainContext: ChainContext {
                 .map { try LedgerValues.hash(hex: $0, as: ScriptHash.self, "Yaci constitution script hash") }
             return .newConstitution(
                 NewConstitution(
-                    id: id, constitution: Constitution(anchor: anchor, scriptHash: scriptHash)
+                    id: try previous(), constitution: Constitution(anchor: anchor, scriptHash: scriptHash)
                 ))
 
         case "UPDATE_COMMITTEE":
+            // As the ledger holds it: `coldCredentials` is the members to remove,
+            // `credentialEpochs` the members to add with their terms.
             var coldCredentials: Set<CommitteeColdCredential> = []
             var credentialEpochs: [CommitteeColdCredential: UInt64] = [:]
 
@@ -2078,7 +2098,6 @@ public actor YaciDevkitChainContext: ChainContext {
                 let credential = try committeeColdCredential(fromKey: key)
                 let epochValue: UInt64 = try LedgerValues.required(
                     LedgerValues.integer(json: epoch, "Yaci committee term epoch"), "Yaci committee term epoch")
-                coldCredentials.insert(credential)
                 credentialEpochs[credential] = epochValue
             }
             // A committee update always carries its quorum; a missing one is not 0.
@@ -2090,7 +2109,7 @@ public actor YaciDevkitChainContext: ChainContext {
 
             return .updateCommittee(
                 UpdateCommittee(
-                    id: id,
+                    id: try previous(),
                     coldCredentials: coldCredentials,
                     credentialEpochs: credentialEpochs,
                     interval: interval
@@ -2101,8 +2120,8 @@ public actor YaciDevkitChainContext: ChainContext {
             // lands the variant tag is correct but the payload is intentionally empty, which is
             // what the Koios and Ogmios backends also do.
             return .parameterChangeAction(
-                ParameterChangeAction(
-                    id: id, protocolParamUpdate: ProtocolParamUpdate(), policyHash: try policyHash()
+                LedgerGovActionJSON.parameterChange(
+                    prev: try previous(), update: ProtocolParamUpdate(), policyHash: try policyHash()
                 ))
 
         default:

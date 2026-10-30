@@ -1141,24 +1141,42 @@ public actor BlockFrostChainContext: ChainContext {
         )
     }
     
-    /// The action in a proposal's `governance_description`, which must carry `tag`.
+    /// A proposal's `governance_description` — the action as db-sync records it,
+    /// `{"tag": …, "contents": …}` — which must carry `tag`.
     ///
-    /// Blockfrost has no typed endpoint for a committee update or a new
-    /// constitution; the description is the only place it reports their
-    /// contents, so a description that is missing or of another kind throws
-    /// rather than standing in an empty or made-up action.
-    private func describedAction(
-        _ proposal: Components.Schemas.Proposal, _ id: GovActionID, tag: String
-    ) throws -> GovAction {
+    /// It is the only place Blockfrost reports an action's previous action id,
+    /// its policy hash, and a committee update's or a new constitution's
+    /// contents, so a description that is missing or of another kind throws.
+    private func description(
+        of proposal: Components.Schemas.Proposal, tag: String
+    ) throws -> [String: Any] {
         let what = "Blockfrost governance_description"
-        let description = try LedgerValues.required(proposal.governanceDescription?.additionalProperties.value, what)
-        guard (description["tag"] as? String) == tag else {
+        let json = try LedgerGovActionJSON.foundationJSON(proposal.governanceDescription?.additionalProperties, what)
+        guard let description = json as? [String: Any], (description["tag"] as? String) == tag else {
             throw CardanoChainError.valueError(
-                "\(what) of a \(proposal.governanceType) proposal is not a \(tag): \(description)")
+                "\(what) of a \(proposal.governanceType) proposal is not a \(tag): \(String(describing: json))")
         }
-        return try LedgerGovActionJSON.govAction(description, id: id, what) { _ in
-            throw CardanoChainError.valueError("\(what): unexpected parameter change")
+        return description
+    }
+
+    /// The action in a proposal's `governance_description`, which must carry `tag`.
+    private func describedAction(_ proposal: Components.Schemas.Proposal, tag: String) throws -> GovAction {
+        let what = "Blockfrost governance_description"
+        return try LedgerGovActionJSON.govAction(description(of: proposal, tag: tag), what) {
+            try LedgerGovActionJSON.protocolParamUpdate($0, what)
         }
+    }
+
+    /// The `contents` of a proposal's `governance_description`, which must be `count` fields.
+    private func describedContents(
+        _ proposal: Components.Schemas.Proposal, tag: String, count: Int
+    ) throws -> [Any] {
+        let description = try description(of: proposal, tag: tag)
+        guard let contents = description["contents"] as? [Any], contents.count == count else {
+            throw CardanoChainError.valueError(
+                "Blockfrost governance_description \(tag) contents are not \(count) fields: \(description)")
+        }
+        return contents
     }
 
     /// Get the governance action information for a given governance action ID.
@@ -1175,26 +1193,14 @@ public actor BlockFrostChainContext: ChainContext {
         )
         let govActionData = try response.ok.body.json
         
-        var govAction: GovAction = .infoAction(.init())
+        let govAction: GovAction
         
         switch govActionData.governanceType {
         case .infoAction:
             govAction = .infoAction(.init())
         case .hardForkInitiation:
-            let paramsResponse = try await api.client.getGovernanceProposalsTxHashCertIndexParameters(
-                .init(path: .init(
-                    txHash: govActionID.transactionID.payload.toHex,
-                    certIndex: Int(govActionID.govActionIndex)
-                ))
-            )
-            let params = try paramsResponse.ok.body.json.parameters
-            govAction = .hardForkInitiationAction(.init(
-                id: nil,
-                protocolVersion: ProtocolVersion(
-                    major: try LedgerValues.required(params.protocolMajorVer, "Blockfrost protocol_major_ver"),
-                    minor: try LedgerValues.required(params.protocolMinorVer, "Blockfrost protocol_minor_ver")
-                )
-            ))
+            // `{"tag": "HardForkInitiation", "contents": [prevId, {major, minor}]}`.
+            govAction = try describedAction(govActionData, tag: "HardForkInitiation")
         case .parameterChange:
             let paramsResponse = try await api.client.getGovernanceProposalsTxHashCertIndexParameters(
                 .init(path: .init(
@@ -1263,20 +1269,28 @@ public actor BlockFrostChainContext: ChainContext {
                 collateralPercentage: try int(params.collateralPercent, "collateral_percent"),
                 maxCollateralInputs: try int(params.maxCollateralInputs, "max_collateral_inputs")
             )
-            govAction = .parameterChangeAction(ParameterChangeAction(id: govActionID, protocolParamUpdate: update, policyHash: nil))
+            // The update is read from Blockfrost's typed endpoint; the previous
+            // action and the policy hash only from `governance_description`:
+            // `{"tag": "ParameterChange", "contents": [prevId, update, policyHash]}`.
+            let contents = try describedContents(govActionData, tag: "ParameterChange", count: 3)
+            govAction = .parameterChangeAction(LedgerGovActionJSON.parameterChange(
+                prev: try LedgerGovActionJSON.prevActionID(contents[0], "Blockfrost previous action"),
+                update: update,
+                policyHash: try LedgerGovActionJSON.policyHash(contents[2], "Blockfrost proposal policy hash")))
         case .noConfidence:
-            govAction = .noConfidence(.init(id: govActionID)) // Using same ID as placeholder
+            // `{"tag": "NoConfidence", "contents": prevId}`.
+            govAction = try describedAction(govActionData, tag: "NoConfidence")
         case .newCommittee:
             // The members to remove, the members to add with their terms and the
             // quorum are in `governance_description`, the action as db-sync
             // records it: `{"tag": "UpdateCommittee", "contents": [prevId, [removed], {added: epoch}, quorum]}`.
-            govAction = try describedAction(govActionData, govActionID, tag: "UpdateCommittee")
+            govAction = try describedAction(govActionData, tag: "UpdateCommittee")
         case .newConstitution:
             // The constitution's anchor is in `governance_description`:
             // `{"tag": "NewConstitution", "contents": [prevId, {"anchor": {url, dataHash}, "script": …}]}`.
             // (The proposal's metadata endpoint is the proposal's own anchor,
             // not the constitution's.)
-            govAction = try describedAction(govActionData, govActionID, tag: "NewConstitution")
+            govAction = try describedAction(govActionData, tag: "NewConstitution")
         case .treasuryWithdrawals:
             let withdrawalsResponse = try await api.client.getGovernanceProposalsTxHashCertIndexWithdrawals(
                 .init(path: .init(
@@ -1294,7 +1308,8 @@ public actor BlockFrostChainContext: ChainContext {
             }
             govAction = .treasuryWithdrawalsAction(.init(withdrawals: withdrawals, policyHash: nil))
         @unknown default:
-            govAction = .infoAction(.init())
+            throw CardanoChainError.valueError(
+                "Blockfrost proposal type \(govActionData.governanceType) is not one this library reads")
         }
         
         return GovActionInfo(

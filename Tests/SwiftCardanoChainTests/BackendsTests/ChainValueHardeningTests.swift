@@ -558,7 +558,8 @@ struct ChainValueHardeningTests {
             credential: .scriptHash(ScriptHash(payload: Data(hex: added))))
         let removedCredential = CommitteeColdCredential(
             credential: .verificationKeyHash(VerificationKeyHash(payload: Data(hex: removed))))
-        #expect(update.coldCredentials == [addedCredential, removedCredential])
+        // `coldCredentials` is the members to remove; the members to add are in the map.
+        #expect(update.coldCredentials == [removedCredential])
         #expect(update.credentialEpochs == [addedCredential: 580])
         #expect(update.interval.numerator == 67 && update.interval.denominator == 100)
     }

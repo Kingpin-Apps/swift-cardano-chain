@@ -1107,7 +1107,7 @@ public actor KoiosChainContext: ChainContext {
                 throw CardanoChainError.valueError("Governance action not found: \(govActionID)")
             }
 
-            let govAction = try parseKoiosGovAction(proposal.proposalDescription, id: govActionID)
+            let govAction = try parseKoiosGovAction(proposal.proposalDescription)
 
             return GovActionInfo(
                 govActionId: govActionID,
@@ -1391,7 +1391,7 @@ public actor KoiosChainContext: ChainContext {
         proposal: Components.Schemas.ProposalListPayload,
         proposalIdBech32: String
     ) async throws -> GovActionVotes {
-        let govAction = try parseKoiosGovAction(proposal.proposalDescription, id: govActionID)
+        let govAction = try parseKoiosGovAction(proposal.proposalDescription)
 
         // deposit / returnAddress / anchor straight from the proposal row.
         let deposit: Coin = try LedgerValues.required(
@@ -1523,10 +1523,11 @@ public actor KoiosChainContext: ChainContext {
     /// we surface the variant as `.infoAction` so callers can detect the
     /// gap via the variant tag rather than via fabricated inner data.
     private func parseKoiosGovAction(
-        _ description: OpenAPIRuntime.OpenAPIObjectContainer?,
-        id: GovActionID
+        _ description: OpenAPIRuntime.OpenAPIObjectContainer?
     ) throws -> GovAction {
-        try LedgerGovActionJSON.govAction(description?.value, id: id, "Koios proposal_description") {
+        try LedgerGovActionJSON.govAction(
+            LedgerGovActionJSON.foundationJSON(description, "Koios proposal_description"), "Koios proposal_description"
+        ) {
             try LedgerGovActionJSON.protocolParamUpdate($0, "Koios proposal_description")
         }
     }
