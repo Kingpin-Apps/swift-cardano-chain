@@ -200,6 +200,38 @@ struct CardanoCLIContextTests {
         #expect(utxo.input.index == 0)
         #expect(utxo.output.amount.coin == 708_864_940)
         #expect(isSpent == false)
+        // The inline datum is read from inlineDatumRaw, its CBOR.
+        guard case .data(let datum)? = utxo.output.datumOption?.datum else {
+            Issue.record("Expected an inline datum")
+            return
+        }
+        #expect(try datum.toCBORHex() == CLIResponse.utxoInlineDatumRaw)
+    }
+
+    @Test("A UTxO's inline datum is read from its CBOR, so integers past 128 bits are exact")
+    func testUtxoDatumFromCBOR() throws {
+        // CBOR tag 2 (positive bignum) of 2^136: 0x01 followed by 17 zero bytes.
+        let bignum = "c252" + "01" + String(repeating: "00", count: 17)
+        let datum = try #require(try CardanoCliChainContext.datumOption(
+            ["inlineDatumRaw": bignum, "inlineDatum": ["int": 1.0]], "test"))
+        guard case .data(let data) = datum.datum else {
+            Issue.record("Expected Plutus data")
+            return
+        }
+        #expect(try data.toCBORHex() == bignum)
+
+        #expect(try CardanoCliChainContext.datumOption(["inlineDatum": NSNull()], "test") == nil)
+        #expect(try CardanoCliChainContext.datumOption([:], "test") == nil)
+    }
+
+    @Test("An inline datum given only as JSON throws rather than being read through Double")
+    func testUtxoDatumJSONOnly() {
+        #expect(throws: CardanoChainError.self) {
+            try CardanoCliChainContext.datumOption(["inlineDatum": ["int": 1e40]], "test")
+        }
+        #expect(throws: CardanoChainError.self) {
+            try CardanoCliChainContext.datumOption(["inlineDatumRaw": "zz"], "test")
+        }
     }
 
     @Test("Test submitTxCBOR")

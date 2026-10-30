@@ -345,8 +345,11 @@ struct CLIResponse {
 
     static let governanceDRepId = "drep1kqhhkv66a0egfw7uyz7u8dv7fcvr4ck0c3ad9k9urx3yzhefup0"
 
+    /// `Constr 0 [997, 10000000000]`, the inline datum's CBOR in the `utxos` fixture.
+    static let utxoInlineDatumRaw = "d8799f1903e51b00000002540be400ff"
+
     static var utxos: String {
-        let dictionary = [
+        var dictionary = [
             "39a7a284c2a0948189dc45dec670211cd4d72f7b66c5726c08d9b3df11e44d58#0": [
                 "address":
                     "addr_test1qp4kux2v7xcg9urqssdffff5p0axz9e3hcc43zz7pcuyle0e20hkwsu2ndpd9dh9anm4jn76ljdz0evj22stzrw9egxqmza5y3",
@@ -420,6 +423,10 @@ struct CLIResponse {
                 ],
             ]
         ]
+
+        // cardano-cli also prints the inline datum's CBOR, which is what is read.
+        dictionary["39a7a284c2a0948189dc45dec670211cd4d72f7b66c5726c08d9b3df11e44d58#0"]!["inlineDatumRaw"] =
+            utxoInlineDatumRaw
 
         let jsonData = try! JSONSerialization.data(withJSONObject: dictionary, options: [])
         return String(data: jsonData, encoding: .utf8)!

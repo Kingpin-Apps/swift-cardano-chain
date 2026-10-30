@@ -363,6 +363,32 @@ public actor CardanoCliChainContext: ChainContext {
 
     // MARK: - ChainContext Protocol Methods
 
+    /// The datum of a UTxO entry in `query utxo --output-json`, read from its
+    /// CBOR: `datum` (a datum option) or `inlineDatumRaw` (the inline datum's
+    /// Plutus data). `nil` when the output has neither.
+    ///
+    /// The JSON `inlineDatum` is never read: a datum integer is unbounded, and
+    /// JSON numbers do not survive `JSONSerialization` (or a `Decimal`'s 38
+    /// digits) exactly. An entry with an inline datum but no CBOR for it throws.
+    static func datumOption(_ entry: [String: Any], _ what: String) throws -> DatumOption? {
+        if let datum = entry["datum"] as? String {
+            return try DatumOption.fromCBOR(data: LedgerValues.hexBytes(datum, "\(what) datum"))
+        }
+        if let raw = entry["inlineDatumRaw"] as? String {
+            let data = try LedgerValues.hexBytes(raw, "\(what) inlineDatumRaw")
+            do {
+                return DatumOption(datum: try PlutusData.fromCBOR(data: data))
+            } catch {
+                throw CardanoChainError.valueError("\(what) inlineDatumRaw is not Plutus data: \(error)")
+            }
+        }
+        if let inline = entry["inlineDatum"], !(inline is NSNull) {
+            throw CardanoChainError.valueError(
+                "\(what) has an inline datum only as JSON (no inlineDatumRaw), whose integers cannot be read exactly")
+        }
+        return nil
+    }
+
     /// Get all UTxOs associated with an address
     ///
     /// - Parameter address: An address encoded with bech32
@@ -444,15 +470,7 @@ public actor CardanoCliChainContext: ChainContext {
             datumHash = try LedgerValues.hash(hex: datumHashStr, as: DatumHash.self, "cardano-cli DatumHash")
         }
 
-        var datumOption: DatumOption? = nil
-        if let datumStr = utxoEntry["datum"] as? String {
-            let datumData = try LedgerValues.hexBytes(datumStr, "cardano-cli UTxO datum")
-            datumOption = try DatumOption.fromCBOR(data: datumData)
-        } else if let inlineDatum = utxoEntry["inlineDatum"] as? [AnyHashable: Any] {
-            let primitiveDict = try Primitive.fromAny(inlineDatum)
-            let plutusData = try PlutusData(from: primitiveDict)
-            datumOption = DatumOption(datum: plutusData)
-        }
+        let datumOption = try Self.datumOption(utxoEntry, "cardano-cli UTxO \(txInStr)")
 
         var script: ScriptType? = nil
         if let referenceScript = utxoEntry["referenceScript"] as? [String: Any] {
