@@ -278,7 +278,6 @@ public actor NodeSocketChainContext: ChainContext {
             )
         }
 
-        let currentEpoch: Int = try epochNo.checked("node epoch")
         let era = Era.fromEpoch(epoch: epochNo).rawValue
         let slotInt: Int
         let hashHex: String?
