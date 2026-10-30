@@ -921,6 +921,65 @@ struct CardanoCLIContextTests {
         }
     }
 
+    /// A transaction with no inputs or scripts: evaluating it needs only the protocol
+    /// parameters and the slot timeline.
+    private static func emptyTransaction() throws -> Data {
+        try Transaction(
+            transactionBody: TransactionBody(inputs: .list([]), outputs: [], fee: 0),
+            transactionWitnessSet: TransactionWitnessSet()
+        ).toCBORData()
+    }
+
+    /// The mock runner, also answering `query protocol-parameters`.
+    private static func evaluationRunner(_ config: Config) -> MockCommandRunning {
+        let runner = createCardaonCLIMockCommandRunner(config: config)
+        given(runner)
+            .run(
+                arguments: .value([config.cardano!.cli!.string] + CLICommands.protocolParams),
+                environment: .any,
+                workingDirectory: .any
+            )
+            .willReturn(
+                AsyncThrowingStream<CommandEvent, any Error> { continuation in
+                    continuation.yield(.standardOutput([UInt8](CLIResponse.protocolParams.utf8)))
+                    continuation.finish()
+                }
+            )
+        return runner
+    }
+
+    @Test("A known network's slot timeline is the built-in one, and evaluation uses it")
+    func testSlotTimelineKnownNetwork() async throws {
+        let config = createMockConfig()
+        let cli = try await CardanoCLI(
+            configuration: config, commandRunner: Self.evaluationRunner(config))
+        let context = try await CardanoCliChainContext(nodeConfig: FilePath(configFilePath!), network: .preview, cli: cli)
+
+        // The fixture genesis is preview's (network magic 2).
+        #expect(try await context.slotTimeline() == .preview)
+        let units = try await context.evaluateTxCBOR(cbor: Self.emptyTransaction())
+        #expect(units.isEmpty)
+    }
+
+    @Test("Evaluation throws when the genesis behind the slot timeline cannot be read")
+    func testSlotTimelineGenesisFailure() async throws {
+        // A node config whose genesis files are not beside it.
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("chain-no-genesis-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let path = directory.appendingPathComponent("config.json").path
+        try FileManager.default.copyItem(atPath: configFilePath!, toPath: path)
+
+        let config = createMockConfig(configPath: path)
+        let cli = try await CardanoCLI(configuration: config, commandRunner: Self.evaluationRunner(config))
+        let context = try await CardanoCliChainContext(nodeConfig: FilePath(path), network: .preview, cli: cli)
+
+        await #expect(throws: (any Error).self) {
+            _ = try await context.evaluateTxCBOR(cbor: Self.emptyTransaction())
+        }
+    }
+
     @Test("Test govActionsAll")
     func testGovActionsAll() async throws {
         let config = createMockConfig()

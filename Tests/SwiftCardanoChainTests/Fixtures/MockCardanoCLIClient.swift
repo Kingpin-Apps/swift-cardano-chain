@@ -39,14 +39,14 @@ func createMockCardanoCLI(withResponses responses: [String: String] = [:]) -> St
     return binaryPath
 }
 
-func createMockConfig() -> Config {
+func createMockConfig(configPath: String = configFilePath!) -> Config {
     let cardanoConfig = CardanoConfig(
         cli: FilePath(createMockCardanoCLI()),
         node: FilePath("/tmp/mock-cardano-node"),
         hwCli: nil,
         signer: nil,
         socket: FilePath("/tmp/test-socket"),
-        config: FilePath(configFilePath!),
+        config: FilePath(configPath),
         topology: nil,
         database: nil,
         port: nil,
