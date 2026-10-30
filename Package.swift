@@ -36,7 +36,7 @@ let package = Package(
         .package(url: "https://github.com/Kingpin-Apps/swift-cardano-core.git", from: "0.10.0"),
         // Consumers that enable CLIBackends must also enable SwiftCardanoUtils' CLITools trait
         // (top-level, e.g. scm). MansAmana enables neither, so utils' CLI/Command code is excluded.
-        .package(url: "https://github.com/Kingpin-Apps/swift-cardano-utils.git", from: "0.5.9"),
+        .package(url: "https://github.com/Kingpin-Apps/swift-cardano-utils.git", from: "0.5.10"),
         .package(url: "https://github.com/Kingpin-Apps/swift-blockfrost-api.git", from: "0.3.0"),
         .package(url: "https://github.com/Kingpin-Apps/swift-handles-api.git", from: "0.1.1"),
         .package(url: "https://github.com/Kingpin-Apps/swift-koios.git", from: "0.3.0"),
