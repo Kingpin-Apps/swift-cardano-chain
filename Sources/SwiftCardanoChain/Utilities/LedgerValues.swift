@@ -73,6 +73,7 @@ enum LedgerValues {
         json any: Any?, as type: T.Type = T.self, _ what: @autoclosure () -> String
     ) throws -> T? {
         guard let any, !(any is NSNull) else { return nil }
+        try rejectBoolean(any, what())
         if let value = any as? any BinaryInteger { return try integer(value, as: T.self, what()) }
         // Bridging an NSNumber to Int64 or UInt64 succeeds only when it holds
         // that whole number exactly.
@@ -89,6 +90,7 @@ enum LedgerValues {
     /// exceed `Int64.max`. `nil` when `any` is absent or `null`.
     static func bigInt(json any: Any?, _ what: @autoclosure () -> String) throws -> BigInt? {
         guard let any, !(any is NSNull) else { return nil }
+        try rejectBoolean(any, what())
         if let value = any as? any BinaryInteger { return BigInt(value) }
         if let value = any as? Int64 { return BigInt(value) }
         if let value = any as? UInt64 { return BigInt(value) }
@@ -104,6 +106,7 @@ enum LedgerValues {
 
     private static func fraction(json any: Any?, _ what: String) throws -> (UInt64, UInt64)? {
         guard let any, !(any is NSNull) else { return nil }
+        try rejectBoolean(any, what)
         if let object = any as? [String: Any] {
             let n: UInt64? = try integer(json: object["numerator"], "\(what) numerator")
             let d: UInt64? = try integer(json: object["denominator"], "\(what) denominator")
@@ -175,6 +178,17 @@ enum LedgerValues {
     }
 
     // MARK: - Implementation
+
+    /// A JSON `true` or `false` arrives as an `NSNumber` that bridges to 1 or
+    /// 0, so it is refused before it can be read as a number. `objCType` tells
+    /// a boolean apart on Darwin and on swift-corelibs-foundation alike.
+    private static func rejectBoolean(_ any: Any, _ what: @autoclosure () -> String) throws {
+        // A Swift `Int8` also reports "c", so only a Foundation number counts.
+        if !(type(of: any) is any BinaryInteger.Type), let number = any as? NSNumber,
+           String(cString: number.objCType) == "c" {
+            throw CardanoChainError.valueError("\(what()): \(number.boolValue) is not a number")
+        }
+    }
 
     /// The JSON text a `Double` was read from: its shortest description reads
     /// back as the same `Double`, so it is the decimal the API sent, unless

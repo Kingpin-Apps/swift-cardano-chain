@@ -170,6 +170,21 @@ struct LedgerValuesTests {
         }
     }
 
+    @Test("A JSON boolean is not read as 0 or 1")
+    func jsonBooleans() throws {
+        let object = try #require(
+            try JSONSerialization.jsonObject(with: Data(#"{"yes": true, "no": false, "one": 1}"#.utf8))
+                as? [String: Any])
+        for key in ["yes", "no"] {
+            #expect(throws: CardanoChainError.self) { try LedgerValues.integer(json: object[key], as: UInt64.self, key) }
+            #expect(throws: CardanoChainError.self) { try LedgerValues.bigInt(json: object[key], key) }
+            #expect(throws: CardanoChainError.self) { try LedgerValues.unitInterval(json: object[key], key) }
+        }
+        // A number 1, and a Swift Int8 (whose NSNumber also reports "c"), still read.
+        #expect(try LedgerValues.integer(json: object["one"], as: UInt64.self, "one") == 1)
+        #expect(try LedgerValues.integer(json: Int8(1), as: UInt64.self, "int8") == 1)
+    }
+
     // MARK: Integers
 
     @Test("Integers are converted only when they fit")
