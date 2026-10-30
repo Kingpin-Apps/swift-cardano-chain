@@ -18,6 +18,29 @@ struct NodeSocketSlotTimelineTests {
         return try NodeSocketChainContext.convertShelleyGenesis(ShelleyGenesis.load(from: path), network: .preview)
     }
 
+    /// The fixture genesis with `systemStart` replaced, built as the node query builds one.
+    private static func genesis(systemStart: String) throws -> ShelleyGenesis {
+        let path = try #require(Bundle.module.path(forResource: "shelley-genesis", ofType: "json", inDirectory: "data"))
+        let g = try ShelleyGenesis.load(from: path)
+        return ShelleyGenesis(
+            activeSlotsCoeff: g.activeSlotsCoeff, protocolParams: g.protocolParams, genDelegs: g.genDelegs,
+            updateQuorum: g.updateQuorum, networkId: g.networkId, initialFunds: g.initialFunds,
+            maxLovelaceSupply: g.maxLovelaceSupply, networkMagic: g.networkMagic, epochLength: g.epochLength,
+            systemStart: systemStart, slotsPerKESPeriod: g.slotsPerKESPeriod, slotLength: g.slotLength,
+            maxKESEvolutions: g.maxKESEvolutions, securityParam: g.securityParam, staking: g.staking,
+            extraConfig: g.extraConfig)
+    }
+
+    @Test("A genesis systemStart that does not parse throws instead of becoming the current time")
+    func badSystemStart() throws {
+        #expect(throws: CardanoChainError.self) {
+            try NodeSocketChainContext.convertShelleyGenesis(Self.genesis(systemStart: "not a date"), network: .preview)
+        }
+        let params = try NodeSocketChainContext.convertShelleyGenesis(
+            Self.genesis(systemStart: "2022-10-25T00:00:00.5Z"), network: .preview)
+        #expect(params.systemStart == Date(timeIntervalSince1970: 1_666_656_000.5))
+    }
+
     @Test("A known network's slot timeline is the built-in one")
     func knownNetwork() async throws {
         let genesis = try Self.previewGenesis()

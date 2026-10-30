@@ -824,8 +824,15 @@ public actor NodeSocketChainContext: ChainContext {
         _ genesis: ShelleyGenesis,
         network: Network
     ) throws -> GenesisParameters {
-        let formatter = ISO8601DateFormatter()
-        let systemStartDate = formatter.date(from: genesis.systemStart) ?? Date()
+        // A start the node reports must parse; it is never replaced by the current time.
+        let plain = ISO8601DateFormatter()
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        guard let systemStartDate = plain.date(from: genesis.systemStart)
+            ?? fractional.date(from: genesis.systemStart)
+        else {
+            throw CardanoChainError.valueError("Node genesis systemStart \(genesis.systemStart) is not an ISO 8601 date")
+        }
 
         return GenesisParameters(
             activeSlotsCoefficient: genesis.activeSlotsCoeff,
