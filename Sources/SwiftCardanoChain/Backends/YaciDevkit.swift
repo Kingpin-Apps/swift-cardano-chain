@@ -1680,29 +1680,39 @@ public actor YaciDevkitChainContext: ChainContext {
             deposit: deposit,
             // A retired DRep holds no voting power; for a registered one, no
             // stake reading is not a stake of 0.
-            stake: retired
-                ? (try await drepStake(hex: hex) ?? 0)
-                : try LedgerValues.required(try await drepStake(hex: hex), "Yaci DRep stake"),
+            stake: retired ? 0 : try await drepStake(hex: hex, drep: drep),
             expiry: nil,
             status: retired ? .retired : .registered
         )
     }
 
-    /// A DRep's live voting power, or `nil` when the local-state endpoint does not answer with
-    /// 200 (it is only served while the cluster runs) or reports no amount.
+    /// A registered DRep's live voting power, read from DevKit's local-state endpoint.
     ///
-    /// - Throws: When the request fails, the body does not decode, or the amount is not a `Coin`.
-    private func drepStake(hex: String) async throws -> Coin? {
+    /// - Throws: ``CardanoChainError/notImplemented(_:)`` when the endpoint does not answer
+    ///   with 200 — it is only served while the DevKit cluster runs, so this Yaci instance
+    ///   cannot report DRep stake; ``CardanoChainError/valueError(_:)`` naming the DRep when
+    ///   it answers without an amount; and when the request fails, the body does not decode,
+    ///   or the amount is not a `Coin`.
+    private func drepStake(hex: String, drep: DRep) async throws -> Coin {
+        let name = (try? drep.id((.bech32, .cip129))).map { "\($0) (\(hex))" } ?? hex
         let output = try await api.client.getDRepStakeDistr(path: .init(dRepHash: hex))
-        guard case .ok(let ok) = output, let amount = try ok.body.json.amount else { return nil }
-        return try amount.checked("Yaci DRep stake amount")
+        guard case .ok(let ok) = output else {
+            throw CardanoChainError.notImplemented(
+                "DRep stake is not supported by this Yaci instance: its live DRep stake endpoint "
+                    + "answered \(output) for \(name). It is served only while the DevKit cluster runs.")
+        }
+        guard let amount = try ok.body.json.amount else {
+            throw CardanoChainError.valueError("Yaci reports no stake for registered DRep \(name)")
+        }
+        return try amount.checked("Yaci DRep stake amount for \(name)")
     }
 
     /// Effective stake delegated to each DRep this epoch.
     ///
     /// Yaci has no distribution endpoint, so the registered DReps are enumerated from the
-    /// certificate log and each one's live stake is read individually. DReps whose stake cannot
-    /// be read are omitted.
+    /// certificate log and each one's live stake is read individually. A DRep whose stake
+    /// cannot be read throws, naming it, and an instance that does not serve the live stake
+    /// endpoint throws ``CardanoChainError/notImplemented(_:)``: never a partial distribution.
     public func drepStakeDistribution() async throws -> [SwiftCardanoNetwork.DRepStakeEntry] {
         var latestByHash: [String: Components.Schemas.DRepRegistration] = [:]
         for certificate in try await drepCertificates() {
@@ -1714,11 +1724,11 @@ public actor YaciDevkitChainContext: ChainContext {
         for hash in latestByHash.keys.sorted() {
             guard let certificate = latestByHash[hash], certificate._type != .unregDrepCert else { continue }
             let payload = try LedgerValues.hash28(hex: hash, "Yaci DRep certificate hash")
-            guard let stake = try await drepStake(hex: hash) else { continue }
             let drep =
                 certificate.credType == .scripthash
                 ? DRep(credential: .scriptHash(ScriptHash(payload: payload)))
                 : DRep(credential: .verificationKeyHash(VerificationKeyHash(payload: payload)))
+            let stake = try await drepStake(hex: hash, drep: drep)
             entries.append(.init(drep: drep, stake: UInt64(stake)))
         }
         return entries

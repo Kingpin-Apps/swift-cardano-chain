@@ -160,9 +160,13 @@ Some consequences are worth planning around:
 ``ChainContext/treasury()`` and ``ChainContext/spoStakeDistribution()`` have no Yaci
 equivalent and throw ``CardanoChainError/notImplemented(_:)``.
 
-The DRep stake distribution and the live committee view read the node through DevKit's
-local-state endpoints, which are only served while the cluster is running. A DRep whose stake
-cannot be read reports `0`.
+The DRep stake distribution, ``ChainContext/drepInfo(drep:)``'s stake and the live committee
+view read the node through DevKit's local-state endpoints, which are only served while the
+cluster is running. When the live DRep stake endpoint does not answer, DRep stake throws
+``CardanoChainError/notImplemented(_:)`` — this Yaci instance cannot report it — and when it
+answers without an amount for a registered DRep, it throws an error naming that DRep. The
+distribution is never returned with DReps left out. A retired DRep holds no voting power and
+reports `0` without a stake read.
 
 ## Verified Against a Live Devnet
 

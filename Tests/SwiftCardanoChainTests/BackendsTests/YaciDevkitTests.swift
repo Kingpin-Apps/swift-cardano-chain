@@ -979,12 +979,47 @@ struct YaciDevkitChainContextTests {
         let context = try makeContext()
         let entries = try await context.drepStakeDistribution()
 
-        // The retired DRep is excluded, and so is any DRep whose stake cannot be read.
+        // The retired DRep is excluded.
         #expect(entries.count == 1)
         #expect(entries[0].stake == 4_200_000)
         #expect(
             entries[0].drep.credential
                 == .verificationKeyHash(VerificationKeyHash(payload: Data(hex: YaciMockData.drepHex))))
+    }
+
+    @Test("drepStakeDistribution throws not-supported when this instance does not serve DRep stake")
+    func testDRepStakeDistributionUnsupported() async throws {
+        let context = try makeContext(transport: MockYaciTransport(failing: ["getDRepStakeDistr": 404]))
+        do {
+            _ = try await context.drepStakeDistribution()
+            Issue.record("Expected an error")
+        } catch let error as CardanoChainError {
+            guard case .notImplemented(let message) = error else {
+                Issue.record("Expected notImplemented, got \(error)")
+                return
+            }
+            #expect(message?.contains("not supported by this Yaci instance") == true)
+        }
+        await #expect(throws: CardanoChainError.self) {
+            _ = try await context.drepInfo(drep: DRep.fromBech32(YaciMockData.drepBech32))
+        }
+    }
+
+    @Test("drepStakeDistribution throws, naming the DRep, when a registered DRep has no stake")
+    func testDRepStakeDistributionMissingStake() async throws {
+        let context = try makeContext(transport: MockYaciTransport(overrides: [
+            "getDRepStakeDistr": #"{"drep_hash": "\#(YaciMockData.drepHex)", "drep_type": "ADDR_KEYHASH", "amount": null, "epoch": 12}"#
+        ]))
+        do {
+            _ = try await context.drepStakeDistribution()
+            Issue.record("Expected an error")
+        } catch let error as CardanoChainError {
+            guard case .valueError(let message) = error else {
+                Issue.record("Expected valueError, got \(error)")
+                return
+            }
+            #expect(message?.contains(YaciMockData.drepHex) == true)
+        }
     }
 
     @Test("Test spoStakeDistribution is not available")
