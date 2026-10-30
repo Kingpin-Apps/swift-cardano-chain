@@ -419,6 +419,38 @@ struct OgmiosChainContextTests {
         #expect(params.minFeeRefScriptCostPerByte == nonNegative(15, 1))
     }
 
+    @Test("Ogmios reference-script fee parameters map to core's, exactly")
+    func testReferenceScriptFeeParameters() async throws {
+        let context = try await createMockOgmiosChainContext()
+        let params = try await context.protocolParameters()
+        // {"base": 15.0, "range": 25600, "multiplier": 1.2}, as Conway sets them.
+        let fee = try #require(params.minFeeReferenceScripts)
+        #expect(fee.base == nonNegative(15, 1))
+        #expect(fee.multiplier == nonNegative(6, 5))
+        #expect(fee.range == 25_600)
+        #expect(params.minFeeRefScriptCostPerByte == nonNegative(15, 1))
+        #expect(params.maxReferenceScriptsSize == 204_800)
+    }
+
+    static let badReferenceScriptFees: [String] = [
+        #"{"base": 15.0, "range": 0, "multiplier": 1.2}"#,
+        #"{"base": 15.0, "range": 25600, "multiplier": 0}"#,
+        #"{"base": -1.0, "range": 25600, "multiplier": 1.2}"#,
+    ]
+
+    @Test("An Ogmios reference-script fee the ledger would refuse throws", arguments: badReferenceScriptFees)
+    func testBadReferenceScriptFee(_ fee: String) async throws {
+        let original = String(decoding: OgmiosMockData.protocolParameters, as: UTF8.self)
+        let broken = original.replacingOccurrences(
+            of: #""minFeeReferenceScripts": {"base": 15.0, "range": 25600, "multiplier": 1.2}"#,
+            with: #""minFeeReferenceScripts": "# + fee)
+        #expect(broken != original)
+        let context = try await createMockOgmiosChainContext(overrides: [
+            "queryLedgerState/protocolParameters": Data(broken.utf8)
+        ])
+        await #expect(throws: CardanoChainError.self) { _ = try await context.protocolParameters() }
+    }
+
     @Test("Ogmios voting thresholds map to the ledger's fields, reduced")
     func testVotingThresholdsViaProtocolParameters() async throws {
         let context = try await createMockOgmiosChainContext()

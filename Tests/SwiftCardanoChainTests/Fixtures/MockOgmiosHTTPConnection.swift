@@ -104,6 +104,7 @@ enum OgmiosMockData {
                 "maxBlockBodySize": {"bytes": 90112},
                 "maxBlockHeaderSize": {"bytes": 1100},
                 "maxTransactionSize": {"bytes": 16384},
+                "maxReferenceScriptsSize": {"bytes": 204800},
                 "stakeCredentialDeposit": {"ada": {"lovelace": 2000000}},
                 "stakePoolDeposit": {"ada": {"lovelace": 500000000}},
                 "stakePoolRetirementEpochBound": 18,

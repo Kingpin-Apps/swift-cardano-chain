@@ -806,10 +806,28 @@ public actor OgmiosChainContext: ChainContext {
         let txUnits = try required(params.maxExecutionUnitsPerTransaction, "maxExecutionUnitsPerTransaction")
         let maxTxExUnits = ProtocolParametersExecutionUnits(memory: txUnits.memory, steps: txUnits.cpu)
 
-        // SwiftOgmios reads `minFeeReferenceScripts.base` as a Double; its
-        // shortest description is the decimal Ogmios sent.
-        let minFeeRefScriptCostPerByte = try params.minFeeReferenceScripts.map {
-            try LedgerValues.nonNegativeInterval($0.base, "Ogmios minFeeReferenceScripts.base")
+        // The reference-script fee: `base` lovelace per byte, multiplied by
+        // `multiplier` for every further `range` bytes. SwiftOgmios reads
+        // `base` and `multiplier` as Doubles; their shortest descriptions are
+        // the decimals Ogmios sent, read here exactly.
+        let referenceScripts = try params.minFeeReferenceScripts.map { fee -> MinReferenceScriptsSize in
+            let multiplier = try LedgerValues.nonNegativeInterval(fee.multiplier, "Ogmios minFeeReferenceScripts.multiplier")
+            // The ledger's multiplier is a PositiveInterval and its range a NonZero Word32.
+            guard multiplier.numerator > 0 else {
+                throw CardanoChainError.valueError("Ogmios minFeeReferenceScripts.multiplier must be positive")
+            }
+            guard fee.range > 0 else {
+                throw CardanoChainError.valueError("Ogmios minFeeReferenceScripts.range must not be zero")
+            }
+            return MinReferenceScriptsSize(
+                base: try LedgerValues.nonNegativeInterval(fee.base, "Ogmios minFeeReferenceScripts.base"),
+                multiplier: multiplier,
+                range: fee.range
+            )
+        }
+        let minFeeRefScriptCostPerByte = referenceScripts?.base
+        let maxReferenceScriptsSize: Int64? = try params.maxReferenceScriptsSize.map {
+            try $0.bytes.checked("Ogmios maxReferenceScriptsSize")
         }
 
         func integer<T: FixedWidthInteger, S: BinaryInteger>(_ value: S, _ what: String) throws -> T {
@@ -849,6 +867,8 @@ public actor OgmiosChainContext: ChainContext {
             maxTxExecutionUnits: maxTxExUnits,
             maxTxSize: try integer(required(params.maxTransactionSize, "maxTransactionSize").bytes, "maxTransactionSize"),
             maxValueSize: try integer(required(params.maxValueSize, "maxValueSize").bytes, "maxValueSize"),
+            maxReferenceScriptsSize: maxReferenceScriptsSize,
+            minFeeReferenceScripts: referenceScripts,
             minFeeRefScriptCostPerByte: minFeeRefScriptCostPerByte,
             minPoolCost: try lovelace(params.minStakePoolCost, "minStakePoolCost"),
             monetaryExpansion: try unitInterval(params.monetaryExpansion, "monetaryExpansion"),
