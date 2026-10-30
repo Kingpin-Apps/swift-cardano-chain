@@ -608,7 +608,10 @@ struct CLIResponse {
                         [
                             [
                                 {
-                                    "keyHash": "b02f7b335aebf284bbdc20bdc3b59e4e183ae2cfc47ad2d8bc19a241"
+                                    "credential": {
+                                        "keyHash": "b02f7b335aebf284bbdc20bdc3b59e4e183ae2cfc47ad2d8bc19a241"
+                                    },
+                                    "network": "Testnet"
                                 },
                                 20000000
                             ]

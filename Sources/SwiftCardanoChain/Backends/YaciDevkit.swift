@@ -1942,7 +1942,9 @@ public actor YaciDevkitChainContext: ChainContext {
         throws -> GovAction
     {
         let details = jsonObject(proposal.details)
-        let type = proposal._type?.rawValue ?? (details?["type"] as? String) ?? ""
+        guard let type = proposal._type?.rawValue ?? (details?["type"] as? String) else {
+            throw CardanoChainError.valueError("Yaci governance proposal \(id) has no type")
+        }
 
         func string(_ keys: String...) -> String? {
             for key in keys {
@@ -1969,10 +1971,14 @@ public actor YaciDevkitChainContext: ChainContext {
             return .noConfidence(NoConfidence(id: id))
 
         case "HARD_FORK_INITIATION_ACTION":
-            guard let version = object("protocolVersion", "protocol_version"),
-                let major = (version["_1"] ?? version["major"]).flatMap({ ($0 as? NSNumber)?.intValue }),
-                let minor = (version["_2"] ?? version["minor"]).flatMap({ ($0 as? NSNumber)?.intValue })
-            else { return .infoAction(InfoAction()) }
+            let version = try LedgerValues.required(
+                object("protocolVersion", "protocol_version"), "Yaci hard fork protocol version")
+            let major: Int = try LedgerValues.required(
+                LedgerValues.integer(json: version["_1"] ?? version["major"], "Yaci hard fork major version"),
+                "Yaci hard fork major version")
+            let minor: Int = try LedgerValues.required(
+                LedgerValues.integer(json: version["_2"] ?? version["minor"], "Yaci hard fork minor version"),
+                "Yaci hard fork minor version")
             return .hardForkInitiationAction(
                 HardForkInitiationAction(
                     id: nil, protocolVersion: ProtocolVersion(major: major, minor: minor)
@@ -1980,8 +1986,9 @@ public actor YaciDevkitChainContext: ChainContext {
 
         case "TREASURY_WITHDRAWALS_ACTION":
             var withdrawals: [RewardAccount: Coin] = [:]
-            for (account, amount) in object("withdrawals") ?? [:] {
-                guard let lovelace = try GovernanceParsing.parseLovelace(amount) else { continue }
+            for (account, amount) in try LedgerValues.required(object("withdrawals"), "Yaci treasury withdrawals") {
+                let lovelace = try LedgerValues.required(
+                    GovernanceParsing.parseLovelace(amount), "Yaci treasury withdrawal amount")
                 let bytes: Data
                 if let decoded = try? Address.fromBech32(account).toBytes() {
                     bytes = decoded
@@ -1998,7 +2005,7 @@ public actor YaciDevkitChainContext: ChainContext {
             )
 
         case "NEW_CONSTITUTION":
-            guard let constitution = object("constitution") else { return .infoAction(InfoAction()) }
+            let constitution = try LedgerValues.required(object("constitution"), "Yaci new constitution")
             let anchor = try LedgerValues.required(
                 LedgerValues.anchor(json: constitution["anchor"], "Yaci constitution anchor"),
                 "Yaci constitution anchor")
@@ -2015,14 +2022,17 @@ public actor YaciDevkitChainContext: ChainContext {
             var coldCredentials: Set<CommitteeColdCredential> = []
             var credentialEpochs: [CommitteeColdCredential: UInt64] = [:]
 
-            let removals =
-                (details?["membersForRemoval"] ?? details?["members_for_removal"]) as? [Any] ?? []
+            guard let removals = (details?["membersForRemoval"] ?? details?["members_for_removal"]) as? [Any] else {
+                throw CardanoChainError.valueError("Yaci committee update has no members to remove")
+            }
             for entry in removals {
                 coldCredentials.insert(try committeeColdCredential(from: entry))
             }
-            let additions =
+            guard let additions =
                 (details?["newMembersAndTerms"] ?? details?["new_members_and_terms"]) as? [String: Any]
-                ?? [:]
+            else {
+                throw CardanoChainError.valueError("Yaci committee update has no members to add")
+            }
             for (key, epoch) in additions {
                 let credential = try committeeColdCredential(fromKey: key)
                 let epochValue: UInt64 = try LedgerValues.required(
@@ -2055,7 +2065,7 @@ public actor YaciDevkitChainContext: ChainContext {
                 ))
 
         default:
-            return .infoAction(InfoAction())
+            throw CardanoChainError.valueError("Yaci governance proposal \(id) has an unknown type \(type)")
         }
     }
 

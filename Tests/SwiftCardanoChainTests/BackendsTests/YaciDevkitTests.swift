@@ -1085,11 +1085,8 @@ struct YaciDevkitChainContextTests {
         #expect(update.interval.numerator == 2)
         #expect(update.interval.denominator == 3)
 
-        // An unparseable payload keeps the variant honest rather than inventing contents.
-        guard case .infoAction = try action("HARD_FORK_INITIATION_ACTION", details: "{}") else {
-            Issue.record("Expected a fallback info action")
-            return
-        }
+        // An unparseable payload throws rather than turning into a different action.
+        #expect(throws: CardanoChainError.self) { try action("HARD_FORK_INITIATION_ACTION", details: "{}") }
     }
 
     @Test("Test threshold parsing accepts ratios, decimals and strings")
