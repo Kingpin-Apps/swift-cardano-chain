@@ -619,4 +619,68 @@ struct ChainValueHardeningTests {
                 transport: KoiosMockTransport(overrides: ["pool_info": poolInfo])))
         return try await context.stakePoolInfo(poolId: "pool1pu5jlj4q9w9jlxeu370a3c9myx47md5j5m2str0naunn2q3lkdy")
     }
+
+    // MARK: Silent skips
+
+    static let brokenKoiosVotes: [String] = [
+        // No voter role.
+        #"{"voter_hex": "b02f7b335aebf284bbdc20bdc3b59e4e183ae2cfc47ad2d8bc19a241", "vote": "Yes", "voter_has_script": false}"#,
+        // No vote.
+        #"{"voter_role": "DRep", "voter_hex": "b02f7b335aebf284bbdc20bdc3b59e4e183ae2cfc47ad2d8bc19a241", "voter_has_script": false}"#,
+        // A vote that is not one.
+        #"{"voter_role": "DRep", "voter_hex": "b02f7b335aebf284bbdc20bdc3b59e4e183ae2cfc47ad2d8bc19a241", "vote": "Maybe", "voter_has_script": false}"#,
+        // A DRep voter that does not say whether it is a script.
+        #"{"voter_role": "DRep", "voter_hex": "b02f7b335aebf284bbdc20bdc3b59e4e183ae2cfc47ad2d8bc19a241", "vote": "Yes"}"#,
+    ]
+
+    @Test("A Koios vote row missing its role, vote or credential kind throws instead of being skipped",
+          arguments: brokenKoiosVotes)
+    func koiosBrokenVote(_ row: String) async throws {
+        let context = try await KoiosChainContext(
+            network: .preview,
+            client: SwiftKoios.Client(
+                serverURL: try SwiftKoios.Network.preview.url(),
+                transport: KoiosMockTransport(overrides: ["proposal_votes": "[\(row)]"])))
+        let id = GovActionID(
+            transactionID: TransactionId(
+                payload: Data(hex: "2dd15e0ef6e6a17841cb9541c27724072ce4d4b79b91e58432fbaa32d9572531")),
+            govActionIndex: 0)
+        await #expect(throws: (any Error).self) { _ = try await context.govActionVotes(govActionID: id) }
+        await #expect(throws: (any Error).self) { _ = try await context.govActionsAll() }
+    }
+
+    @Test("A Blockfrost UTxO whose reference script cannot be fetched throws instead of losing the script")
+    func blockfrostMissingReferenceScript() async throws {
+        let utxos = try JSONEncoder().encode(
+            SwiftBlockfrostAPI.Components.Schemas.AddressUtxoContent([
+                .init(
+                    address: "addr_test1qp4kux2v7xcg9urqssdffff5p0axz9e3hcc43zz7pcuyle0e20hkwsu2ndpd9dh9anm4jn76ljdz0evj22stzrw9egxqmza5y3",
+                    txHash: "39a7a284c2a0948189dc45dec670211cd4d72f7b66c5726c08d9b3df11e44d58",
+                    txIndex: 0, outputIndex: 0,
+                    amount: [.init(unit: "lovelace", quantity: "1000000")],
+                    block: "123456", dataHash: nil, inlineDatum: nil,
+                    referenceScriptHash: "33333333333333333333333333333333333333333333333333333333")
+            ]))
+        // The mock answers the script endpoints with 404.
+        let context = try await blockfrost(["get/addresses/{address}/utxos": utxos])
+        await #expect(throws: (any Error).self) {
+            _ = try await context.utxos(address: try Address(
+                from: .string("addr_test1qp4kux2v7xcg9urqssdffff5p0axz9e3hcc43zz7pcuyle0e20hkwsu2ndpd9dh9anm4jn76ljdz0evj22stzrw9egxqmza5y3")))
+        }
+    }
+
+    @Test("Blockfrost govActionsAll throws when one proposal cannot be read, instead of leaving it out")
+    func blockfrostGovActionsAllPropagates() async throws {
+        let list = try JSONEncoder().encode([
+            SwiftBlockfrostAPI.Components.Schemas.ProposalsPayload(
+                id: "gov_action1qkm52uwlnw0gtcyh9259sjuwsyrnjdfd3hg7tjzrl463xtv4wfxysqqqqqfd6vw0",
+                txHash: proposalTxHash, certIndex: 1, governanceType: .infoAction)
+        ])
+        // The proposal itself has a deposit that does not parse.
+        let context = try await blockfrost([
+            "get/governance/proposals": list,
+            "get/governance/proposals/{tx_hash}/{cert_index}": try proposal(deposit: "abc"),
+        ])
+        await #expect(throws: CardanoChainError.self) { _ = try await context.govActionsAll() }
+    }
 }

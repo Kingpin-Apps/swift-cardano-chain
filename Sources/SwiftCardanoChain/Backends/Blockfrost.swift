@@ -597,9 +597,9 @@ public actor BlockFrostChainContext: ChainContext {
                 //                }
 
                 if let referenceScriptHash = result.referenceScriptHash {
-                    script =
-                        try? await self
-                        .getScript(scriptHash: referenceScriptHash)
+                    // A UTxO that references a script carries it: one that cannot be
+                    // fetched is an error, not a UTxO without a script.
+                    script = try await self.getScript(scriptHash: referenceScriptHash)
                 }
 
                 let address = try Address(from: .string(result.address))
@@ -1568,9 +1568,7 @@ public actor BlockFrostChainContext: ChainContext {
                 transactionID: try LedgerValues.hash(hex: proposal.txHash, as: TransactionId.self, "Blockfrost TransactionId"),
                 govActionIndex: try proposal.certIndex.checked("Blockfrost proposal cert_index")
             )
-            if let votes = try? await govActionVotes(govActionID: govActionID) {
-                results.append(votes)
-            }
+            results.append(try await govActionVotes(govActionID: govActionID))
         }
         return results
     }

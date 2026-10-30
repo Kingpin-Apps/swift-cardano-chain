@@ -1316,20 +1316,19 @@ public actor KoiosChainContext: ChainContext {
 
         var results: [GovActionVotes] = []
         for proposal in proposals {
-            guard let txHashRaw = proposal.proposalTxHash?.value as? String else { continue }
+            let txHashRaw = try LedgerValues.required(
+                proposal.proposalTxHash?.value as? String, "Koios proposal proposal_tx_hash")
             let govActionID = GovActionID(
                 transactionID: try LedgerValues.hash(hex: txHashRaw, as: TransactionId.self, "Koios TransactionId"),
                 govActionIndex: try LedgerValues.required(proposal.proposalIndex, "Koios proposal_index")
                     .checked("Koios proposal_index")
             )
-            let proposalIdBech32 = proposal.proposalId ?? (try? govActionID.id()) ?? ""
-            if let votes = try? await buildKoiosGovActionVotes(
+            let proposalIdBech32 = try proposal.proposalId ?? govActionID.id()
+            results.append(try await buildKoiosGovActionVotes(
                 govActionID: govActionID,
                 proposal: proposal,
                 proposalIdBech32: proposalIdBech32
-            ) {
-                results.append(votes)
-            }
+            ))
         }
         return results
     }
@@ -1413,21 +1412,26 @@ public actor KoiosChainContext: ChainContext {
         var stakePoolVotes: [SwiftCardanoNetwork.StakePoolVote] = []
 
         for row in voteRows {
-            guard let role = row.voterRole,
-                  let hotOrPoolHex = row.voterHex,
-                  let voteRaw = row.vote?.value as? String,
-                  let vote = GovernanceParsing.parseVote(voteRaw) else { continue }
-
-            let isScript = (row.voterHasScript?.value as? Bool) ?? false
+            // A vote row always names its voter and its vote.
+            let role = try LedgerValues.required(row.voterRole, "Koios vote voter_role")
+            let hotOrPoolHex = try LedgerValues.required(row.voterHex, "Koios vote voter_hex")
+            let voteRaw = try LedgerValues.required(row.vote?.value as? String, "Koios vote")
+            guard let vote = GovernanceParsing.parseVote(voteRaw) else {
+                throw CardanoChainError.valueError("Koios vote \(voteRaw) is not a vote")
+            }
+            /// Whether a committee or DRep voter is a script; Koios always says.
+            func isScript() throws -> Bool {
+                try LedgerValues.required(row.voterHasScript?.value as? Bool, "Koios vote voter_has_script")
+            }
 
             switch role {
             case .constitutionalCommittee:
-                let cred: CommitteeHotCredential = isScript
+                let cred: CommitteeHotCredential = try isScript()
                     ? CommitteeHotCredential(credential: .scriptHash(try LedgerValues.hash(hex: hotOrPoolHex, as: ScriptHash.self, "Koios ScriptHash")))
                     : CommitteeHotCredential(credential: .verificationKeyHash(try LedgerValues.hash(hex: hotOrPoolHex, as: VerificationKeyHash.self, "Koios VerificationKeyHash")))
                 committeeVotes.append(.init(credential: cred, vote: vote))
             case .dRep:
-                let cred: DRepCredential = isScript
+                let cred: DRepCredential = try isScript()
                     ? DRepCredential(credential: .scriptHash(try LedgerValues.hash(hex: hotOrPoolHex, as: ScriptHash.self, "Koios ScriptHash")))
                     : DRepCredential(credential: .verificationKeyHash(try LedgerValues.hash(hex: hotOrPoolHex, as: VerificationKeyHash.self, "Koios VerificationKeyHash")))
                 dRepVotes.append(.init(credential: cred, vote: vote))

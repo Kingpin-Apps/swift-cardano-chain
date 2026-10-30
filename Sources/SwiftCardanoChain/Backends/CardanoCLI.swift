@@ -1157,11 +1157,10 @@ public actor CardanoCliChainContext: ChainContext {
         let proposals = try await fetchProposalsFromGovState()
         let currentEpoch: UInt64 = try await self.epoch().checked("cardano-cli epoch")
 
-        return try proposals.compactMap { proposal in
-            guard let actionId = try parseActionId(from: proposal) else { return nil }
-            return try buildGovActionVotes(
+        return try proposals.map { proposal in
+            try buildGovActionVotes(
                 proposal: proposal,
-                actionID: actionId,
+                actionID: try parseActionId(from: proposal),
                 currentEpoch: currentEpoch
             )
         }
@@ -1182,15 +1181,20 @@ public actor CardanoCliChainContext: ChainContext {
         var entries: [SwiftCardanoNetwork.DRepStakeEntry] = []
 
         if let pairs = json as? [[Any]] {
-            for pair in pairs where pair.count >= 2 {
+            for pair in pairs {
+                guard pair.count == 2 else {
+                    throw CardanoChainError.valueError("cardano-cli stake distribution entry \(pair) is not [key, stake]")
+                }
                 let drep = try parseDRepKey(pair[0])
-                guard let stake = try parseLovelaceUInt(pair[1]) else { continue }
+                // The ledger keeps a stake for every entry; a null one is not 0.
+                let stake = try LedgerValues.required(parseLovelaceUInt(pair[1]), "cardano-cli stake distribution stake")
                 entries.append(SwiftCardanoNetwork.DRepStakeEntry(drep: drep, stake: stake))
             }
         } else if let dict = json as? [String: Any] {
             for (key, value) in dict {
                 let drep = try parseDRepKey(key)
-                guard let stake = try parseLovelaceUInt(value) else { continue }
+                // The ledger keeps a stake for every entry; a null one is not 0.
+                let stake = try LedgerValues.required(parseLovelaceUInt(value), "cardano-cli stake distribution stake")
                 entries.append(SwiftCardanoNetwork.DRepStakeEntry(drep: drep, stake: stake))
             }
         } else {
@@ -1214,15 +1218,20 @@ public actor CardanoCliChainContext: ChainContext {
         var entries: [SwiftCardanoNetwork.SPOStakeEntry] = []
 
         if let pairs = json as? [[Any]] {
-            for pair in pairs where pair.count >= 2 {
+            for pair in pairs {
+                guard pair.count == 2 else {
+                    throw CardanoChainError.valueError("cardano-cli stake distribution entry \(pair) is not [key, stake]")
+                }
                 let pool = try parsePoolKey(pair[0])
-                guard let stake = try parseLovelaceUInt(pair[1]) else { continue }
+                // The ledger keeps a stake for every entry; a null one is not 0.
+                let stake = try LedgerValues.required(parseLovelaceUInt(pair[1]), "cardano-cli stake distribution stake")
                 entries.append(SwiftCardanoNetwork.SPOStakeEntry(poolOperator: pool, stake: stake))
             }
         } else if let dict = json as? [String: Any] {
             for (key, value) in dict {
                 let pool = try parsePoolKey(key)
-                guard let stake = try parseLovelaceUInt(value) else { continue }
+                // The ledger keeps a stake for every entry; a null one is not 0.
+                let stake = try LedgerValues.required(parseLovelaceUInt(value), "cardano-cli stake distribution stake")
                 entries.append(SwiftCardanoNetwork.SPOStakeEntry(poolOperator: pool, stake: stake))
             }
         } else {
@@ -1327,20 +1336,17 @@ public actor CardanoCliChainContext: ChainContext {
         return pTxId.lowercased() == txHash && pIndex == index
     }
 
-    private func parseActionId(from proposal: [String: Any]) throws -> GovActionID? {
+    /// A proposal's own id, which every proposal in the gov state carries.
+    private func parseActionId(from proposal: [String: Any]) throws -> GovActionID {
         guard let actionId = proposal["actionId"] as? [String: Any],
-              let txId = actionId["txId"] as? String else { return nil }
-        let idx: Int
-        if let i = actionId["govActionIx"] as? Int {
-            idx = i
-        } else if let n = actionId["govActionIx"] as? NSNumber {
-            idx = n.intValue
-        } else {
-            return nil
+              let txId = actionId["txId"] as? String
+        else {
+            throw CardanoChainError.valueError("cardano-cli proposal has no actionId: \(proposal)")
         }
         return GovActionID(
             transactionID: try LedgerValues.hash(hex: txId, as: TransactionId.self, "cardano-cli TransactionId"),
-            govActionIndex: try idx.checked("cardano-cli govActionIx")
+            govActionIndex: try LedgerValues.required(
+                LedgerValues.integer(json: actionId["govActionIx"], "cardano-cli govActionIx"), "cardano-cli govActionIx")
         )
     }
 

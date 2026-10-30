@@ -878,6 +878,27 @@ struct CardanoCLIContextTests {
         GovActionPreviousIDTests.check(votes.govAction, previous: true)
     }
 
+    static let badDistributions: [String] = [
+        // A null stake is not 0: the ledger keeps a stake for every DRep in the distribution.
+        #"{"drep-keyHash-002e87e32c1735bef2af2825943a9c06714857d1fc19385b86e429a3": null}"#,
+        #"[["drep-keyHash-002e87e32c1735bef2af2825943a9c06714857d1fc19385b86e429a3", null]]"#,
+        // A pair that is not [key, stake].
+        #"[["drep-alwaysAbstain"]]"#,
+        // A key that is not a DRep.
+        #"{"drep-somethingElse": 1}"#,
+    ]
+
+    @Test("A cardano-cli DRep stake distribution entry with a null stake or bad shape throws",
+          arguments: badDistributions)
+    func testDRepStakeDistributionRejects(_ output: String) async throws {
+        let config = createMockConfig()
+        let cli = try await CardanoCLI(
+            configuration: config,
+            commandRunner: createCardaonCLIMockCommandRunner(config: config, drepStakeDistribution: output))
+        let context = try await CardanoCliChainContext(nodeConfig: FilePath(configFilePath!), network: .preview, cli: cli)
+        await #expect(throws: (any Error).self) { _ = try await context.drepStakeDistribution() }
+    }
+
     @Test("Test govActionsAll")
     func testGovActionsAll() async throws {
         let config = createMockConfig()
