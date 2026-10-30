@@ -449,10 +449,14 @@ struct ChainValueHardeningTests {
     }
 
     private func constitutionProposal(_ description: String) -> Data {
+        describedProposal("new_constitution", description)
+    }
+
+    private func describedProposal(_ type: String, _ description: String) -> Data {
         Data("""
             {"id": "gov_action1qkm52uwlnw0gtcyh9259sjuwsyrnjdfd3hg7tjzrl463xtv4wfxysqqqqqfd6vw0",
              "tx_hash": "\(proposalTxHash)", "cert_index": 1,
-             "governance_type": "new_constitution",
+             "governance_type": "\(type)",
              "governance_description": \(description),
              "deposit": "12000",
              "return_address": "stake_test1urd3hs7rlxwwdzthe6hj026dmyt3y0heuulctscyydh2kgck6nkmz",
@@ -529,5 +533,55 @@ struct ChainValueHardeningTests {
                 ]))
         let context = try await blockfrost(["get/governance/committee": committee])
         await #expect(throws: CardanoChainError.self) { _ = try await context.committeeState() }
+    }
+
+    // MARK: Blockfrost committee update
+
+    @Test("A Blockfrost committee update reads its members and quorum, not an empty 0/1 stand-in")
+    func blockfrostCommitteeUpdate() async throws {
+        let removed = String(repeating: "ab", count: 28)
+        let added = String(repeating: "cd", count: 28)
+        let context = try await blockfrost([
+            "get/governance/proposals/{tx_hash}/{cert_index}": describedProposal("new_committee", """
+                {"tag": "UpdateCommittee", "contents": [null,
+                  [{"keyHash": "\(removed)"}],
+                  {"scriptHash-\(added)": 580},
+                  0.67]}
+                """)
+        ])
+        let info = try await context.govActionInfo(govActionID: govActionID)
+        guard case .updateCommittee(let update) = info.govAction else {
+            Issue.record("Expected a committee update, got \(info.govAction)")
+            return
+        }
+        let addedCredential = CommitteeColdCredential(
+            credential: .scriptHash(ScriptHash(payload: Data(hex: added))))
+        let removedCredential = CommitteeColdCredential(
+            credential: .verificationKeyHash(VerificationKeyHash(payload: Data(hex: removed))))
+        #expect(update.coldCredentials == [addedCredential, removedCredential])
+        #expect(update.credentialEpochs == [addedCredential: 580])
+        #expect(update.interval.numerator == 67 && update.interval.denominator == 100)
+    }
+
+    static let brokenCommitteeDescriptions: [String] = [
+        // No description: Blockfrost has nowhere else to read the update from.
+        "null",
+        // A description of a different action.
+        #"{"tag": "InfoAction"}"#,
+        // No quorum.
+        #"{"tag": "UpdateCommittee", "contents": [null, [], {}]}"#,
+        // A member whose hash is not 28 bytes.
+        #"{"tag": "UpdateCommittee", "contents": [null, [{"keyHash": "abcd"}], {}, 0.5]}"#,
+    ]
+
+    @Test("A Blockfrost committee update with no readable description throws",
+          arguments: brokenCommitteeDescriptions)
+    func blockfrostBrokenCommitteeUpdate(_ description: String) async throws {
+        let context = try await blockfrost([
+            "get/governance/proposals/{tx_hash}/{cert_index}": describedProposal("new_committee", description)
+        ])
+        await #expect(throws: CardanoChainError.self) {
+            _ = try await context.govActionInfo(govActionID: govActionID)
+        }
     }
 }

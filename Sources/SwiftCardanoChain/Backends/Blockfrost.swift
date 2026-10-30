@@ -1141,6 +1141,26 @@ public actor BlockFrostChainContext: ChainContext {
         )
     }
     
+    /// The action in a proposal's `governance_description`, which must carry `tag`.
+    ///
+    /// Blockfrost has no typed endpoint for a committee update or a new
+    /// constitution; the description is the only place it reports their
+    /// contents, so a description that is missing or of another kind throws
+    /// rather than standing in an empty or made-up action.
+    private func describedAction(
+        _ proposal: Components.Schemas.Proposal, _ id: GovActionID, tag: String
+    ) throws -> GovAction {
+        let what = "Blockfrost governance_description"
+        let description = try LedgerValues.required(proposal.governanceDescription?.additionalProperties.value, what)
+        guard (description["tag"] as? String) == tag else {
+            throw CardanoChainError.valueError(
+                "\(what) of a \(proposal.governanceType) proposal is not a \(tag): \(description)")
+        }
+        return try LedgerGovActionJSON.govAction(description, id: id, what) { _ in
+            throw CardanoChainError.valueError("\(what): unexpected parameter change")
+        }
+    }
+
     /// Get the governance action information for a given governance action ID.
     /// - Parameter govActionID: The identifier of the governance action.
     /// - Returns: The `GovActionInfo` object containing information about the governance action.
@@ -1247,41 +1267,16 @@ public actor BlockFrostChainContext: ChainContext {
         case .noConfidence:
             govAction = .noConfidence(.init(id: govActionID)) // Using same ID as placeholder
         case .newCommittee:
-            // Blockfrost's `/governance/proposals/{tx_hash}/{cert_index}`
-            // payload does not expose the proposed cold-credential add/remove
-            // sets or the new quorum threshold (only `governance_description`
-            // as an untyped opaque container). Surface the variant tag
-            // correctly, but use an honest "unknown" interval (0/1) and
-            // empty credential collections rather than a plausible-looking
-            // fake. Switch to Koios, Ogmios, or cardano-cli for the real
-            // proposed values.
-            govAction = .updateCommittee(.init(
-                id: govActionID,
-                coldCredentials: [],
-                credentialEpochs: [:],
-                interval: UnitInterval(numerator: 0, denominator: 1)
-            ))
+            // The members to remove, the members to add with their terms and the
+            // quorum are in `governance_description`, the action as db-sync
+            // records it: `{"tag": "UpdateCommittee", "contents": [prevId, [removed], {added: epoch}, quorum]}`.
+            govAction = try describedAction(govActionData, govActionID, tag: "UpdateCommittee")
         case .newConstitution:
-            // The constitution's anchor is in `governance_description`, the
-            // action as db-sync records it:
+            // The constitution's anchor is in `governance_description`:
             // `{"tag": "NewConstitution", "contents": [prevId, {"anchor": {url, dataHash}, "script": …}]}`.
             // (The proposal's metadata endpoint is the proposal's own anchor,
             // not the constitution's.)
-            let description = govActionData.governanceDescription?.additionalProperties.value
-            let contents = description?["contents"] as? [Any] ?? []
-            let constitution = contents.last as? [String: Any]
-            let anchor = try LedgerValues.required(
-                LedgerValues.anchor(json: constitution?["anchor"], "Blockfrost constitution anchor"),
-                "Blockfrost constitution anchor")
-            let scriptHash: ScriptHash? = try {
-                guard let script = constitution?["script"], !(script is NSNull) else { return nil }
-                guard let hex = script as? String else {
-                    throw CardanoChainError.valueError("Blockfrost constitution script \(script) is not a hash")
-                }
-                return try LedgerValues.hash(hex: hex, as: ScriptHash.self, "Blockfrost ScriptHash")
-            }()
-            govAction = .newConstitution(.init(
-                id: govActionID, constitution: .init(anchor: anchor, scriptHash: scriptHash)))
+            govAction = try describedAction(govActionData, govActionID, tag: "NewConstitution")
         case .treasuryWithdrawals:
             let withdrawalsResponse = try await api.client.getGovernanceProposalsTxHashCertIndexWithdrawals(
                 .init(path: .init(
