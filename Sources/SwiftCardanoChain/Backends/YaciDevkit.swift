@@ -2116,16 +2116,165 @@ public actor YaciDevkitChainContext: ChainContext {
                 ))
 
         case "PARAMETER_CHANGE_ACTION":
-            // TODO: map yaci's ProtocolParamUpdate JSON onto ProtocolParamUpdate. Until that
-            // lands the variant tag is correct but the payload is intentionally empty, which is
-            // what the Koios and Ogmios backends also do.
+            let update = try LedgerValues.required(
+                object("protocolParamUpdate", "protocol_param_update"), "Yaci parameter change update")
             return .parameterChangeAction(
                 LedgerGovActionJSON.parameterChange(
-                    prev: try previous(), update: ProtocolParamUpdate(), policyHash: try policyHash()
+                    prev: try previous(), update: try protocolParamUpdate(update), policyHash: try policyHash()
                 ))
 
         default:
             throw CardanoChainError.valueError("Yaci governance proposal \(id) has an unknown type \(type)")
+        }
+    }
+
+    /// A proposed parameter update as Yaci Store records it: the Jackson form of
+    /// yaci's `ProtocolParamUpdate` (camelCase fields, ratios as `{numerator,
+    /// denominator}`, each cost model as the hex of its CBOR parameter list,
+    /// keyed by language number). A null field is not part of the update; a field
+    /// this reader does not know, or one Conway cannot change, throws.
+    static func protocolParamUpdate(_ d: [String: Any]) throws -> ProtocolParamUpdate {
+        let what = "Yaci parameter update"
+        func value(_ key: String) -> Any? {
+            guard let raw = d[key], !(raw is NSNull) else { return nil }
+            return raw
+        }
+        func int<T: FixedWidthInteger>(_ key: String) throws -> T? {
+            try LedgerValues.integer(json: value(key), "\(what) \(key)")
+        }
+        func unit(_ key: String, in object: [String: Any]? = nil) throws -> UnitInterval? {
+            try LedgerValues.unitInterval(json: object.map { $0[key] } ?? value(key), "\(what) \(key)")
+        }
+        func nni(_ key: String) throws -> NonNegativeInterval? {
+            try LedgerValues.nonNegativeInterval(json: value(key), "\(what) \(key)")
+        }
+        func object(_ key: String) throws -> [String: Any]? {
+            guard let raw = value(key) else { return nil }
+            guard let object = raw as? [String: Any] else {
+                throw CardanoChainError.valueError("\(what) \(key): \(raw) is not an object")
+            }
+            return object
+        }
+        /// Both halves of a pair, or neither.
+        func pair<A, B>(_ a: A?, _ b: B?, _ name: String) throws -> (A, B)? {
+            switch (a, b) {
+            case let (a?, b?): return (a, b)
+            case (nil, nil): return nil
+            default: throw CardanoChainError.valueError("\(what) has only half of \(name)")
+            }
+        }
+
+        let known: Set<String> = [
+            "minFeeA", "minFeeB", "maxBlockSize", "maxTxSize", "maxBlockHeaderSize", "keyDeposit",
+            "poolDeposit", "maxEpoch", "nopt", "poolPledgeInfluence", "expansionRate", "treasuryGrowthRate",
+            "decentralisationParam", "extraEntropy", "protocolMajorVer", "protocolMinorVer", "minUtxo",
+            "minPoolCost", "adaPerUtxoByte", "costModels", "costModelsHash", "priceMem", "priceStep",
+            "maxTxExMem", "maxTxExSteps", "maxBlockExMem", "maxBlockExSteps", "maxValSize",
+            "collateralPercent", "maxCollateralInputs", "poolVotingThresholds", "drepVotingThresholds",
+            "committeeMinSize", "committeeMaxTermLength", "govActionLifetime", "govActionDeposit",
+            "drepDeposit", "drepActivity", "minFeeRefScriptCostPerByte",
+        ]
+        if let unknown = d.keys.filter({ !known.contains($0) }).sorted().first {
+            throw CardanoChainError.valueError("\(what) has a field this library does not read: \(unknown)")
+        }
+        // Pre-Conway fields a Conway parameter change cannot carry.
+        for key in ["extraEntropy", "minUtxo"] where value(key) != nil {
+            throw CardanoChainError.notImplemented("\(what) changes \(key), which a Conway update cannot")
+        }
+
+        var u = ProtocolParamUpdate()
+        u.minFeeA = try int("minFeeA")
+        u.minFeeB = try int("minFeeB")
+        u.maxBlockBodySize = try int("maxBlockSize")
+        u.maxTransactionSize = try int("maxTxSize")
+        u.maxBlockHeaderSize = try int("maxBlockHeaderSize")
+        u.keyDeposit = try int("keyDeposit")
+        u.poolDeposit = try int("poolDeposit")
+        u.maximumEpoch = try int("maxEpoch")
+        u.nOpt = try int("nopt")
+        u.poolPledgeInfluence = try nni("poolPledgeInfluence")
+        u.expansionRate = try unit("expansionRate")
+        u.treasuryGrowthRate = try unit("treasuryGrowthRate")
+        u.decentralizationConstant = try unit("decentralisationParam")
+        if let (major, minor) = try pair(
+            int("protocolMajorVer") as Int?, int("protocolMinorVer") as Int?, "the protocol version")
+        {
+            u.protocolVersion = ProtocolVersion(major: major, minor: minor)
+        }
+        u.minPoolCost = try int("minPoolCost")
+        u.adaPerUtxoByte = try int("adaPerUtxoByte")
+        if let models = try object("costModels") {
+            u.costModels = try costModels(models, what)
+        }
+        if let (mem, step) = try pair(nni("priceMem"), nni("priceStep"), "the execution prices") {
+            u.executionCosts = ExUnitPrices(memPrice: mem, stepPrice: step)
+        }
+        if let (mem, steps) = try pair(
+            int("maxTxExMem") as UInt64?, int("maxTxExSteps") as UInt64?, "the transaction execution units")
+        {
+            u.maxTxExUnits = ExUnits(mem: mem, steps: steps)
+        }
+        if let (mem, steps) = try pair(
+            int("maxBlockExMem") as UInt64?, int("maxBlockExSteps") as UInt64?, "the block execution units")
+        {
+            u.maxBlockExUnits = ExUnits(mem: mem, steps: steps)
+        }
+        u.maxValueSize = try int("maxValSize")
+        u.collateralPercentage = try int("collateralPercent")
+        u.maxCollateralInputs = try int("maxCollateralInputs")
+        if let pvt = try object("poolVotingThresholds") {
+            func t(_ key: String) throws -> UnitInterval {
+                try LedgerValues.required(unit(key, in: pvt), "\(what) poolVotingThresholds \(key)")
+            }
+            u.poolVotingThresholds = PoolVotingThresholds(
+                motionNoConfidence: try t("pvtMotionNoConfidence"),
+                committeeNormal: try t("pvtCommitteeNormal"),
+                committeeNoConfidence: try t("pvtCommitteeNoConfidence"),
+                hardForkInitiation: try t("pvtHardForkInitiation"),
+                ppSecurityGroup: try t("pvtPPSecurityGroup"))
+        }
+        if let dvt = try object("drepVotingThresholds") {
+            func t(_ key: String) throws -> UnitInterval {
+                try LedgerValues.required(unit(key, in: dvt), "\(what) drepVotingThresholds \(key)")
+            }
+            // CDDL order.
+            u.drepVotingThresholds = try DrepVotingThresholds(thresholds: [
+                t("dvtMotionNoConfidence"), t("dvtCommitteeNormal"), t("dvtCommitteeNoConfidence"),
+                t("dvtUpdateToConstitution"), t("dvtHardForkInitiation"), t("dvtPPNetworkGroup"),
+                t("dvtPPEconomicGroup"), t("dvtPPTechnicalGroup"), t("dvtPPGovGroup"), t("dvtTreasuryWithdrawal"),
+            ])
+        }
+        u.minCommitteeSize = try int("committeeMinSize")
+        u.committeeTermLimit = try int("committeeMaxTermLength")
+        u.governanceActionValidityPeriod = try int("govActionLifetime")
+        u.governanceActionDeposit = try int("govActionDeposit")
+        u.drepDeposit = try int("drepDeposit")
+        u.drepInactivityPeriod = try int("drepActivity")
+        u.minFeeRefScriptCoinsPerByte = try nni("minFeeRefScriptCostPerByte")
+        return u
+    }
+
+    /// `{"<language number>": "<hex of the CBOR parameter list>"}`, read through
+    /// core's CBOR decoder as the ledger's cost-model map.
+    private static func costModels(_ models: [String: Any], _ what: String) throws -> CostModels {
+        guard models.count <= 23 else {
+            throw CardanoChainError.valueError("\(what) costModels has \(models.count) languages")
+        }
+        var cbor = Data([0xA0 | UInt8(models.count)])
+        for (key, value) in models.sorted(by: { $0.key < $1.key }) {
+            guard let language = UInt8(key), language <= 2 else {
+                throw CardanoChainError.valueError("\(what) costModels: unknown language \(key)")
+            }
+            guard let hex = value as? String, !hex.isEmpty else {
+                throw CardanoChainError.valueError("\(what) costModels \(key): \(value) is not CBOR hex")
+            }
+            cbor.append(language)
+            cbor.append(try LedgerValues.hexBytes(hex, "\(what) costModels \(key)"))
+        }
+        do {
+            return try CostModels.fromCBOR(data: cbor)
+        } catch {
+            throw CardanoChainError.valueError("\(what) costModels: \(error)")
         }
     }
 

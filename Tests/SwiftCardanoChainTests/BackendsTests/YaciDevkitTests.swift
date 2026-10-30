@@ -1157,6 +1157,90 @@ struct YaciDevkitChainContextTests {
         #expect(throws: CardanoChainError.self) { try action("HARD_FORK_INITIATION_ACTION", details: "{}") }
     }
 
+    private func yaciParameterChange(_ update: String) throws -> GovAction {
+        let json = """
+            {"tx_hash": "\(YaciMockData.proposalTxHash)", "index": 0, "type": "PARAMETER_CHANGE_ACTION",
+             "details": {"type": "PARAMETER_CHANGE_ACTION",
+                         "govActionId": {"transactionId": "\(YaciMockData.proposalTxHash)", "gov_action_index": 1},
+                         "protocolParamUpdate": \(update),
+                         "policyHash": "fa24fb305126805cf2164c161d852a0e7330cf988f1fe558cf7d4a64"}}
+            """
+        let proposal = try JSONDecoder().decode(Components.Schemas.GovActionProposal.self, from: Data(json.utf8))
+        let id = GovActionID(
+            transactionID: TransactionId(payload: Data(hex: String(repeating: "11", count: 32))), govActionIndex: 0)
+        return try YaciDevkitChainContext.govAction(from: proposal, id: id)
+    }
+
+    @Test("A Yaci parameter change reads its update, previous action and policy hash")
+    func testYaciParameterChange() throws {
+        let action = try yaciParameterChange("""
+            {"minFeeA": 44, "maxTxSize": 16384, "nopt": 500, "keyDeposit": 2000000, "minFeeB": null,
+             "expansionRate": {"numerator": 3, "denominator": 1000},
+             "priceMem": {"numerator": 577, "denominator": 10000},
+             "priceStep": {"numerator": 721, "denominator": 10000000},
+             "maxTxExMem": 14000000, "maxTxExSteps": 10000000000,
+             "costModels": {"1": "83010203"}, "costModelsHash": "ab",
+             "poolVotingThresholds": {"pvtMotionNoConfidence": {"numerator": 51, "denominator": 100},
+               "pvtCommitteeNormal": {"numerator": 51, "denominator": 100},
+               "pvtCommitteeNoConfidence": {"numerator": 51, "denominator": 100},
+               "pvtHardForkInitiation": {"numerator": 51, "denominator": 100},
+               "pvtPPSecurityGroup": {"numerator": 51, "denominator": 100}},
+             "govActionLifetime": 6, "minFeeRefScriptCostPerByte": {"numerator": 15, "denominator": 1}}
+            """)
+        guard case .parameterChangeAction(let change) = action else {
+            Issue.record("Expected a parameter change, got \(action)")
+            return
+        }
+        let u = change.protocolParamUpdate
+        #expect(change.id?.govActionIndex == 1)
+        #expect(change.policyHash?.payload.toHex == "fa24fb305126805cf2164c161d852a0e7330cf988f1fe558cf7d4a64")
+        #expect(u.minFeeA == 44 && u.minFeeB == nil)
+        #expect(u.maxTransactionSize == 16384 && u.nOpt == 500 && u.keyDeposit == 2_000_000)
+        #expect(u.expansionRate?.numerator == 3 && u.expansionRate?.denominator == 1000)
+        #expect(u.executionCosts?.memPrice.numerator == 577)
+        #expect(u.maxTxExUnits?.mem == 14_000_000 && u.maxTxExUnits?.steps == 10_000_000_000)
+        #expect(u.costModels?.plutusV2.map { Array($0.values.prefix(3)) } == [1, 2, 3])
+        #expect(u.poolVotingThresholds?.ppSecurityGroup.numerator == 51)
+        #expect(u.governanceActionValidityPeriod == 6)
+        #expect(u.minFeeRefScriptCoinsPerByte?.numerator == 15)
+        // Everything not in the update is unchanged.
+        #expect(u.maxBlockBodySize == nil && u.drepVotingThresholds == nil)
+    }
+
+    static let badYaciUpdates: [String] = [
+        // A field this reader does not know.
+        #"{"someNewParameter": 1}"#,
+        // Only half of a pair.
+        #"{"priceMem": {"numerator": 1, "denominator": 2}}"#,
+        #"{"maxTxExMem": 1}"#,
+        // A pre-Conway field.
+        #"{"extraEntropy": {"_1": 1, "_2": "ab"}}"#,
+        // A cost model that is not CBOR hex, or for an unknown language.
+        #"{"costModels": {"1": "zz"}}"#,
+        #"{"costModels": {"7": "83010203"}}"#,
+        // Thresholds missing one of their fields.
+        #"{"poolVotingThresholds": {"pvtMotionNoConfidence": {"numerator": 1, "denominator": 2}}}"#,
+    ]
+
+    @Test("A Yaci parameter update with an unknown, partial or pre-Conway field throws", arguments: badYaciUpdates)
+    func testYaciBadParameterChange(_ update: String) {
+        #expect(throws: CardanoChainError.self) { try yaciParameterChange(update) }
+    }
+
+    @Test("A Yaci parameter change with no update throws instead of reading as an empty one")
+    func testYaciParameterChangeNoUpdate() throws {
+        let json = """
+            {"tx_hash": "\(YaciMockData.proposalTxHash)", "index": 0, "type": "PARAMETER_CHANGE_ACTION",
+             "details": {"type": "PARAMETER_CHANGE_ACTION"}}
+            """
+        let proposal = try JSONDecoder().decode(Components.Schemas.GovActionProposal.self, from: Data(json.utf8))
+        #expect(throws: CardanoChainError.self) {
+            try YaciDevkitChainContext.govAction(
+                from: proposal,
+                id: GovActionID(transactionID: TransactionId(payload: Data(count: 32)), govActionIndex: 0))
+        }
+    }
+
     @Test("Test threshold parsing accepts ratios, decimals and strings")
     func testUnitIntervalParsing() {
         let ratio = YaciDevkitChainContext.unitInterval(["numerator": 2, "denominator": 3])
