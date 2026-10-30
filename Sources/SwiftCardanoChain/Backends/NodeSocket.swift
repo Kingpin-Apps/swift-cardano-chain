@@ -383,8 +383,10 @@ public actor NodeSocketChainContext: ChainContext {
         }
 
         // A validity interval needs the chain's slot timeline; without one the
-        // script cannot be given its time range and evaluation refuses it.
-        let timeline = (try? await self.slotTimeline()) ?? nil
+        // script cannot be given its time range and evaluation refuses it. The
+        // timeline comes from the genesis parameters, and failing to read them is
+        // an error — never a reason to evaluate without one.
+        let timeline = try await self.slotTimeline()
 
         return try await evaluateTx(
             tx: tx,
