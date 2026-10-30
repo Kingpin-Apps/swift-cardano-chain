@@ -219,6 +219,13 @@ enum LedgerGovActionJSON {
         func unit(_ key: String) throws -> UnitInterval? {
             try LedgerValues.unitInterval(json: d[key], "\(what) \(key)")
         }
+        func object(_ key: String) throws -> [String: Any]? {
+            guard let raw = d[key], !(raw is NSNull) else { return nil }
+            guard let object = raw as? [String: Any] else {
+                throw CardanoChainError.valueError("\(what) \(key): \(raw) is not an object")
+            }
+            return object
+        }
         func exUnits(_ key: String) throws -> ExUnits? {
             guard let raw = d[key], !(raw is NSNull) else { return nil }
             guard let pair = raw as? [String: Any] else {
@@ -231,6 +238,25 @@ enum LedgerGovActionJSON {
                     "\(what) \(key) \(keys[0])")
             }
             return ExUnits(mem: try value("memory", "mem"), steps: try value("steps", "step"))
+        }
+
+        // A field this reader does not know would otherwise be dropped from the update.
+        let known: Set<String> = [
+            "txFeePerByte", "minFeeA", "txFeeFixed", "minFeeB", "maxBlockBodySize", "maxTxSize",
+            "maxTransactionSize", "maxBlockHeaderSize", "stakeAddressDeposit", "keyDeposit",
+            "stakePoolDeposit", "poolDeposit", "poolRetireMaxEpoch", "maximumEpoch", "stakePoolTargetNum",
+            "nOpt", "poolPledgeInfluence", "monetaryExpansion", "expansionRate", "treasuryCut",
+            "treasuryGrowthRate", "minPoolCost", "utxoCostPerByte", "adaPerUTxOByte", "adaPerUtxoByte",
+            "maxValueSize", "collateralPercentage", "maxCollateralInputs", "committeeMinSize",
+            "minCommitteeSize", "committeeMaxTermLength", "committeeTermLimit", "govActionLifetime",
+            "governanceActionValidityPeriod", "govActionDeposit", "governanceActionDeposit", "dRepDeposit",
+            "drepDeposit", "dRepActivity", "drepInactivityPeriod", "minFeeRefScriptCostPerByte",
+            "minFeeRefScriptCoinsPerByte", "protocolVersion", "maxBlockExecutionUnits", "maxBlockExUnits",
+            "maxTxExecutionUnits", "maxTxExUnits", "executionUnitPrices", "executionCosts", "costModels",
+            "poolVotingThresholds", "dRepVotingThresholds",
+        ]
+        if let unknown = d.keys.filter({ !known.contains($0) }).sorted().first {
+            throw CardanoChainError.valueError("\(what) parameter update has a field this library does not read: \(unknown)")
         }
 
         var u = ProtocolParamUpdate()
@@ -259,7 +285,7 @@ enum LedgerGovActionJSON {
         u.drepInactivityPeriod = try epochInterval("dRepActivity") ?? (try epochInterval("drepInactivityPeriod"))
         u.minFeeRefScriptCoinsPerByte = try nni("minFeeRefScriptCostPerByte") ?? (try nni("minFeeRefScriptCoinsPerByte"))
 
-        if let v = d["protocolVersion"] as? [String: Any] {
+        if let v = try object("protocolVersion") {
             u.protocolVersion = ProtocolVersion(
                 major: try LedgerValues.required(
                     LedgerValues.integer(json: v["major"], "\(what) protocolVersion major"), "\(what) protocolVersion major"),
@@ -270,7 +296,7 @@ enum LedgerGovActionJSON {
         u.maxBlockExUnits = try exUnits("maxBlockExecutionUnits") ?? (try exUnits("maxBlockExUnits"))
         u.maxTxExUnits = try exUnits("maxTxExecutionUnits") ?? (try exUnits("maxTxExUnits"))
 
-        if let prices = d["executionUnitPrices"] as? [String: Any] ?? d["executionCosts"] as? [String: Any] {
+        if let prices = try object("executionUnitPrices") ?? (try object("executionCosts")) {
             let mem = try LedgerValues.required(
                 LedgerValues.nonNegativeInterval(json: prices["priceMemory"], "\(what) priceMemory"),
                 "\(what) priceMemory")
@@ -280,28 +306,39 @@ enum LedgerGovActionJSON {
             u.executionCosts = ExUnitPrices(memPrice: mem, stepPrice: step)
         }
 
-        if let cm = d["costModels"] as? [String: Any], !cm.isEmpty {
-            // The cardano-cli JSON arrays may not match the strict cost-model template
-            // length (entries are added over hard forks). Pass empty arrays for any
-            // version present in the JSON — `modelFromValues` treats empty as
-            // "zero-filled template" and avoids the length check. Values are wrong,
-            // but downstream consumers in scm only need the field to be non-nil to
-            // detect that the TECHNICAL parameter group was touched.
-            var byId: [Int: [Int64]] = [:]
-            for key in cm.keys {
-                switch key {
-                case "PlutusV1", "PlutusScriptV1": byId[0] = []
-                case "PlutusV2", "PlutusScriptV2": byId[1] = []
-                case "PlutusV3", "PlutusScriptV3": byId[2] = []
-                default: break
+        if let raw = d["costModels"], !(raw is NSNull) {
+            // `{"PlutusV1": [Int], "PlutusV2": [Int], "PlutusV3": [Int]}`: each
+            // language's full parameter list, read as given.
+            guard let models = raw as? [String: Any] else {
+                throw CardanoChainError.valueError("\(what) costModels: \(raw) is not an object")
+            }
+            var byLanguage: [Int: [Int64]] = [:]
+            for (language, values) in models {
+                let id: Int
+                switch language {
+                case "PlutusV1", "PlutusScriptV1": id = 0
+                case "PlutusV2", "PlutusScriptV2": id = 1
+                case "PlutusV3", "PlutusScriptV3": id = 2
+                default:
+                    throw CardanoChainError.valueError("\(what) costModels: unknown language \(language)")
+                }
+                guard let list = values as? [Any], !list.isEmpty else {
+                    throw CardanoChainError.valueError("\(what) costModels \(language): \(values) is not a parameter list")
+                }
+                byLanguage[id] = try list.map {
+                    try LedgerValues.required(
+                        LedgerValues.integer(json: $0, as: Int64.self, "\(what) costModels \(language)"),
+                        "\(what) costModels \(language)")
                 }
             }
-            if !byId.isEmpty {
-                u.costModels = try? CostModels(byId)
+            do {
+                u.costModels = try CostModels(byLanguage)
+            } catch {
+                throw CardanoChainError.valueError("\(what) costModels: \(error)")
             }
         }
 
-        if let pvt = d["poolVotingThresholds"] as? [String: Any] {
+        if let pvt = try object("poolVotingThresholds") {
             // An update that carries the thresholds carries all of them.
             func ui(_ key: String) throws -> UnitInterval? {
                 try LedgerValues.required(
@@ -323,13 +360,11 @@ enum LedgerGovActionJSON {
             }
         }
 
-        if let dvt = d["dRepVotingThresholds"] as? [String: Any] {
+        if let dvt = try object("dRepVotingThresholds") {
             func ui(_ key: String) throws -> UnitInterval? {
                 try LedgerValues.required(
                     LedgerValues.unitInterval(json: dvt[key], "\(what) \(key)"), "\(what) dRepVotingThresholds \(key)")
             }
-            let order: [(String, KeyPath<[String: UnitInterval?], UnitInterval?>)] = []  // unused; we'll inline
-            _ = order
             if let mnc = try ui("motionNoConfidence"),
                let cn = try ui("committeeNormal"),
                let cnc = try ui("committeeNoConfidence"),

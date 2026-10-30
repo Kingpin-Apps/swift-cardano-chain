@@ -90,6 +90,33 @@ struct LedgerGovActionJSONTests {
         #expect(change.protocolParamUpdate.maxTransactionSize == 16384)
     }
 
+    @Test("A proposed update's cost models are read as given, not zero-filled")
+    func costModels() throws {
+        guard case .parameterChangeAction(let change) = try parse(
+            #"{"tag": "ParameterChange", "contents": [null, {"costModels": {"PlutusV2": [7, 8, 9]}}, null]}"#)
+        else { Issue.record("Expected a parameter change"); return }
+        let v2 = try #require(change.protocolParamUpdate.costModels?.plutusV2)
+        #expect(Array(v2.values.prefix(3)) == [7, 8, 9])
+        #expect(change.protocolParamUpdate.costModels?.plutusV1 == nil)
+    }
+
+    static let badUpdates: [String] = [
+        // A field this reader does not know, which would otherwise be dropped.
+        #"{"someNewParameter": 1}"#,
+        #"{"costModels": {"PlutusV9": [1]}}"#,
+        #"{"costModels": {"PlutusV1": []}}"#,
+        #"{"costModels": {"PlutusV1": ["x"]}}"#,
+        #"{"poolVotingThresholds": 0.5}"#,
+        #"{"executionUnitPrices": "cheap"}"#,
+    ]
+
+    @Test("A proposed update with an unknown field or a malformed one throws", arguments: badUpdates)
+    func badUpdate(_ update: String) {
+        #expect(throws: CardanoChainError.self) {
+            try parse(#"{"tag": "ParameterChange", "contents": [null, \#(update), null]}"#)
+        }
+    }
+
     // MARK: Yaci
 
     static let corruptYaciProposals: [String] = [
