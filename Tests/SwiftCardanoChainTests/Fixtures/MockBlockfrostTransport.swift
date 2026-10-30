@@ -362,7 +362,7 @@ struct MockTransport: ClientTransport {
                         certIndex: 1,
                         governanceType: .treasuryWithdrawals,
                         governanceDescription: try JSONDecoder().decode(
-                            Components.Schemas.Proposal.GovernanceDescriptionPayload.self,
+                            SwiftBlockfrostAPI.LedgerJSON.self,
                             from: Data(Self.treasuryDescription.utf8)),
                         deposit: "12000",
                         returnAddress: "stake_test1urd3hs7rlxwwdzthe6hj026dmyt3y0heuulctscyydh2kgck6nkmz",
@@ -598,7 +598,7 @@ struct ParameterChangeMockTransport: ClientTransport {
                     certIndex: 1,
                     governanceType: .parameterChange,
                     governanceDescription: try JSONDecoder().decode(
-                        Components.Schemas.Proposal.GovernanceDescriptionPayload.self,
+                        SwiftBlockfrostAPI.LedgerJSON.self,
                         from: Data(Self.description.utf8)),
                     deposit: "12000",
                     returnAddress: "stake_test1urd3hs7rlxwwdzthe6hj026dmyt3y0heuulctscyydh2kgck6nkmz",

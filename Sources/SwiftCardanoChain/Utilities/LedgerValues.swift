@@ -68,8 +68,8 @@ enum LedgerValues {
         if let value = any as? Int64 { return try integer(value, as: T.self, what()) }
         if let value = any as? UInt64 { return try integer(value, as: T.self, what()) }
         if let text = any as? String { return try integer(text: text, as: T.self, what()) }
-        // A Double (OpenAPIRuntime's containers hold JSON numbers as one) is
-        // accepted only when it is a whole number in range.
+        // `JSONSerialization` (cardano-cli output) may read a number as a
+        // Double; it is accepted only when it is a whole number in range.
         if let value = any as? Double { return try integer(value, as: T.self, what()) }
         throw CardanoChainError.valueError("\(what()): \(any) is not a whole number")
     }
@@ -115,6 +115,64 @@ enum LedgerValues {
         throw CardanoChainError.valueError("\(what): \(any) is not a number")
     }
 
+    // MARK: Ledger JSON
+
+    /// A unit interval from ledger JSON: a `{"numerator", "denominator"}`
+    /// object, a decimal number, or text. `nil` when absent or `null`.
+    static func unitInterval(json value: ChainJSON?, _ what: @autoclosure () -> String) throws -> UnitInterval? {
+        guard let (n, d) = try fraction(json: value, what()) else { return nil }
+        return try unitInterval(n, d, what())
+    }
+
+    /// A non-negative interval from ledger JSON. `nil` when absent or `null`.
+    static func nonNegativeInterval(json value: ChainJSON?, _ what: @autoclosure () -> String) throws -> NonNegativeInterval? {
+        guard let (n, d) = try fraction(json: value, what()) else { return nil }
+        return NonNegativeInterval(numerator: n, denominator: d)
+    }
+
+    /// An integer from ledger JSON: a whole number or integer text. `nil`
+    /// when absent or `null`.
+    static func integer<T: FixedWidthInteger>(
+        json value: ChainJSON?, as type: T.Type = T.self, _ what: @autoclosure () -> String
+    ) throws -> T? {
+        switch value.nonNull {
+        case nil: return nil
+        case .number(let decimal)?: return try integer(decimal, as: T.self, what())
+        case .string(let text)?: return try integer(text: text, as: T.self, what())
+        case let other?: throw CardanoChainError.valueError("\(what()): \(other) is not a whole number")
+        }
+    }
+
+    /// A token quantity from ledger JSON. `nil` when absent or `null`.
+    static func bigInt(json value: ChainJSON?, _ what: @autoclosure () -> String) throws -> BigInt? {
+        switch value.nonNull {
+        case nil: return nil
+        case .number(let decimal)?: return try bigInt(decimal, what())
+        case .string(let text)?: return try bigInt(text: text, what())
+        case let other?: throw CardanoChainError.valueError("\(what()): \(other) is not a whole number")
+        }
+    }
+
+    private static func fraction(json value: ChainJSON?, _ what: String) throws -> (UInt64, UInt64)? {
+        switch value.nonNull {
+        case nil:
+            return nil
+        case .object(let object)?:
+            let n: UInt64? = try integer(json: object["numerator"], "\(what) numerator")
+            let d: UInt64? = try integer(json: object["denominator"], "\(what) denominator")
+            guard let n, let d else {
+                throw CardanoChainError.valueError("\(what): \(object) is not a fraction")
+            }
+            return try reduced(BigInt(n), BigInt(d), what)
+        case .string(let text)?:
+            return try fraction(text: text, what)
+        case .number(let decimal)?:
+            return try fraction(decimal: decimal, what)
+        case let other?:
+            throw CardanoChainError.valueError("\(what): \(other) is not a number")
+        }
+    }
+
     // MARK: Presence
 
     /// `value`, or an error naming the missing field.
@@ -145,6 +203,31 @@ enum LedgerValues {
             throw CardanoChainError.valueError("\(what()): \(value) is not a whole \(T.self)")
         }
         return result
+    }
+
+    /// `value` as a `T` when it is a whole number in range, an error otherwise.
+    static func integer<T: FixedWidthInteger>(
+        _ value: Decimal, as type: T.Type = T.self, _ what: @autoclosure () -> String
+    ) throws -> T {
+        guard let result = T(exactly: try bigInt(value, what())) else {
+            throw CardanoChainError.valueError("\(what()): \(value) does not fit a \(T.self)")
+        }
+        return result
+    }
+
+    /// `value` as a `BigInt` when it is a whole number, an error otherwise.
+    static func bigInt(_ value: Decimal, _ what: @autoclosure () -> String) throws -> BigInt {
+        guard value.isFinite, !value.isNaN, let significand = BigInt(value.significand.description) else {
+            throw CardanoChainError.valueError("\(what()): \(value) is not a number")
+        }
+        let signed = value.sign == .minus ? -significand : significand
+        let exponent = Int(value.exponent)
+        if exponent >= 0 { return signed * BigInt(10).power(exponent) }
+        let divisor = BigInt(10).power(-exponent)
+        guard signed % divisor == 0 else {
+            throw CardanoChainError.valueError("\(what()): \(value) is not a whole number")
+        }
+        return signed / divisor
     }
 
     /// Integer text such as `"45000000000000000"` as a `T`.
@@ -263,16 +346,6 @@ extension BinaryInteger {
     /// The value as a `T`, or a ``CardanoChainError/valueError(_:)`` naming
     /// `what` when it is negative or too large for `T`: a value from the
     /// network or a file never traps and is never clamped.
-    func checked<T: FixedWidthInteger>(_ what: @autoclosure () -> String) throws -> T {
-        try LedgerValues.integer(self, as: T.self, what())
-    }
-}
-
-extension Double {
-    /// The value as a `T` when it is a whole number in range, a
-    /// ``CardanoChainError/valueError(_:)`` naming `what` otherwise. APIs
-    /// whose clients read every number as a `Double` (Koios) go through this
-    /// instead of `T(_:)`, which truncates fractions and traps on overflow.
     func checked<T: FixedWidthInteger>(_ what: @autoclosure () -> String) throws -> T {
         try LedgerValues.integer(self, as: T.self, what())
     }

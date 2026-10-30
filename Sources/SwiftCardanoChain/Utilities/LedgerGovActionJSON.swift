@@ -1,7 +1,7 @@
 import Foundation
 import SwiftCardanoCore
 
-/// A governance action as the ledger writes it in JSON — the form cardano-cli's
+/// A governance action as the ledger writes it in JSON (read as exact ``ChainJSON``) — the form cardano-cli's
 /// `query gov-state` prints and db-sync stores (Koios's `proposal_description`,
 /// Blockfrost's `governance_description`):
 /// `{"tag": "<Constructor>", "contents": [<fields>]}`.
@@ -16,17 +16,17 @@ enum LedgerGovActionJSON {
     /// from the JSON, or `nil` when it has none — never the proposal's own id.
     /// `protocolParamUpdate` reads a parameter change's update object.
     static func govAction(
-        _ any: Any?, _ what: String,
-        protocolParamUpdate: ([String: Any]) throws -> ProtocolParamUpdate
+        _ json: ChainJSON?, _ what: String,
+        protocolParamUpdate: ([String: ChainJSON]) throws -> ProtocolParamUpdate
     ) throws -> GovAction {
-        guard let object = any as? [String: Any] else {
-            throw CardanoChainError.valueError("\(what): \(String(describing: any)) is not a governance action")
+        guard let object = json?.object else {
+            throw CardanoChainError.valueError("\(what): \(String(describing: json)) is not a governance action")
         }
-        guard let tag = object["tag"] as? String else {
+        guard let tag = object["tag"]?.string else {
             throw CardanoChainError.valueError("\(what) has no tag: \(object)")
         }
-        func contents(_ count: Int) throws -> [Any] {
-            guard let contents = object["contents"] as? [Any], contents.count == count else {
+        func contents(_ count: Int) throws -> [ChainJSON] {
+            guard let contents = object["contents"]?.array, contents.count == count else {
                 throw CardanoChainError.valueError(
                     "\(what) \(tag) contents are not \(count) fields: \(String(describing: object["contents"]))")
             }
@@ -44,7 +44,7 @@ enum LedgerGovActionJSON {
         case "ParameterChange":
             // [prevGovActionId, ProtocolParamUpdate, policyHash]
             let c = try contents(3)
-            guard let update = c[1] as? [String: Any] else {
+            guard let update = c[1].object else {
                 throw CardanoChainError.valueError("\(what) parameter update is not an object: \(c[1])")
             }
             return .parameterChangeAction(parameterChange(
@@ -55,7 +55,7 @@ enum LedgerGovActionJSON {
         case "HardForkInitiation":
             // [prevGovActionId, {major, minor}]
             let c = try contents(2)
-            guard let version = c[1] as? [String: Any] else {
+            guard let version = c[1].object else {
                 throw CardanoChainError.valueError("\(what) protocol version is not an object: \(c[1])")
             }
             let major: Int = try LedgerValues.required(
@@ -69,12 +69,12 @@ enum LedgerGovActionJSON {
         case "TreasuryWithdrawals":
             // [[[rewardAccount, coin], ...], policyHash]
             let c = try contents(2)
-            guard let pairs = c[0] as? [Any] else {
+            guard let pairs = c[0].array else {
                 throw CardanoChainError.valueError("\(what) withdrawals are not a list: \(c[0])")
             }
             var withdrawals: [RewardAccount: Coin] = [:]
             for pair in pairs {
-                guard let pair = pair as? [Any], pair.count == 2 else {
+                guard let pair = pair.array, pair.count == 2 else {
                     throw CardanoChainError.valueError("\(what) withdrawal \(pair) is not [account, amount]")
                 }
                 let account = try LedgerValues.rewardAccount(json: pair[0], "\(what) withdrawal account")
@@ -90,7 +90,7 @@ enum LedgerGovActionJSON {
         case "NewConstitution":
             // [prevGovActionId, {anchor, script}]
             let c = try contents(2)
-            guard let constitution = c[1] as? [String: Any] else {
+            guard let constitution = c[1].object else {
                 throw CardanoChainError.valueError("\(what) constitution is not an object: \(c[1])")
             }
             return .newConstitution(NewConstitution(
@@ -105,14 +105,14 @@ enum LedgerGovActionJSON {
     /// `[prevGovActionId, [members to remove], {member to add: expiry epoch}, quorum]`,
     /// mapped as the ledger holds it: `coldCredentials` is the set of members
     /// to remove, `credentialEpochs` the members to add with their terms.
-    static func updateCommittee(_ contents: [Any], _ what: String) throws -> UpdateCommittee {
+    static func updateCommittee(_ contents: [ChainJSON], _ what: String) throws -> UpdateCommittee {
         guard contents.count == 4 else {
             throw CardanoChainError.valueError("\(what) UpdateCommittee contents are not 4 fields: \(contents)")
         }
-        guard let removed = contents[1] as? [Any] else {
+        guard let removed = contents[1].array else {
             throw CardanoChainError.valueError("\(what) members to remove are not a list: \(contents[1])")
         }
-        guard let added = contents[2] as? [String: Any] else {
+        guard let added = contents[2].object else {
             throw CardanoChainError.valueError("\(what) members to add are not an object: \(contents[2])")
         }
         var toRemove: Set<CommitteeColdCredential> = []
@@ -123,7 +123,7 @@ enum LedgerGovActionJSON {
         var toAdd: [CommitteeColdCredential: UInt64] = [:]
         for (key, epoch) in added {
             let credential = CommitteeColdCredential(
-                credential: try LedgerValues.credential(json: key, "\(what) member to add"))
+                credential: try LedgerValues.credential(json: ChainJSON.string(key), "\(what) member to add"))
             toAdd[credential] = try LedgerValues.required(
                 LedgerValues.integer(json: epoch, "\(what) member term"), "\(what) member term")
         }
@@ -134,25 +134,12 @@ enum LedgerGovActionJSON {
             coldCredentials: toRemove, credentialEpochs: toAdd, interval: quorum)
     }
 
-    /// `value` (a generated client's JSON container) as `JSONSerialization`
-    /// reads JSON, so a JSON null is `NSNull` throughout, not a boxed `nil`;
-    /// `nil` when there is no value.
-    static func foundationJSON<T: Encodable>(_ value: T?, _ what: String) throws -> Any? {
-        guard let value else { return nil }
-        do {
-            return try JSONSerialization.jsonObject(
-                with: JSONEncoder().encode(value), options: .fragmentsAllowed)
-        } catch {
-            throw CardanoChainError.valueError("\(what) is not JSON: \(error)")
-        }
-    }
-
     /// A previous governance action id as the ledger writes it,
     /// `{"txId": hex, "govActionIx": n}`, or `nil` for no value or JSON null.
-    static func prevActionID(_ any: Any?, _ what: String) throws -> GovActionID? {
-        guard let any, !(any is NSNull) else { return nil }
-        guard let object = any as? [String: Any], let txId = object["txId"] as? String else {
-            throw CardanoChainError.valueError("\(what): \(any) is not a governance action id")
+    static func prevActionID(_ json: ChainJSON?, _ what: String) throws -> GovActionID? {
+        guard let json = json.nonNull else { return nil }
+        guard let object = json.object, let txId = object["txId"]?.string else {
+            throw CardanoChainError.valueError("\(what): \(json) is not a governance action id")
         }
         return GovActionID(
             transactionID: try LedgerValues.hash(hex: txId, as: TransactionId.self, "\(what) txId"),
@@ -174,7 +161,7 @@ enum LedgerGovActionJSON {
     }
 
     /// `{anchor: {url, dataHash}, script: hash | null}`; the anchor is required.
-    static func constitution(_ object: [String: Any], _ what: String) throws -> Constitution {
+    static func constitution(_ object: [String: ChainJSON], _ what: String) throws -> Constitution {
         Constitution(
             anchor: try LedgerValues.required(
                 LedgerValues.anchor(json: object["anchor"], "\(what) constitution anchor"),
@@ -184,10 +171,10 @@ enum LedgerGovActionJSON {
     }
 
     /// A script hash in hex, or `nil` for no value or JSON null.
-    static func policyHash(_ any: Any?, _ what: String) throws -> ScriptHash? {
-        guard let any, !(any is NSNull) else { return nil }
-        guard let hex = any as? String else {
-            throw CardanoChainError.valueError("\(what): \(any) is not a script hash")
+    static func policyHash(_ json: ChainJSON?, _ what: String) throws -> ScriptHash? {
+        guard let json = json.nonNull else { return nil }
+        guard let hex = json.string else {
+            throw CardanoChainError.valueError("\(what): \(json) is not a script hash")
         }
         return try LedgerValues.hash(hex: hex, as: ScriptHash.self, what)
     }
@@ -200,7 +187,7 @@ enum LedgerGovActionJSON {
     /// A field that is present but does not fit its ledger type (negative,
     /// too large, a ratio above one, not a number) throws. Field-name keys
     /// mirror what `cardano-cli conway query gov-state` emits.
-    static func protocolParamUpdate(_ d: [String: Any], _ what: String) throws -> ProtocolParamUpdate {
+    static func protocolParamUpdate(_ d: [String: ChainJSON], _ what: String) throws -> ProtocolParamUpdate {
         func coin(_ key: String) throws -> Coin? {
             try LedgerValues.integer(json: d[key], "\(what) \(key)")
         }
@@ -219,16 +206,16 @@ enum LedgerGovActionJSON {
         func unit(_ key: String) throws -> UnitInterval? {
             try LedgerValues.unitInterval(json: d[key], "\(what) \(key)")
         }
-        func object(_ key: String) throws -> [String: Any]? {
-            guard let raw = d[key], !(raw is NSNull) else { return nil }
-            guard let object = raw as? [String: Any] else {
+        func object(_ key: String) throws -> [String: ChainJSON]? {
+            guard let raw = d[key].nonNull else { return nil }
+            guard let object = raw.object else {
                 throw CardanoChainError.valueError("\(what) \(key): \(raw) is not an object")
             }
             return object
         }
         func exUnits(_ key: String) throws -> ExUnits? {
-            guard let raw = d[key], !(raw is NSNull) else { return nil }
-            guard let pair = raw as? [String: Any] else {
+            guard let raw = d[key].nonNull else { return nil }
+            guard let pair = raw.object else {
                 throw CardanoChainError.valueError("\(what) \(key): \(raw) is not an execution-units object")
             }
             func value(_ keys: String...) throws -> UInt64 {
@@ -306,10 +293,10 @@ enum LedgerGovActionJSON {
             u.executionCosts = ExUnitPrices(memPrice: mem, stepPrice: step)
         }
 
-        if let raw = d["costModels"], !(raw is NSNull) {
+        if let raw = d["costModels"].nonNull {
             // `{"PlutusV1": [Int], "PlutusV2": [Int], "PlutusV3": [Int]}`: each
             // language's full parameter list, read as given.
-            guard let models = raw as? [String: Any] else {
+            guard let models = raw.object else {
                 throw CardanoChainError.valueError("\(what) costModels: \(raw) is not an object")
             }
             var byLanguage: [Int: [Int64]] = [:]
@@ -322,7 +309,7 @@ enum LedgerGovActionJSON {
                 default:
                     throw CardanoChainError.valueError("\(what) costModels: unknown language \(language)")
                 }
-                guard let list = values as? [Any], !list.isEmpty else {
+                guard let list = values.array, !list.isEmpty else {
                     throw CardanoChainError.valueError("\(what) costModels \(language): \(values) is not a parameter list")
                 }
                 byLanguage[id] = try list.map {

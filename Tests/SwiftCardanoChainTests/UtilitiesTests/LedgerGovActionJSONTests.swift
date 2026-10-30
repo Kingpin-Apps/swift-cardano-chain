@@ -14,8 +14,8 @@ struct LedgerGovActionJSONTests {
     static let anchorHash = String(repeating: "cd", count: 32)
 
     private func parse(_ json: String) throws -> GovAction {
-        let any = try JSONSerialization.jsonObject(with: Data(json.utf8), options: .fragmentsAllowed)
-        return try LedgerGovActionJSON.govAction(any, "test") {
+        let value = try ChainJSON.decode(Data(json.utf8), "test")
+        return try LedgerGovActionJSON.govAction(value, "test") {
             try LedgerGovActionJSON.protocolParamUpdate($0, "test")
         }
     }

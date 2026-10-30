@@ -116,7 +116,7 @@ public actor KoiosChainContext: ChainContext {
             // Unfiltered, `epoch_info` returns every epoch in no set order, so
             // its first row is not the current one: ask for the tip's epoch.
             let tipEpoch = try await api.client.tip().ok.body.json.first?.epochNo
-            guard let epochNo: Int = try LedgerValues.integer(json: tipEpoch, "Koios tip epoch_no") else {
+            guard let epochNo = tipEpoch else {
                 throw CardanoChainError.koiosError("The tip has no epoch")
             }
             let response = try await api.client.epochInfo(.init(query: .init(_epochNo: String(epochNo))))
@@ -134,9 +134,8 @@ public actor KoiosChainContext: ChainContext {
     public func lastBlockSlot() async throws -> Int {
         do {
             let response = try await api.client.tip()
-            return try LedgerValues.required(
-                LedgerValues.integer(json: response.ok.body.json.first?.absSlot, "Koios tip abs_slot"),
-                "Koios tip abs_slot")
+            return try LedgerValues.required(response.ok.body.json.first?.absSlot, "Koios tip abs_slot")
+                .checked("Koios tip abs_slot")
         } catch {
             throw CardanoChainError.koiosError("Failed to get tip: \(error)")
         }
@@ -285,11 +284,11 @@ public actor KoiosChainContext: ChainContext {
 
             return ChainTip(
                 block: try Self.tipBlockNumber(tip),
-                epoch: try LedgerValues.integer(json: tip.epochNo, "Koios tip epoch_no"),
+                epoch: try tip.epochNo.map { try $0.checked("Koios tip epoch_no") },
                 era: nil,
                 hash: tip.hash,
-                slot: try LedgerValues.integer(json: tip.absSlot, "Koios tip abs_slot"),
-                slotInEpoch: try LedgerValues.integer(json: tip.epochSlot, "Koios tip epoch_slot"),
+                slot: try tip.absSlot.map { try $0.checked("Koios tip abs_slot") },
+                slotInEpoch: try tip.epochSlot.map { try $0.checked("Koios tip epoch_slot") },
                 slotsToEpochEnd: nil,
                 syncProgress: nil
             )
@@ -307,7 +306,7 @@ public actor KoiosChainContext: ChainContext {
     /// without dropping the value. A row without the key yields `nil` rather than block zero.
     static func tipBlockNumber(_ tip: Components.Schemas.TipPayload) throws -> BlockNumber? {
         guard let data = try? JSONEncoder().encode(tip),
-            let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            let object = try? JSONDecoder().decode(ChainJSON.self, from: data)
         else { return nil }
         return try LedgerValues.integer(json: object["block_no"], "Koios tip block_no")
     }
@@ -602,7 +601,7 @@ public actor KoiosChainContext: ChainContext {
             let isSpent = result.isSpent ?? false
 
             guard let txHashStr = result.txHash,
-                let txIndexDouble = result.txIndex,
+                let txIndex = result.txIndex,
                 let addressStr = result.address
             else {
                 return nil
@@ -610,7 +609,7 @@ public actor KoiosChainContext: ChainContext {
 
             let txIn = TransactionInput(
                 transactionId: try LedgerValues.hash(hex: txHashStr, as: TransactionId.self, "Koios TransactionId"),
-                index: try LedgerValues.integer(txIndexDouble, as: UInt16.self, "Koios output index")
+                index: try LedgerValues.integer(txIndex, as: UInt16.self, "Koios output index")
             )
 
             var lovelaceAmount: UInt64? = nil
@@ -974,7 +973,7 @@ public actor KoiosChainContext: ChainContext {
         // Map relays
         let relays: [SwiftCardanoCore.Relay] =
             try pool.relays?.map { relay in
-                let port: Int? = try relay.port.map { try $0.checked("Koios relay port") }
+                let port: Int? = try relay.port.map { try LedgerValues.integer($0, as: Int.self, "Koios relay port") }
                 return try LedgerValues.relay(
                     port: port, ipv4: relay.ipv4, ipv6: relay.ipv6,
                     dnsName: relay.dns, srvName: relay.srv, "Koios pool relay")
@@ -1599,18 +1598,12 @@ public actor KoiosChainContext: ChainContext {
 
     // MARK: - GovAction parsing
 
-    /// Parse a Koios `proposal_description` (an OpenAPI generic JSON object)
-    /// into a real `GovAction`. The shape matches cardano-cli's
+    /// Parse a Koios `proposal_description` (exact ledger JSON) into a real
+    /// `GovAction`. The shape matches cardano-cli's
     /// `proposalProcedure.govAction` (tag + contents) — Koios indexes the
-    /// ledger-state output. When the description is missing or unparseable
-    /// we surface the variant as `.infoAction` so callers can detect the
-    /// gap via the variant tag rather than via fabricated inner data.
-    private func parseKoiosGovAction(
-        _ description: OpenAPIRuntime.OpenAPIObjectContainer?
-    ) throws -> GovAction {
-        try LedgerGovActionJSON.govAction(
-            LedgerGovActionJSON.foundationJSON(description, "Koios proposal_description"), "Koios proposal_description"
-        ) {
+    /// ledger-state output. A missing or malformed description throws.
+    private func parseKoiosGovAction(_ description: SwiftKoios.LedgerJSON?) throws -> GovAction {
+        try LedgerGovActionJSON.govAction(description.map(ChainJSON.init), "Koios proposal_description") {
             try LedgerGovActionJSON.protocolParamUpdate($0, "Koios proposal_description")
         }
     }

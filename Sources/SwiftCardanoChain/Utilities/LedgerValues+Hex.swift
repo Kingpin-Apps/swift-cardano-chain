@@ -123,6 +123,43 @@ extension LedgerValues {
         }
     }
 
+    /// A credential written as ledger JSON: `{"keyHash": hex}` or
+    /// `{"scriptHash": hex}`, or a map key `keyHash-<hex>` / `scriptHash-<hex>`.
+    static func credential(json value: ChainJSON?, _ what: @autoclosure () -> String) throws -> CredentialType {
+        let what = what()
+        if let key = value?.string {
+            return try credential(json: key as Any?, what)
+        }
+        if let object = value?.object, object.count == 1 {
+            if let hex = object["keyHash"]?.string {
+                return try credential(isScript: false, hex: hex, what)
+            }
+            if let hex = object["scriptHash"]?.string {
+                return try credential(isScript: true, hex: hex, what)
+            }
+        }
+        throw CardanoChainError.valueError("\(what): \(String(describing: value)) is not a credential")
+    }
+
+    /// A reward account written as ledger JSON:
+    /// `{"network": "Mainnet" | "Testnet", "credential": {"keyHash" | "scriptHash": hex}}`.
+    static func rewardAccount(json value: ChainJSON?, _ what: @autoclosure () -> String) throws -> RewardAccount {
+        let what = what()
+        guard let network = value?["network"]?.string else {
+            throw CardanoChainError.valueError("\(what): \(String(describing: value)) is not a reward account")
+        }
+        let networkBit: UInt8
+        switch network.lowercased() {
+        case "mainnet": networkBit = 1
+        case "testnet": networkBit = 0
+        default: throw CardanoChainError.valueError("\(what): unknown network \(network)")
+        }
+        switch try credential(json: value?["credential"], "\(what) credential") {
+        case .verificationKeyHash(let hash): return Data([0xE0 | networkBit]) + hash.payload
+        case .scriptHash(let hash): return Data([0xF0 | networkBit]) + hash.payload
+        }
+    }
+
     private static func nibble(_ c: UInt8) -> UInt8? {
         switch c {
         case UInt8(ascii: "0")...UInt8(ascii: "9"): c - UInt8(ascii: "0")

@@ -873,6 +873,12 @@ public actor CardanoCliChainContext: ChainContext {
         let txHash = govActionID.transactionID.payload.toHex.lowercased()
         let index = govActionID.govActionIndex
 
+        // The actions themselves are read from the same JSON decoded exactly.
+        let govActionsJSON = try Self.proposalGovActions(data)
+        guard govActionsJSON.count == proposals.count else {
+            throw CardanoChainError.valueError("cardano-cli gov-state proposals did not decode alike")
+        }
+
         let nextRatifyState = govState["nextRatifyState"] as? [String: Any]
         let enactedGovActions = nextRatifyState?["enactedGovActions"] as? [[String: Any]] ?? []
         let expiredGovActions = nextRatifyState?["expiredGovActions"] as? [[String: Any]] ?? []
@@ -904,19 +910,19 @@ public actor CardanoCliChainContext: ChainContext {
             }
         }
 
-        let proposal = proposals.first(where: {
+        let proposalPosition = proposals.firstIndex(where: {
             guard let actionId = $0["actionId"] as? [String: Any] else {
                 return false
             }
             return actionIdMatches(actionId)
         })
+        let proposal = proposalPosition.map { proposals[$0] }
 
-        func extractGovAction(_ proposal: [String: Any]) throws -> GovAction {
-            guard let proposalProcedure = proposal["proposalProcedure"] as? [String: Any]
-            else {
+        func extractGovAction(at position: Int) throws -> GovAction {
+            guard proposals[position]["proposalProcedure"] is [String: Any] else {
                 throw CardanoChainError.valueError("Missing proposalProcedure in proposal")
             }
-            return try parseGovAction(actionDict: proposalProcedure["govAction"])
+            return try parseGovAction(govActionsJSON[position])
         }
 
         let inEnactedSet = actionExists(in: enactedGovActions)
@@ -941,7 +947,7 @@ public actor CardanoCliChainContext: ChainContext {
 
         // A proposal no longer in the gov state has no body to read: report its
         // status without an action rather than standing in a different one.
-        let parsedGovAction: GovAction? = try proposal.map { try extractGovAction($0) }
+        let parsedGovAction: GovAction? = try proposalPosition.map { try extractGovAction(at: $0) }
 
         return GovActionInfo(
             govActionId: govActionID,
@@ -1139,7 +1145,7 @@ public actor CardanoCliChainContext: ChainContext {
         let txHash = govActionID.transactionID.payload.toHex.lowercased()
         let index = Int(govActionID.govActionIndex)
 
-        guard let proposal = proposals.first(where: { proposalMatchesActionId($0, txHash: txHash, index: index) }) else {
+        guard let proposal = proposals.first(where: { proposalMatchesActionId($0.fields, txHash: txHash, index: index) }) else {
             throw CardanoChainError.valueError(
                 "Governance action not found in gov-state: \(txHash)#\(index)")
         }
@@ -1158,7 +1164,7 @@ public actor CardanoCliChainContext: ChainContext {
         return try proposals.map { proposal in
             try buildGovActionVotes(
                 proposal: proposal,
-                actionID: try parseActionId(from: proposal),
+                actionID: try parseActionId(from: proposal.fields),
                 currentEpoch: currentEpoch
             )
         }
@@ -1304,7 +1310,11 @@ public actor CardanoCliChainContext: ChainContext {
 
     // MARK: - Vote-query helpers (private)
 
-    private func fetchProposalsFromGovState() async throws -> [[String: Any]] {
+    /// A gov-state proposal: its fields, and its governance action read
+    /// exactly as ``ChainJSON``.
+    private typealias GovStateProposal = (fields: [String: Any], govAction: ChainJSON?)
+
+    private func fetchProposalsFromGovState() async throws -> [GovStateProposal] {
         let result = try await cli.query.govState(arguments: ["--output-json"])
         guard let data = result.data(using: .utf8),
               let govState = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -1313,7 +1323,21 @@ public actor CardanoCliChainContext: ChainContext {
             throw CardanoChainError.valueError(
                 "Failed to parse gov-state JSON or missing proposals")
         }
-        return proposals
+        let govActions = try Self.proposalGovActions(data)
+        guard govActions.count == proposals.count else {
+            throw CardanoChainError.valueError("cardano-cli gov-state proposals did not decode alike")
+        }
+        return Array(zip(proposals, govActions)).map { (fields: $0.0, govAction: $0.1) }
+    }
+
+    /// Each gov-state proposal's `proposalProcedure.govAction`, in proposal
+    /// order, decoded exactly (numbers as `Decimal`, never `Double`).
+    static func proposalGovActions(_ data: Data) throws -> [ChainJSON?] {
+        let state = try ChainJSON.decode(data, "cardano-cli gov-state")
+        guard let proposals = state["proposals"]?.array else {
+            throw CardanoChainError.valueError("cardano-cli gov-state has no proposals")
+        }
+        return proposals.map { $0["proposalProcedure"]?["govAction"] }
     }
 
     private func proposalMatchesActionId(
@@ -1349,14 +1373,15 @@ public actor CardanoCliChainContext: ChainContext {
     }
 
     private func buildGovActionVotes(
-        proposal: [String: Any],
+        proposal entry: GovStateProposal,
         actionID: GovActionID,
         currentEpoch: UInt64
     ) throws -> GovActionVotes {
+        let proposal = entry.fields
         let proposalProcedure = proposal["proposalProcedure"] as? [String: Any] ?? [:]
 
         // Parse govAction fully from the proposal procedure.
-        let govAction = try parseGovAction(actionDict: proposalProcedure["govAction"])
+        let govAction = try parseGovAction(entry.govAction)
 
         // Parse deposit + return address.
         let deposit: Coin = try LedgerValues.required(
@@ -1401,16 +1426,11 @@ public actor CardanoCliChainContext: ChainContext {
         )
     }
 
-    /// Parse a cardano-cli `proposalProcedure.govAction` dict into a real
-    /// `GovAction`. Unlike a tag-only stub, this walks the `contents` array
-    /// and extracts the on-chain payload for each variant. When a particular
-    /// field cannot be parsed (e.g. malformed JSON for that variant) the
-    /// fallback is to surface the variant tag with empty contents rather
-    /// than fabricated data — and where the tag itself is missing, we
-    /// return `.infoAction` so consumers can detect "unparseable" via the
-    /// variant tag.
-    private func parseGovAction(actionDict any: Any?) throws -> GovAction {
-        try LedgerGovActionJSON.govAction(any, "cardano-cli governance action") {
+    /// Parse a cardano-cli `proposalProcedure.govAction`, decoded exactly as
+    /// ``ChainJSON``, into a real `GovAction`, walking the `contents` of each
+    /// variant. A missing tag or contents of the wrong shape throw.
+    private func parseGovAction(_ json: ChainJSON?) throws -> GovAction {
+        try LedgerGovActionJSON.govAction(json, "cardano-cli governance action") {
             try LedgerGovActionJSON.protocolParamUpdate($0, "cardano-cli")
         }
     }

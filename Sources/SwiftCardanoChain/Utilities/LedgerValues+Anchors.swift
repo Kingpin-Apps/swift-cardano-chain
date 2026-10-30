@@ -89,6 +89,29 @@ extension LedgerValues {
         )
     }
 
+    /// An anchor written as ledger JSON (the same spellings as the untyped reader).
+    /// `nil` for no value or JSON null.
+    static func anchor(json value: ChainJSON?, _ what: @autoclosure () -> String) throws -> Anchor? {
+        let what = what()
+        guard let value = value.nonNull else { return nil }
+        guard let object = value.object else {
+            throw CardanoChainError.valueError("\(what) is not an object: \(value)")
+        }
+        func text(_ keys: String...) throws -> String {
+            guard let found = keys.lazy.compactMap({ object[$0].nonNull }).first else {
+                throw CardanoChainError.valueError("\(what) \(keys[0]) is missing")
+            }
+            guard let text = found.string else {
+                throw CardanoChainError.valueError("\(what) \(keys[0]) is not a string: \(found)")
+            }
+            return text
+        }
+        return try anchor(
+            url: text("url", "anchorUrl", "anchor_url"),
+            hash: text("dataHash", "anchorDataHash", "anchor_data_hash", "hash"),
+            what)
+    }
+
     // MARK: Relays
 
     /// A single-host-name relay, or an error when the DNS name is too long.

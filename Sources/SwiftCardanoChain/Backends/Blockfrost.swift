@@ -1141,10 +1141,10 @@ public actor BlockFrostChainContext: ChainContext {
     /// contents, so a description that is missing or of another kind throws.
     private func description(
         of proposal: Components.Schemas.Proposal, tag: String
-    ) throws -> [String: Any] {
+    ) throws -> [String: ChainJSON] {
         let what = "Blockfrost governance_description"
-        let json = try LedgerGovActionJSON.foundationJSON(proposal.governanceDescription?.additionalProperties, what)
-        guard let description = json as? [String: Any], (description["tag"] as? String) == tag else {
+        let json = proposal.governanceDescription.map(ChainJSON.init)
+        guard let description = json?.object, description["tag"]?.string == tag else {
             throw CardanoChainError.valueError(
                 "\(what) of a \(proposal.governanceType) proposal is not a \(tag): \(String(describing: json))")
         }
@@ -1154,7 +1154,7 @@ public actor BlockFrostChainContext: ChainContext {
     /// The action in a proposal's `governance_description`, which must carry `tag`.
     private func describedAction(_ proposal: Components.Schemas.Proposal, tag: String) throws -> GovAction {
         let what = "Blockfrost governance_description"
-        return try LedgerGovActionJSON.govAction(description(of: proposal, tag: tag), what) {
+        return try LedgerGovActionJSON.govAction(.object(description(of: proposal, tag: tag)), what) {
             try LedgerGovActionJSON.protocolParamUpdate($0, what)
         }
     }
@@ -1162,9 +1162,9 @@ public actor BlockFrostChainContext: ChainContext {
     /// The `contents` of a proposal's `governance_description`, which must be `count` fields.
     private func describedContents(
         _ proposal: Components.Schemas.Proposal, tag: String, count: Int
-    ) throws -> [Any] {
+    ) throws -> [ChainJSON] {
         let description = try description(of: proposal, tag: tag)
-        guard let contents = description["contents"] as? [Any], contents.count == count else {
+        guard let contents = description["contents"]?.array, contents.count == count else {
             throw CardanoChainError.valueError(
                 "Blockfrost governance_description \(tag) contents are not \(count) fields: \(description)")
         }
@@ -1278,7 +1278,7 @@ public actor BlockFrostChainContext: ChainContext {
             // The endpoint keys cost models by parameter name, which loses Plutus V3's
             // ledger order; the description's lists keep it.
             let contents = try describedContents(govActionData, tag: "ParameterChange", count: 3)
-            guard let described = contents[1] as? [String: Any] else {
+            guard let described = contents[1].object else {
                 throw CardanoChainError.valueError("Blockfrost governance_description update is not an object")
             }
             let costModels = try described["costModels"].map { _ in

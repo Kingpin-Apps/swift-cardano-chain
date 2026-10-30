@@ -46,7 +46,7 @@ private func proposal(deposit: String = "12000", expiration: Int = 120) throws -
             txHash: proposalTxHash,
             certIndex: 1,
             governanceType: .infoAction,
-            governanceDescription: Components.Schemas.Proposal.GovernanceDescriptionPayload(),
+            governanceDescription: .object([:]),
             deposit: deposit,
             returnAddress: "stake_test1urd3hs7rlxwwdzthe6hj026dmyt3y0heuulctscyydh2kgck6nkmz",
             ratifiedEpoch: nil,

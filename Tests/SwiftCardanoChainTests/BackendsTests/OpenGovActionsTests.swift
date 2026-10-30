@@ -147,7 +147,7 @@ struct BlockfrostProposalsTransport: ClientTransport {
                 txHash: hash,
                 certIndex: 0,
                 governanceType: .treasuryWithdrawals,
-                governanceDescription: Components.Schemas.Proposal.GovernanceDescriptionPayload(),
+                governanceDescription: .object([:]),
                 deposit: "100000000000",
                 returnAddress: "stake_test1urd3hs7rlxwwdzthe6hj026dmyt3y0heuulctscyydh2kgck6nkmz",
                 ratifiedEpoch: proposals[n].ratified,

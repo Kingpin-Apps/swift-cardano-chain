@@ -1983,36 +1983,36 @@ public actor YaciDevkitChainContext: ChainContext {
     // MARK: - Governance action parsing
 
     /// Map a Yaci proposal — its type plus the `details` document the store indexed — onto a
-    /// `GovAction`. Unparseable payloads surface as `.infoAction`, so callers can detect the gap
-    /// from the variant tag rather than from fabricated inner data.
+    /// `GovAction`. `details` is exact ledger JSON (numbers as `Decimal`); a payload that does not
+    /// fit its action throws.
     static func govAction(from proposal: Components.Schemas.GovActionProposal, id: GovActionID)
         throws -> GovAction
     {
-        let details = jsonObject(proposal.details)
-        guard let type = proposal._type?.rawValue ?? (details?["type"] as? String) else {
+        let details = proposal.details.map(ChainJSON.init)?.object
+        guard let type = proposal._type?.rawValue ?? details?["type"]?.string else {
             throw CardanoChainError.valueError("Yaci governance proposal \(id) has no type")
         }
 
         func string(_ keys: String...) -> String? {
             for key in keys {
-                if let value = details?[key] as? String, !value.isEmpty { return value }
+                if let value = details?[key]?.string, !value.isEmpty { return value }
             }
             return nil
         }
-        func object(_ keys: String...) -> [String: Any]? {
+        func object(_ keys: String...) -> [String: ChainJSON]? {
             for key in keys {
-                if let value = details?[key] as? [String: Any] { return value }
+                if let value = details?[key]?.object { return value }
             }
             return nil
         }
         /// The action's previous action of the same purpose, Yaci's `govActionId`
         /// (`{transactionId, gov_action_index}`), or `nil` when it has none.
         func previous() throws -> GovActionID? {
-            guard let raw = details?["govActionId"] ?? details?["gov_action_id"], !(raw is NSNull) else {
+            guard let raw = (details?["govActionId"] ?? details?["gov_action_id"]).nonNull else {
                 return nil
             }
-            guard let prev = raw as? [String: Any],
-                let txHash = (prev["transactionId"] ?? prev["transaction_id"]) as? String
+            guard let prev = raw.object,
+                let txHash = (prev["transactionId"] ?? prev["transaction_id"])?.string
             else {
                 throw CardanoChainError.valueError("Yaci previous governance action \(raw) is not an id")
             }
@@ -2053,7 +2053,7 @@ public actor YaciDevkitChainContext: ChainContext {
             var withdrawals: [RewardAccount: Coin] = [:]
             for (account, amount) in try LedgerValues.required(object("withdrawals"), "Yaci treasury withdrawals") {
                 let lovelace = try LedgerValues.required(
-                    GovernanceParsing.parseLovelace(amount), "Yaci treasury withdrawal amount")
+                    LedgerValues.integer(json: amount, as: UInt64.self, "Yaci treasury withdrawal amount"), "Yaci treasury withdrawal amount")
                 let bytes: Data
                 if let decoded = try? Address.fromBech32(account).toBytes() {
                     bytes = decoded
@@ -2074,8 +2074,8 @@ public actor YaciDevkitChainContext: ChainContext {
             let anchor = try LedgerValues.required(
                 LedgerValues.anchor(json: constitution["anchor"], "Yaci constitution anchor"),
                 "Yaci constitution anchor")
-            let scriptHash = try ((constitution["scripthash"] ?? constitution["scriptHash"]
-                ?? constitution["script"]) as? String)
+            let scriptHash = try (constitution["scripthash"] ?? constitution["scriptHash"]
+                ?? constitution["script"])?.string
                 .flatMap { $0.isEmpty ? nil : $0 }
                 .map { try LedgerValues.hash(hex: $0, as: ScriptHash.self, "Yaci constitution script hash") }
             return .newConstitution(
@@ -2089,14 +2089,14 @@ public actor YaciDevkitChainContext: ChainContext {
             var coldCredentials: Set<CommitteeColdCredential> = []
             var credentialEpochs: [CommitteeColdCredential: UInt64] = [:]
 
-            guard let removals = (details?["membersForRemoval"] ?? details?["members_for_removal"]) as? [Any] else {
+            guard let removals = (details?["membersForRemoval"] ?? details?["members_for_removal"])?.array else {
                 throw CardanoChainError.valueError("Yaci committee update has no members to remove")
             }
             for entry in removals {
                 coldCredentials.insert(try committeeColdCredential(from: entry))
             }
             guard let additions =
-                (details?["newMembersAndTerms"] ?? details?["new_members_and_terms"]) as? [String: Any]
+                (details?["newMembersAndTerms"] ?? details?["new_members_and_terms"])?.object
             else {
                 throw CardanoChainError.valueError("Yaci committee update has no members to add")
             }
@@ -2139,24 +2139,23 @@ public actor YaciDevkitChainContext: ChainContext {
     /// denominator}`, each cost model as the hex of its CBOR parameter list,
     /// keyed by language number). A null field is not part of the update; a field
     /// this reader does not know, or one Conway cannot change, throws.
-    static func protocolParamUpdate(_ d: [String: Any]) throws -> ProtocolParamUpdate {
+    static func protocolParamUpdate(_ d: [String: ChainJSON]) throws -> ProtocolParamUpdate {
         let what = "Yaci parameter update"
-        func value(_ key: String) -> Any? {
-            guard let raw = d[key], !(raw is NSNull) else { return nil }
-            return raw
+        func value(_ key: String) -> ChainJSON? {
+            d[key].nonNull
         }
         func int<T: FixedWidthInteger>(_ key: String) throws -> T? {
             try LedgerValues.integer(json: value(key), "\(what) \(key)")
         }
-        func unit(_ key: String, in object: [String: Any]? = nil) throws -> UnitInterval? {
+        func unit(_ key: String, in object: [String: ChainJSON]? = nil) throws -> UnitInterval? {
             try LedgerValues.unitInterval(json: object.map { $0[key] } ?? value(key), "\(what) \(key)")
         }
         func nni(_ key: String) throws -> NonNegativeInterval? {
             try LedgerValues.nonNegativeInterval(json: value(key), "\(what) \(key)")
         }
-        func object(_ key: String) throws -> [String: Any]? {
+        func object(_ key: String) throws -> [String: ChainJSON]? {
             guard let raw = value(key) else { return nil }
-            guard let object = raw as? [String: Any] else {
+            guard let object = raw.object else {
                 throw CardanoChainError.valueError("\(what) \(key): \(raw) is not an object")
             }
             return object
@@ -2262,7 +2261,7 @@ public actor YaciDevkitChainContext: ChainContext {
 
     /// `{"<language number>": "<hex of the CBOR parameter list>"}`, read through
     /// core's CBOR decoder as the ledger's cost-model map.
-    private static func costModels(_ models: [String: Any], _ what: String) throws -> CostModels {
+    private static func costModels(_ models: [String: ChainJSON], _ what: String) throws -> CostModels {
         guard models.count <= 23 else {
             throw CardanoChainError.valueError("\(what) costModels has \(models.count) languages")
         }
@@ -2271,7 +2270,7 @@ public actor YaciDevkitChainContext: ChainContext {
             guard let language = UInt8(key), language <= 2 else {
                 throw CardanoChainError.valueError("\(what) costModels: unknown language \(key)")
             }
-            guard let hex = value as? String, !hex.isEmpty else {
+            guard let hex = value.string, !hex.isEmpty else {
                 throw CardanoChainError.valueError("\(what) costModels \(key): \(value) is not CBOR hex")
             }
             cbor.append(language)
@@ -2285,12 +2284,12 @@ public actor YaciDevkitChainContext: ChainContext {
     }
 
     /// Yaci serialises a credential as `{"type": "ADDR_KEYHASH" | "SCRIPTHASH", "hash": hex}`.
-    private static func committeeColdCredential(from any: Any) throws -> CommitteeColdCredential {
-        if let key = any as? String { return try committeeColdCredential(fromKey: key) }
-        guard let dict = any as? [String: Any], let hash = dict["hash"] as? String else {
-            throw CardanoChainError.valueError("Yaci committee credential \(any) is not a credential")
+    private static func committeeColdCredential(from json: ChainJSON) throws -> CommitteeColdCredential {
+        if let key = json.string { return try committeeColdCredential(fromKey: key) }
+        guard let dict = json.object, let hash = dict["hash"]?.string else {
+            throw CardanoChainError.valueError("Yaci committee credential \(json) is not a credential")
         }
-        let type = dict["type"] as? String ?? "ADDR_KEYHASH"
+        let type = dict["type"]?.string ?? "ADDR_KEYHASH"
         return makeCommitteeColdCredential(
             payload: try LedgerValues.hash28(hex: hash, "Yaci committee credential"), isScript: type == "SCRIPTHASH")
     }
