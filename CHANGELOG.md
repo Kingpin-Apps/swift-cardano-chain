@@ -1,3 +1,44 @@
+## 0.14.0 (2026-10-30)
+
+### Feat
+
+- report no action body for a proposal that is no longer available
+- hold the committee quorum as an exact optional fraction
+
+### Fix
+
+- **cardano-cli**: bound an output's lovelace and quantities to UInt64
+- read cardano-cli and Yaci evaluation JSON exactly through ChainJSON
+- **node-socket**: throw when the genesis systemStart does not parse
+- **cardano-cli**: read a UTxO's inline datum from its CBOR
+- throw on malformed enrichment data and keep nil for unavailable data
+- **yaci**: decode genesis files exactly with ChainJSON
+- read ledger gov-action JSON exactly through a shared ChainJSON
+- **yaci**: throw when a DRep's stake cannot be read instead of leaving it out
+- read exact ledger values from the API clients
+- throw when the slot timeline's genesis cannot be read instead of evaluating without it
+- **yaci**: throw when a certificate log or genesis cannot be read instead of guessing
+- **node-socket**: drop an unused epoch range check
+- throw on an unreadable vote, reference script, proposal or stake instead of skipping it
+- **koios**: throw on a missing pool margin instead of reading 0
+- **ogmios**: read a proposed parameter update instead of an empty one
+- **ogmios**: read guardrails script hashes and refuse a treasury transfer
+- **blockfrost**: read a treasury withdrawal's policy hash from its description
+- **yaci**: read a parameter change's update instead of an empty one
+- read a proposed update's cost models instead of zero-filling them
+- carry a governance action's previous action and keep committee removals apart
+- **yaci**: read genesis pool relays strictly instead of best-effort
+- **yaci**: throw on an invalid genesis pool owner instead of dropping it
+- **cardano-cli**: throw on a missing proposal return account instead of using empty bytes
+- **blockfrost**: read a new committee instead of inventing one
+- throw on an unknown or malformed governance action instead of reading it as info
+- read hashes and credentials from a backend as strict hex
+- refuse a JSON boolean where a ledger number is expected
+- throw on a corrupt anchor or relay instead of dropping it
+- **ogmios**: read the reference-script fee parameters
+- throw on out-of-range chain values instead of trapping or defaulting
+- build against swift-cardano-core 0.10
+
 ## 0.13.0 (2026-10-28)
 
 ### Feat
