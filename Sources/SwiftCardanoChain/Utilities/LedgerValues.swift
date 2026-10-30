@@ -13,12 +13,6 @@ enum LedgerValues {
 
     // MARK: Rationals
 
-    /// A unit interval from a decimal such as `0.0577` or `5.77e-05`.
-    static func unitInterval(_ value: Double, _ what: @autoclosure () -> String) throws -> UnitInterval {
-        let (n, d) = try fraction(decimalText: try decimalText(value, what()), what())
-        return try unitInterval(n, d, what())
-    }
-
     /// A unit interval from a `Decimal`.
     static func unitInterval(_ value: Decimal, _ what: @autoclosure () -> String) throws -> UnitInterval {
         let (n, d) = try fraction(decimal: value, what())
@@ -30,12 +24,6 @@ enum LedgerValues {
     static func unitInterval(text: String, _ what: @autoclosure () -> String) throws -> UnitInterval {
         let (n, d) = try fraction(text: text, what())
         return try unitInterval(n, d, what())
-    }
-
-    /// A non-negative interval from a decimal such as `4.4e-07`.
-    static func nonNegativeInterval(_ value: Double, _ what: @autoclosure () -> String) throws -> NonNegativeInterval {
-        let (n, d) = try fraction(decimalText: try decimalText(value, what()), what())
-        return NonNegativeInterval(numerator: n, denominator: d)
     }
 
     /// A non-negative interval from a `Decimal`.

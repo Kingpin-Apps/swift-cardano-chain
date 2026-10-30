@@ -1,3 +1,4 @@
+import BigInt
 import Foundation
 import HTTPTypes
 import OpenAPIRuntime
@@ -78,7 +79,8 @@ struct ChainValueHardeningTests {
                 "queryLedgerState/treasuryAndReserves",
                 #"{"treasury": {"ada": {"lovelace": -1}}, "reserves": {"ada": {"lovelace": 1}}}"#)
         ])
-        await #expect(throws: CardanoChainError.self) { _ = try await context.treasury() }
+        // SwiftOgmios now reads lovelace as UInt64, so the negative amount fails to decode.
+        await #expect(throws: (any Error).self) { _ = try await context.treasury() }
     }
 
     /// DRep summaries whose stake is negative, one per DRep kind.
@@ -106,7 +108,8 @@ struct ChainValueHardeningTests {
         case "drep_always_no_confidence": target = DRep(credential: .alwaysNoConfidence)
         default: target = try DRep.fromBech32(drep)
         }
-        await #expect(throws: CardanoChainError.self) { _ = try await context.drepInfo(drep: target) }
+        // SwiftOgmios now reads lovelace as UInt64, so the negative stake fails to decode.
+        await #expect(throws: (any Error).self) { _ = try await context.drepInfo(drep: target) }
     }
 
     @Test("Ogmios's predefined DReps are told apart by their type, not SwiftOgmios's case")
@@ -210,7 +213,8 @@ struct ChainValueHardeningTests {
 
     @Test("A malformed Koios committee quorum throws", arguments: badKoiosQuorums)
     func koiosBadQuorum(_ quorum: String) async throws {
-        await #expect(throws: CardanoChainError.self) { _ = try await self.koiosCommittee(quorum) }
+        // A negative or fractional part no longer decodes into Koios's UInt64 fields at all.
+        await #expect(throws: (any Error).self) { _ = try await self.koiosCommittee(quorum) }
     }
 
     // MARK: Blockfrost
@@ -260,7 +264,7 @@ struct ChainValueHardeningTests {
                 txHash: proposalTxHash,
                 certIndex: 1,
                 parameters: Components.Schemas.ProposalParameters.ParametersPayload(
-                    a0: 0.3, rho: 0.003, tau: 0.2, decentralisationParam: 0.5,
+                    a0: Decimal(string: "0.3")!, rho: Decimal(string: "0.003")!, tau: Decimal(string: "0.2")!, decentralisationParam: Decimal(string: "0.5")!,
                     extraEntropy: extraEntropy, protocolMajorVer: 10, protocolMinorVer: 0
                 )
             )
@@ -682,5 +686,72 @@ struct ChainValueHardeningTests {
             "get/governance/proposals/{tx_hash}/{cert_index}": try proposal(deposit: "abc"),
         ])
         await #expect(throws: CardanoChainError.self) { _ = try await context.govActionsAll() }
+    }
+
+    // MARK: Exact client values
+
+    /// A 19-digit ratio: a Double keeps only about 17 significant digits.
+    static let preciseRatio = "0.1234567890123456789"
+
+    @Test("A Blockfrost proposal's 19-digit price survives exactly")
+    func blockfrostExactRatio() async throws {
+        let params = try JSONEncoder().encode(
+            Components.Schemas.ProposalParameters(
+                id: "gov_action1qkm52uwlnw0gtcyh9259sjuwsyrnjdfd3hg7tjzrl463xtv4wfxysqqqqqfd6vw0",
+                txHash: proposalTxHash,
+                certIndex: 1,
+                parameters: Components.Schemas.ProposalParameters.ParametersPayload(
+                    priceMem: Decimal(string: Self.preciseRatio)!, priceStep: Decimal(string: "0.0000721")!)
+            ))
+        let context = try await blockfrost(["get/governance/proposals/{tx_hash}/{cert_index}/parameters": params])
+        let info = try await context.govActionInfo(govActionID: govActionID)
+        guard case .parameterChangeAction(let change)? = info.govAction else {
+            Issue.record("Expected a parameter change")
+            return
+        }
+        let price = try #require(change.protocolParamUpdate.executionCosts?.memPrice)
+        #expect(price.numerator == 1_234_567_890_123_456_789)
+        #expect(price.denominator == 10_000_000_000_000_000_000)
+    }
+
+    @Test("A Koios pool's 19-digit margin survives exactly")
+    func koiosExactMargin() async throws {
+        let info = try await koiosPool(margin: #""margin": \#(Self.preciseRatio),"#)
+        #expect(info.poolParams.margin.numerator == 1_234_567_890_123_456_789)
+        #expect(info.poolParams.margin.denominator == 10_000_000_000_000_000_000)
+    }
+
+    @Test("A Yaci protocol parameter's 19-digit price survives exactly")
+    func yaciExactRatio() async throws {
+        let params = YaciMockResponses.protocolParams
+            .replacingOccurrences(of: #""price_mem": 0.0577"#, with: #""price_mem": \#(Self.preciseRatio)"#)
+        #expect(params != YaciMockResponses.protocolParams)
+        let context = try YaciDevkitChainContext(
+            apiURL: "http://localhost:8080",
+            network: .custom(42),
+            client: Client(
+                serverURL: URL(string: "http://localhost:8080")!,
+                transport: MockYaciTransport(overrides: ["getLatestProtocolParams": params])),
+            admin: MockYaciDevkitAdmin())
+        let price = try await context.protocolParameters().executionUnitPrices.priceMemory
+        #expect(price.numerator == 1_234_567_890_123_456_789)
+        #expect(price.denominator == 10_000_000_000_000_000_000)
+    }
+
+    @Test("An Ogmios output of UInt64.max lovelace survives exactly")
+    func ogmiosExactLovelace() async throws {
+        let utxo = ogmiosResult("queryLedgerState/utxo", """
+            [{"transaction": {"id": "39a7a284c2a0948189dc45dec670211cd4d72f7b66c5726c08d9b3df11e44d58"},
+              "index": 0,
+              "address": "addr_test1qp4kux2v7xcg9urqssdffff5p0axz9e3hcc43zz7pcuyle0e20hkwsu2ndpd9dh9anm4jn76ljdz0evj22stzrw9egxqmza5y3",
+              "value": {"ada": {"lovelace": 18446744073709551615},
+                        "b0d07d45fe9514f80213f4020e5a61241458be626841cde717cb38a7": {"6574636f696e": 18446744073709551615}}}]
+            """)
+        let context = try await createMockOgmiosChainContext(overrides: ["queryLedgerState/utxo": utxo])
+        let utxos = try await context.utxos(address: try Address(
+            from: .string("addr_test1qp4kux2v7xcg9urqssdffff5p0axz9e3hcc43zz7pcuyle0e20hkwsu2ndpd9dh9anm4jn76ljdz0evj22stzrw9egxqmza5y3")))
+        let output = try #require(utxos.first?.output)
+        #expect(output.amount.coin == BigInt(UInt64.max))
+        #expect(output.amount.multiAsset.data.values.first?.data.values.first == BigInt(UInt64.max))
     }
 }

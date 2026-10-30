@@ -43,14 +43,14 @@ struct LedgerValuesTests {
 
     @Test("A decimal becomes the exact unit interval it is", arguments: decimals)
     func unitIntervalFromDouble(_ c: DecimalCase) throws {
-        let interval = try LedgerValues.unitInterval(c.value, "test")
+        let interval = try LedgerValues.unitInterval(try #require(Decimal(string: "\(c.value)")), "test")
         #expect(interval.numerator == c.numerator)
         #expect(interval.denominator == c.denominator)
     }
 
     @Test("A decimal becomes the exact non-negative interval it is", arguments: decimals)
     func nonNegativeIntervalFromDouble(_ c: DecimalCase) throws {
-        let interval = try LedgerValues.nonNegativeInterval(c.value, "test")
+        let interval = try LedgerValues.nonNegativeInterval(try #require(Decimal(string: "\(c.value)")), "test")
         #expect(interval.numerator == c.numerator)
         #expect(interval.denominator == c.denominator)
     }
@@ -121,10 +121,10 @@ struct LedgerValuesTests {
         }
     }
 
-    static let badDoubles: [Double] = [-0.5, 1.7, .nan, .infinity]
+    static let badDoubles: [Decimal] = [-0.5, 1.7, .nan]
 
-    @Test("A Double outside the unit interval is refused, not clamped", arguments: badDoubles)
-    func badUnitDouble(_ value: Double) {
+    @Test("A decimal outside the unit interval is refused, not clamped", arguments: badDoubles)
+    func badUnitDouble(_ value: Decimal) {
         #expect(throws: CardanoChainError.self) {
             try LedgerValues.unitInterval(value, "test")
         }

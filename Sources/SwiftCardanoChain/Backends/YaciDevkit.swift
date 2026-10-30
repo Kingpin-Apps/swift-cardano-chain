@@ -534,19 +534,15 @@ public actor YaciDevkitChainContext: ChainContext {
             }
             return value
         }
-        // Yaci's client reads each ratio as a Double; its shortest description
-        // is the decimal Yaci sent, read here exactly.
+        // Yaci's client reads each ratio as the exact decimal Yaci sent.
         // A missing threshold is not 0.
-        func unit(_ value: Double?, _ name: String) throws -> UnitInterval {
+        func unit(_ value: Decimal?, _ name: String) throws -> UnitInterval {
             try LedgerValues.unitInterval(try require(value, name), "Yaci protocol parameter \(name)")
         }
-        func nonNegative(_ value: Double?, _ name: String) throws -> NonNegativeInterval {
+        func nonNegative(_ value: Decimal?, _ name: String) throws -> NonNegativeInterval {
             try LedgerValues.nonNegativeInterval(try require(value, name), "Yaci protocol parameter \(name)")
         }
         func int<T: FixedWidthInteger, S: BinaryInteger>(_ value: S?, _ name: String) throws -> T {
-            try LedgerValues.integer(try require(value, name), as: T.self, "Yaci protocol parameter \(name)")
-        }
-        func int<T: FixedWidthInteger>(_ value: Double?, _ name: String) throws -> T {
             try LedgerValues.integer(try require(value, name), as: T.self, "Yaci protocol parameter \(name)")
         }
         func int<T: FixedWidthInteger>(_ text: String?, _ name: String) throws -> T {
@@ -1737,10 +1733,11 @@ public actor YaciDevkitChainContext: ChainContext {
     // MARK: - Governance actions
 
     /// The number of epochs a governance action stays open for voting.
-    private func govActionLifetime() async throws -> Int32? {
-        try await perform("get protocol parameters") {
+    private func govActionLifetime() async throws -> UInt64? {
+        let lifetime = try await perform("get protocol parameters") {
             try await api.client.getLatestProtocolParams().ok.body.json.govActionLifetime
         }
+        return try lifetime.map { try LedgerValues.integer($0, as: UInt64.self, "Yaci gov_action_lifetime") }
     }
 
     private func findProposal(_ govActionID: GovActionID) async throws
@@ -1787,9 +1784,9 @@ public actor YaciDevkitChainContext: ChainContext {
         )
     }
 
-    private static func expiresAfter(proposedIn: UInt64?, lifetime: Int32?) throws -> UInt64? {
+    private static func expiresAfter(proposedIn: UInt64?, lifetime: UInt64?) throws -> UInt64? {
         guard let proposedIn, let lifetime else { return nil }
-        let (sum, overflow) = proposedIn.addingReportingOverflow(try lifetime.checked("Yaci gov_action_lifetime"))
+        let (sum, overflow) = proposedIn.addingReportingOverflow(lifetime)
         guard !overflow else {
             throw CardanoChainError.yaciDevkitError("Proposal epoch \(proposedIn) + lifetime \(lifetime) overflows")
         }
@@ -1862,7 +1859,7 @@ public actor YaciDevkitChainContext: ChainContext {
     private func govActionVotes(
         proposal: Components.Schemas.GovActionProposal,
         id: GovActionID,
-        lifetime: Int32?
+        lifetime: UInt64?
     ) async throws -> GovActionVotes {
         let (committee, dreps, pools) = try await votes(
             txHash: proposal.txHash ?? id.transactionID.payload.toHex,
@@ -2418,8 +2415,8 @@ public actor YaciDevkitChainContext: ChainContext {
                 expiration: member.expiredEpoch
             )
         }
-        // Yaci's client reads the threshold as a Double; its shortest
-        // description is the decimal Yaci sent. None means no committee: nil.
+        // Yaci's client reads the threshold as the exact decimal Yaci sent.
+        // None means no committee: nil.
         return (members, try live.threshold.map { try LedgerValues.unitInterval($0, "Yaci committee threshold") })
     }
 

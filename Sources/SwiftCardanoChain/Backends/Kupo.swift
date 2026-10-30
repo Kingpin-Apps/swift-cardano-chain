@@ -307,9 +307,7 @@ public struct KupoChainContext: ChainContext {
             index: index
         )
 
-        guard match.value.coins >= 0 else {
-            throw CardanoChainError.valueError("Kupo coin quantity \(match.value.coins) is out of range")
-        }
+        // SwiftKupo reads coins and asset quantities as UInt64, so they cannot be negative.
         let coin = BigInt(match.value.coins)
         var multiAsset = MultiAsset([:])
         for (unit, count) in match.value.assets?.additionalProperties ?? [:] {

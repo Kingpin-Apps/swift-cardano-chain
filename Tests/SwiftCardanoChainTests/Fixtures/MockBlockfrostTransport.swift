@@ -105,7 +105,7 @@ struct MockTransport: ClientTransport {
             case "get/genesis":
                 body = try JSONEncoder().encode(
                     Components.Schemas.GenesisContent(
-                        activeSlotsCoefficient: 0.05,
+                        activeSlotsCoefficient: Decimal(string: "0.05")!,
                         updateQuorum: 5,
                         maxLovelaceSupply: "45000000000000000",
                         networkMagic: 764824073,
@@ -130,9 +130,9 @@ struct MockTransport: ClientTransport {
                         poolDeposit: "500000000",
                         eMax: 18,
                         nOpt: 500,
-                        a0: 0.3,
-                        rho: 0.003,
-                        tau: 0.2,
+                        a0: Decimal(string: "0.3")!,
+                        rho: Decimal(string: "0.003")!,
+                        tau: Decimal(string: "0.2")!,
                         decentralisationParam: 0,
                         extraEntropy: nil,
                         protocolMajorVer: 10,
@@ -144,7 +144,7 @@ struct MockTransport: ClientTransport {
                             // Raw list form, which is what Blockfrost now serves and what the
                             // ledger hashes. The deprecated `cost_models` map is keyed by operation
                             // name and sorts wrong for Plutus V3.
-                            additionalProperties: OpenAPIObjectContainer(unvalidatedValue: [
+                            additionalProperties: [
                                 "PlutusV1": [
                                     100788, 420, 1, 1, 1000, 173, 0, 1, 1000, 59957, 4, 1, 11183,
                                     32, 201305, 8356, 4, 16000, 100, 16000, 100, 16000, 100, 16000,
@@ -208,10 +208,10 @@ struct MockTransport: ClientTransport {
                                     158519, 8942, 0, 1, 159378, 8813, 0, 1, 107490, 3298, 1,
                                     106057, 655, 1, 1964219, 24520, 3
                                 ]
-                            ])
+                            ]
                         ),
-                        priceMem: 0.0577,
-                        priceStep: 0.0000721,
+                        priceMem: Decimal(string: "0.0577")!,
+                        priceStep: Decimal(string: "0.0000721")!,
                         maxTxExMem: "14000000",
                         maxTxExSteps: "10000000000",
                         maxBlockExMem: "62000000",
@@ -221,20 +221,20 @@ struct MockTransport: ClientTransport {
                         maxCollateralInputs: 3,
                         coinsPerUtxoSize: "4310",
                         coinsPerUtxoWord: "4310",
-                        pvtMotionNoConfidence: 0.51,
-                        pvtCommitteeNormal: 0.51,
-                        pvtCommitteeNoConfidence: 0.67,
-                        pvtHardForkInitiation: 0.67,
-                        dvtMotionNoConfidence: 0.6,
-                        dvtCommitteeNormal: 0.75,
-                        dvtCommitteeNoConfidence: 0.6,
-                        dvtUpdateToConstitution: 0.67,
-                        dvtHardForkInitiation: 0.67,
-                        dvtPPNetworkGroup: 0.67,
-                        dvtPPEconomicGroup: 0.75,
-                        dvtPPTechnicalGroup: 0.67,
-                        dvtPPGovGroup: 0.75,
-                        dvtTreasuryWithdrawal: 0.67,
+                        pvtMotionNoConfidence: Decimal(string: "0.51")!,
+                        pvtCommitteeNormal: Decimal(string: "0.51")!,
+                        pvtCommitteeNoConfidence: Decimal(string: "0.67")!,
+                        pvtHardForkInitiation: Decimal(string: "0.67")!,
+                        dvtMotionNoConfidence: Decimal(string: "0.6")!,
+                        dvtCommitteeNormal: Decimal(string: "0.75")!,
+                        dvtCommitteeNoConfidence: Decimal(string: "0.6")!,
+                        dvtUpdateToConstitution: Decimal(string: "0.67")!,
+                        dvtHardForkInitiation: Decimal(string: "0.67")!,
+                        dvtPPNetworkGroup: Decimal(string: "0.67")!,
+                        dvtPPEconomicGroup: Decimal(string: "0.75")!,
+                        dvtPPTechnicalGroup: Decimal(string: "0.67")!,
+                        dvtPPGovGroup: Decimal(string: "0.75")!,
+                        dvtTreasuryWithdrawal: Decimal(string: "0.67")!,
                         committeeMinSize: "7",
                         // Preview's values. Each is a ledger `EpochInterval` (Word32) or `Coin`.
                         committeeMaxTermLength: "365",
@@ -242,8 +242,8 @@ struct MockTransport: ClientTransport {
                         govActionDeposit: "100000000000",
                         drepDeposit: "500000000",
                         drepActivity: "20",
-                        pvtppSecurityGroup:  0.51,
-                        pvtPPSecurityGroup: 0.51,
+                        pvtppSecurityGroup: Decimal(string: "0.51")!,
+                        pvtPPSecurityGroup: Decimal(string: "0.51")!,
                         minFeeRefScriptCostPerByte: 15
                     )
                 )
@@ -380,10 +380,10 @@ struct MockTransport: ClientTransport {
                         txHash: "2dd15e0ef6e6a17841cb9541c27724072ce4d4b79b91e58432fbaa32d9572531",
                         certIndex: 1,
                         parameters: Components.Schemas.ProposalParameters.ParametersPayload(
-                            a0: 0.3,
-                            rho: 0.003,
-                            tau: 0.2,
-                            decentralisationParam: 0.5,
+                            a0: Decimal(string: "0.3")!,
+                            rho: Decimal(string: "0.003")!,
+                            tau: Decimal(string: "0.2")!,
+                            decentralisationParam: Decimal(string: "0.5")!,
                             protocolMajorVer: 10,
                             protocolMinorVer: 0
                         )

@@ -1,3 +1,4 @@
+import BigInt
 import Foundation
 import SwiftCardanoCore
 import SwiftKupo
@@ -109,6 +110,21 @@ struct KupoTests {
             Issue.record("expected the native reference script")
             return
         }
+    }
+
+    @Test("Coins and an asset quantity of UInt64.max survive exactly")
+    func exactQuantities() async throws {
+        let body = Self.match(index: 0, datumType: nil, datum: nil, scriptHash: nil, script: nil, spent: false)
+            .replacingOccurrences(of: #""coins": 2000000"#, with: #""coins": 18446744073709551615"#)
+            .replacingOccurrences(of: "18446744073709551,", with: "18446744073709551615,")
+        let transport = KupoMockTransport(routes: [
+            "/matches/\(Self.address)": .init(flags: ["unspent", "resolve_hashes"], body: "[\(body)]")
+        ])
+        let utxos = try await Self.context(transport).utxos(address: try Address(from: .string(Self.address)))
+        let utxo = try #require(utxos.first)
+        #expect(utxo.output.amount.coin == BigInt(UInt64.max))
+        let assets = try #require(utxo.output.amount.multiAsset[ScriptHash(payload: Data(hex: Self.policy))])
+        #expect(assets[try AssetName(payload: Data(hex: "746f6b656e"))] == BigInt(UInt64.max))
     }
 
     @Test("A spent output says so, and keeps its datum hash")

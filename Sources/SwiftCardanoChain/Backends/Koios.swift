@@ -115,7 +115,7 @@ public actor KoiosChainContext: ChainContext {
         do {
             // Unfiltered, `epoch_info` returns every epoch in no set order, so
             // its first row is not the current one: ask for the tip's epoch.
-            let tipEpoch = try await api.client.tip().ok.body.json.first?.epochNo?.value
+            let tipEpoch = try await api.client.tip().ok.body.json.first?.epochNo
             guard let epochNo: Int = try LedgerValues.integer(json: tipEpoch, "Koios tip epoch_no") else {
                 throw CardanoChainError.koiosError("The tip has no epoch")
             }
@@ -135,7 +135,7 @@ public actor KoiosChainContext: ChainContext {
         do {
             let response = try await api.client.tip()
             return try LedgerValues.required(
-                LedgerValues.integer(json: response.ok.body.json.first?.absSlot?.value, "Koios tip abs_slot"),
+                LedgerValues.integer(json: response.ok.body.json.first?.absSlot, "Koios tip abs_slot"),
                 "Koios tip abs_slot")
         } catch {
             throw CardanoChainError.koiosError("Failed to get tip: \(error)")
@@ -285,11 +285,11 @@ public actor KoiosChainContext: ChainContext {
 
             return ChainTip(
                 block: try Self.tipBlockNumber(tip),
-                epoch: try LedgerValues.integer(json: tip.epochNo?.value, "Koios tip epoch_no"),
+                epoch: try LedgerValues.integer(json: tip.epochNo, "Koios tip epoch_no"),
                 era: nil,
-                hash: tip.hash?.value as? String,
-                slot: try LedgerValues.integer(json: tip.absSlot?.value, "Koios tip abs_slot"),
-                slotInEpoch: try LedgerValues.integer(json: tip.epochSlot?.value, "Koios tip epoch_slot"),
+                hash: tip.hash,
+                slot: try LedgerValues.integer(json: tip.absSlot, "Koios tip abs_slot"),
+                slotInEpoch: try LedgerValues.integer(json: tip.epochSlot, "Koios tip epoch_slot"),
                 slotsToEpochEnd: nil,
                 syncProgress: nil
             )
@@ -337,17 +337,96 @@ public actor KoiosChainContext: ChainContext {
     /// cardano-cli style JSON that ``ProtocolParameters`` knows how to decode, and every failure
     /// surfaces as a thrown ``CardanoChainError`` instead of a crash.
     static func decodeProtocolParameters(
-        from container: OpenAPIObjectContainer
+        from params: Components.Schemas.CliProtocolParams
     ) throws -> ProtocolParameters {
-        guard !container.value.isEmpty else {
-            throw CardanoChainError.koiosError("Protocol parameters response was empty")
+        func require<T>(_ value: T?, _ name: String) throws -> T {
+            try LedgerValues.required(value, "Koios protocol parameter \(name)")
         }
-        do {
-            let jsonData = try JSONEncoder().encode(container)
-            return try JSONDecoder().decode(ProtocolParameters.self, from: jsonData)
-        } catch {
-            throw CardanoChainError.koiosError("Failed to decode protocol parameters: \(error)")
+        // Koios's client reads each ratio as the exact decimal Koios sent.
+        func unit(_ value: Decimal?, _ name: String) throws -> UnitInterval {
+            try LedgerValues.unitInterval(try require(value, name), "Koios protocol parameter \(name)")
         }
+        func nonNegative(_ value: Decimal?, _ name: String) throws -> NonNegativeInterval {
+            try LedgerValues.nonNegativeInterval(try require(value, name), "Koios protocol parameter \(name)")
+        }
+        func int<T: FixedWidthInteger>(_ value: UInt64?, _ name: String) throws -> T {
+            try LedgerValues.integer(try require(value, name), as: T.self, "Koios protocol parameter \(name)")
+        }
+        // Each language's full parameter list, as cardano-cli prints it.
+        let models = try require(params.costModels, "costModels").additionalProperties
+        func model(_ name: String) throws -> [Int64] { try require(models[name], "costModels \(name)") }
+        let dvt = try require(params.dRepVotingThresholds, "dRepVotingThresholds")
+        let pvt = try require(params.poolVotingThresholds, "poolVotingThresholds")
+        let prices = try require(params.executionUnitPrices, "executionUnitPrices")
+        let block = try require(params.maxBlockExecutionUnits, "maxBlockExecutionUnits")
+        let tx = try require(params.maxTxExecutionUnits, "maxTxExecutionUnits")
+        let version = try require(params.protocolVersion, "protocolVersion")
+
+        return ProtocolParameters(
+            collateralPercentage: try int(params.collateralPercentage, "collateralPercentage"),
+            committeeMaxTermLength: try int(params.committeeMaxTermLength, "committeeMaxTermLength"),
+            committeeMinSize: try int(params.committeeMinSize, "committeeMinSize"),
+            costModels: ProtocolParametersCostModels(
+                PlutusV1: try model("PlutusV1"), PlutusV2: try model("PlutusV2"), PlutusV3: try model("PlutusV3")),
+            dRepActivity: try int(params.dRepActivity, "dRepActivity"),
+            dRepDeposit: try int(params.dRepDeposit, "dRepDeposit"),
+            dRepVotingThresholds: DRepVotingThresholds(
+                committeeNoConfidence: try unit(dvt.committeeNoConfidence, "dRepVotingThresholds.committeeNoConfidence"),
+                committeeNormal: try unit(dvt.committeeNormal, "dRepVotingThresholds.committeeNormal"),
+                hardForkInitiation: try unit(dvt.hardForkInitiation, "dRepVotingThresholds.hardForkInitiation"),
+                motionNoConfidence: try unit(dvt.motionNoConfidence, "dRepVotingThresholds.motionNoConfidence"),
+                ppEconomicGroup: try unit(dvt.ppEconomicGroup, "dRepVotingThresholds.ppEconomicGroup"),
+                ppGovGroup: try unit(dvt.ppGovGroup, "dRepVotingThresholds.ppGovGroup"),
+                ppNetworkGroup: try unit(dvt.ppNetworkGroup, "dRepVotingThresholds.ppNetworkGroup"),
+                ppTechnicalGroup: try unit(dvt.ppTechnicalGroup, "dRepVotingThresholds.ppTechnicalGroup"),
+                treasuryWithdrawal: try unit(dvt.treasuryWithdrawal, "dRepVotingThresholds.treasuryWithdrawal"),
+                updateToConstitution: try unit(dvt.updateToConstitution, "dRepVotingThresholds.updateToConstitution")
+            ),
+            executionUnitPrices: ExecutionUnitPrices(
+                priceMemory: try nonNegative(prices.priceMemory, "executionUnitPrices.priceMemory"),
+                priceSteps: try nonNegative(prices.priceSteps, "executionUnitPrices.priceSteps")
+            ),
+            govActionDeposit: try int(params.govActionDeposit, "govActionDeposit"),
+            govActionLifetime: try int(params.govActionLifetime, "govActionLifetime"),
+            maxBlockBodySize: try int(params.maxBlockBodySize, "maxBlockBodySize"),
+            maxBlockExecutionUnits: ProtocolParametersExecutionUnits(
+                memory: try int(block.memory, "maxBlockExecutionUnits.memory"),
+                steps: try int(block.steps, "maxBlockExecutionUnits.steps")
+            ),
+            maxBlockHeaderSize: try int(params.maxBlockHeaderSize, "maxBlockHeaderSize"),
+            maxCollateralInputs: try int(params.maxCollateralInputs, "maxCollateralInputs"),
+            maxTxExecutionUnits: ProtocolParametersExecutionUnits(
+                memory: try int(tx.memory, "maxTxExecutionUnits.memory"),
+                steps: try int(tx.steps, "maxTxExecutionUnits.steps")
+            ),
+            maxTxSize: try int(params.maxTxSize, "maxTxSize"),
+            maxValueSize: try int(params.maxValueSize, "maxValueSize"),
+            minFeeRefScriptCostPerByte: try params.minFeeRefScriptCostPerByte.map {
+                try LedgerValues.nonNegativeInterval($0, "Koios protocol parameter minFeeRefScriptCostPerByte")
+            },
+            minPoolCost: try int(params.minPoolCost, "minPoolCost"),
+            monetaryExpansion: try unit(params.monetaryExpansion, "monetaryExpansion"),
+            poolPledgeInfluence: try nonNegative(params.poolPledgeInfluence, "poolPledgeInfluence"),
+            poolRetireMaxEpoch: try int(params.poolRetireMaxEpoch, "poolRetireMaxEpoch"),
+            poolVotingThresholds: ProtocolParametersPoolVotingThresholds(
+                committeeNoConfidence: try unit(pvt.committeeNoConfidence, "poolVotingThresholds.committeeNoConfidence"),
+                committeeNormal: try unit(pvt.committeeNormal, "poolVotingThresholds.committeeNormal"),
+                hardForkInitiation: try unit(pvt.hardForkInitiation, "poolVotingThresholds.hardForkInitiation"),
+                motionNoConfidence: try unit(pvt.motionNoConfidence, "poolVotingThresholds.motionNoConfidence"),
+                ppSecurityGroup: try unit(pvt.ppSecurityGroup, "poolVotingThresholds.ppSecurityGroup")
+            ),
+            protocolVersion: ProtocolParametersProtocolVersion(
+                major: try int(version.major, "protocolVersion.major"),
+                minor: try int(version.minor, "protocolVersion.minor")
+            ),
+            stakeAddressDeposit: try int(params.stakeAddressDeposit, "stakeAddressDeposit"),
+            stakePoolDeposit: try int(params.stakePoolDeposit, "stakePoolDeposit"),
+            stakePoolTargetNum: try int(params.stakePoolTargetNum, "stakePoolTargetNum"),
+            treasuryCut: try unit(params.treasuryCut, "treasuryCut"),
+            txFeeFixed: try int(params.txFeeFixed, "txFeeFixed"),
+            txFeePerByte: try int(params.txFeePerByte, "txFeePerByte"),
+            utxoCostPerByte: try int(params.utxoCostPerByte, "utxoCostPerByte")
+        )
     }
 
     // MARK: - Private methods
@@ -710,7 +789,7 @@ public actor KoiosChainContext: ChainContext {
                 let delegatedDrep = stakeInfo.delegatedDrep.flatMap { $0.isEmpty ? nil : $0 }
                 let info = StakeAddressInfo(
                     active: stakeInfo.status == .registered,
-                    address: (stakeInfo.stakeAddress?.value as? String) ?? "",
+                    address: try LedgerValues.required(stakeInfo.stakeAddress, "Koios account stake_address"),
                     rewardAccountBalance: try LedgerValues.integer(
                         text: LedgerValues.required(stakeInfo.rewardsAvailable, "Koios rewards_available"),
                         "Koios rewards_available"),
@@ -743,7 +822,7 @@ public actor KoiosChainContext: ChainContext {
         do {
             let poolList = try response.ok.body.json
             let poolIds = try poolList.compactMap {
-                try PoolOperator(from: LedgerValues.required($0.poolIdBech32?.value as? String, "Koios pool_id_bech32"))
+                try PoolOperator(from: LedgerValues.required($0.poolIdBech32, "Koios pool_id_bech32"))
             }
             return poolIds
         } catch {
@@ -901,8 +980,7 @@ public actor KoiosChainContext: ChainContext {
                     dnsName: relay.dns, srvName: relay.srv, "Koios pool relay")
             } ?? []
 
-        // Koios's client reads the margin as a Double; its shortest
-        // description is the decimal Koios sent, read here exactly.
+        // Koios's client reads the margin as the exact decimal Koios sent.
         // Every registered pool has a margin; a missing one is not 0.
         let margin = try LedgerValues.unitInterval(
             LedgerValues.required(pool.margin, "Koios pool margin"), "Koios pool margin")
@@ -967,8 +1045,8 @@ public actor KoiosChainContext: ChainContext {
         let livePledge: UInt? = try pool.livePledge.map { try LedgerValues.integer(text: $0, "Koios live_pledge") }
         let liveStake: UInt? = try pool.liveStake.map { try LedgerValues.integer(text: $0, "Koios live_stake") }
         let activeStake: UInt? = try pool.activeStake.map { try LedgerValues.integer(text: $0, "Koios active_stake") }
-        let activeSize: Decimal? = pool.sigma.map { Decimal($0) }
-        let opcertCounter: UInt? = pool.opCertCounter.map { UInt($0) }
+        let activeSize: Decimal? = pool.sigma
+        let opcertCounter: UInt? = try pool.opCertCounter.map { try LedgerValues.integer($0, "Koios op_cert_counter") }
 
         // Map pool status from Koios pool_status field
         let status: PoolStatus?
@@ -1099,7 +1177,7 @@ public actor KoiosChainContext: ChainContext {
                         return true
                     }
 
-                    let proposalTxHash = ($0.proposalTxHash?.value as? String)?.lowercased()
+                    let proposalTxHash = $0.proposalTxHash?.lowercased()
                     let idx = $0.proposalIndex.flatMap { Int(exactly: $0) }
 
                     return proposalTxHash == txHash && idx == proposalIndex
@@ -1296,7 +1374,7 @@ public actor KoiosChainContext: ChainContext {
 
         guard let proposal = proposals.first(where: { p in
             if p.proposalId == proposalIdBech32 { return true }
-            let pTx = (p.proposalTxHash?.value as? String)?.lowercased()
+            let pTx = p.proposalTxHash?.lowercased()
             let pIdx = p.proposalIndex.flatMap { Int(exactly: $0) }
             return pTx == txHashLower && pIdx == idx
         }) else {
@@ -1317,7 +1395,7 @@ public actor KoiosChainContext: ChainContext {
         var results: [GovActionVotes] = []
         for proposal in proposals {
             let txHashRaw = try LedgerValues.required(
-                proposal.proposalTxHash?.value as? String, "Koios proposal proposal_tx_hash")
+                proposal.proposalTxHash, "Koios proposal proposal_tx_hash")
             let govActionID = GovActionID(
                 transactionID: try LedgerValues.hash(hex: txHashRaw, as: TransactionId.self, "Koios TransactionId"),
                 govActionIndex: try LedgerValues.required(proposal.proposalIndex, "Koios proposal_index")
@@ -1349,7 +1427,7 @@ public actor KoiosChainContext: ChainContext {
         )
         do {
             return try response.ok.body.json.compactMap { proposal in
-                guard let txHash = proposal.proposalTxHash?.value as? String else { return nil }
+                let txHash = try LedgerValues.required(proposal.proposalTxHash, "Koios proposal proposal_tx_hash")
                 let concluded = proposal.ratifiedEpoch != nil || proposal.enactedEpoch != nil
                     || proposal.droppedEpoch != nil || proposal.expiredEpoch != nil
                 let expiresAfter: UInt64? = try proposal.expiration.map { try $0.checked("Koios proposal expiration") }
@@ -1364,7 +1442,7 @@ public actor KoiosChainContext: ChainContext {
                 default: .infoAction
                 }
                 let anchor = try LedgerValues.optionalAnchor(
-                    url: proposal.metaUrl?.value, hash: proposal.metaHash?.value, "Koios proposal anchor")
+                    url: proposal.metaUrl, hash: proposal.metaHash, "Koios proposal anchor")
                 return OpenGovAction(
                     govActionId: GovActionID(
                         transactionID: try LedgerValues.hash(hex: txHash, as: TransactionId.self, "Koios TransactionId"),
@@ -1372,7 +1450,7 @@ public actor KoiosChainContext: ChainContext {
                             .checked("Koios proposal_index")
                     ),
                     type: type,
-                    deposit: try GovernanceParsing.parseLovelace(proposal.deposit?.value),
+                    deposit: try GovernanceParsing.parseLovelace(proposal.deposit),
                     anchor: anchor,
                     proposedIn: try proposal.proposedEpoch.map { try $0.checked("Koios proposed_epoch") },
                     expiresAfter: expiresAfter
@@ -1395,11 +1473,11 @@ public actor KoiosChainContext: ChainContext {
 
         // deposit / returnAddress / anchor straight from the proposal row.
         let deposit: Coin = try LedgerValues.required(
-            GovernanceParsing.parseLovelace(proposal.deposit?.value), "Koios proposal deposit")
+            GovernanceParsing.parseLovelace(proposal.deposit), "Koios proposal deposit")
         let returnAddrData = try Address.fromBech32(
             LedgerValues.required(proposal.returnAddress, "Koios proposal return_address")).toBytes()
         let anchor = try LedgerValues.optionalAnchor(
-            url: proposal.metaUrl?.value, hash: proposal.metaHash?.value, "Koios proposal anchor")
+            url: proposal.metaUrl, hash: proposal.metaHash, "Koios proposal anchor")
 
         // Vote list for this proposal.
         let votesResponse = try await api.client.proposalVotes(
@@ -1415,13 +1493,13 @@ public actor KoiosChainContext: ChainContext {
             // A vote row always names its voter and its vote.
             let role = try LedgerValues.required(row.voterRole, "Koios vote voter_role")
             let hotOrPoolHex = try LedgerValues.required(row.voterHex, "Koios vote voter_hex")
-            let voteRaw = try LedgerValues.required(row.vote?.value as? String, "Koios vote")
+            let voteRaw = try LedgerValues.required(row.vote, "Koios vote").rawValue
             guard let vote = GovernanceParsing.parseVote(voteRaw) else {
                 throw CardanoChainError.valueError("Koios vote \(voteRaw) is not a vote")
             }
             /// Whether a committee or DRep voter is a script; Koios always says.
             func isScript() throws -> Bool {
-                try LedgerValues.required(row.voterHasScript?.value as? Bool, "Koios vote voter_has_script")
+                try LedgerValues.required(row.voterHasScript, "Koios vote voter_has_script")
             }
 
             switch role {

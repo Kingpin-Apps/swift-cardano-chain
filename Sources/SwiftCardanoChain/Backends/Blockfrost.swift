@@ -143,7 +143,7 @@ public actor BlockFrostChainContext: ChainContext {
         let response = try await api.client.getGenesis()
         do {
             let genesis = try response.ok.body.json
-            func int<T: FixedWidthInteger>(_ value: Int, _ field: String) throws -> T {
+            func int<T: FixedWidthInteger, S: BinaryInteger>(_ value: S, _ field: String) throws -> T {
                 try LedgerValues.integer(value, as: T.self, "Blockfrost genesis \(field)")
             }
             return GenesisParameters(
@@ -156,8 +156,8 @@ public actor BlockFrostChainContext: ChainContext {
                 networkId: _network.description,
                 networkMagic: try int(genesis.networkMagic, "network_magic"),
                 securityParam: try int(genesis.securityParam, "security_param"),
-                // Blockfrost sends the slot length in whole seconds.
-                slotLength: Decimal(genesis.slotLength),
+                // Read as the exact decimal Blockfrost sent.
+                slotLength: genesis.slotLength,
                 slotsPerKesPeriod: try int(genesis.slotsPerKesPeriod, "slots_per_kes_period"),
                 systemStart: Date(timeIntervalSince1970: TimeInterval(genesis.systemStart)),
                 updateQuorum: try int(genesis.updateQuorum, "update_quorum")
@@ -277,32 +277,25 @@ public actor BlockFrostChainContext: ChainContext {
             // data hash covers the costs in ledger order, which for Plutus V3 is not
             // alphabetical, so costs taken from the name-keyed map and sorted would have the
             // transaction refused with PPViewHashesDontMatch.
-            let rawCostModels = protocolParams.costModelsRaw?.additionalProperties.value ?? [:]
-            // A missing or malformed cost model is an error, not an empty one.
+            let rawCostModels = protocolParams.costModelsRaw?.additionalProperties ?? [:]
+            // A missing cost model is an error, not an empty one.
             func costModel(_ language: String) throws -> [Int64] {
-                guard let value = rawCostModels[language].flatMap({ $0 }),
-                    let list = value as? [Any]
-                else {
+                guard let list = rawCostModels[language] else {
                     throw CardanoChainError.blockfrostError("cost_models_raw has no \(language) list")
                 }
-                return try list.map {
-                    try LedgerValues.required(
-                        LedgerValues.integer(json: $0, as: Int64.self, "Blockfrost \(language) cost"),
-                        "Blockfrost \(language) cost")
-                }
+                return list
             }
 
             let p = protocolParams
-            // Blockfrost's client reads each ratio as a Double; its shortest
-            // description is the decimal Blockfrost sent, read here exactly.
-            func unit(_ value: Double?, _ field: String) throws -> UnitInterval {
+            // Blockfrost's client reads each ratio as the exact decimal Blockfrost sent.
+            func unit(_ value: Decimal?, _ field: String) throws -> UnitInterval {
                 try LedgerValues.unitInterval(LedgerValues.required(value, "Blockfrost \(field)"), "Blockfrost \(field)")
             }
-            func nonNegative(_ value: Double?, _ field: String) throws -> NonNegativeInterval {
+            func nonNegative(_ value: Decimal?, _ field: String) throws -> NonNegativeInterval {
                 try LedgerValues.nonNegativeInterval(
                     LedgerValues.required(value, "Blockfrost \(field)"), "Blockfrost \(field)")
             }
-            func int<T: FixedWidthInteger>(_ value: Int?, _ field: String) throws -> T {
+            func int<T: FixedWidthInteger, S: BinaryInteger>(_ value: S?, _ field: String) throws -> T {
                 try LedgerValues.integer(LedgerValues.required(value, "Blockfrost \(field)"), as: T.self, "Blockfrost \(field)")
             }
             func int<T: FixedWidthInteger>(_ text: String?, _ field: String) throws -> T {
@@ -1007,8 +1000,7 @@ public actor BlockFrostChainContext: ChainContext {
                 dnsName: relay.dns, srvName: relay.dnsSrv, "Blockfrost pool relay")
         }
 
-        // Blockfrost's client reads the margin as a Double; its shortest
-        // description is the decimal Blockfrost sent, read here exactly.
+        // Blockfrost's client reads the margin as the exact decimal Blockfrost sent.
         let margin = try LedgerValues.unitInterval(pool.marginCost, "Blockfrost pool margin_cost")
 
         let poolOperator = try PoolOperator(from: poolId)
@@ -1210,37 +1202,91 @@ public actor BlockFrostChainContext: ChainContext {
             )
             let params = try paramsResponse.ok.body.json.parameters
             
-            // Construct ProtocolParamUpdate from Blockfrost params. Blockfrost's
-            // client reads each ratio as a Double; its shortest description is
-            // the decimal Blockfrost sent, read here exactly.
-            func int<T: FixedWidthInteger>(_ value: Int?, _ field: String) throws -> T? {
+            // The update from Blockfrost's typed endpoint, whose ratios are the
+            // exact decimals Blockfrost sent and whose integers are exact.
+            // A field it leaves null is not part of the update.
+            func int<T: FixedWidthInteger, S: BinaryInteger>(_ value: S?, _ field: String) throws -> T? {
                 try value.map { try LedgerValues.integer($0, as: T.self, "Blockfrost proposal \(field)") }
             }
             func int<T: FixedWidthInteger>(_ text: String?, _ field: String) throws -> T? {
                 try text.map { try LedgerValues.integer(text: $0, as: T.self, "Blockfrost proposal \(field)") }
             }
-            func unit(_ value: Double?, _ field: String) throws -> UnitInterval? {
+            func unit(_ value: Decimal?, _ field: String) throws -> UnitInterval? {
                 try value.map { try LedgerValues.unitInterval($0, "Blockfrost proposal \(field)") }
             }
-            func nonNegative(_ value: Double?, _ field: String) throws -> NonNegativeInterval? {
+            func nonNegative(_ value: Decimal?, _ field: String) throws -> NonNegativeInterval? {
                 try value.map { try LedgerValues.nonNegativeInterval($0, "Blockfrost proposal \(field)") }
             }
+            /// Both halves of a pair, or neither.
+            func pair<A, B>(_ a: A?, _ b: B?, _ name: String) throws -> (A, B)? {
+                switch (a, b) {
+                case let (a?, b?): return (a, b)
+                case (nil, nil): return nil
+                default: throw CardanoChainError.valueError("Blockfrost proposal has only half of \(name)")
+                }
+            }
             func exUnits(_ mem: String?, _ steps: String?, _ field: String) throws -> ExUnits? {
-                guard let mem: UInt64 = try int(mem, "\(field)_mem"),
-                      let steps: UInt64 = try int(steps, "\(field)_steps") else { return nil }
-                return ExUnits(mem: mem, steps: steps)
+                try pair(int(mem, "\(field)_mem") as UInt64?, int(steps, "\(field)_steps") as UInt64?, field)
+                    .map { ExUnits(mem: $0.0, steps: $0.1) }
+            }
+            /// Every one of a threshold group, or none of it.
+            func all(_ values: [UnitInterval?], _ name: String) throws -> [UnitInterval]? {
+                let present = values.compactMap { $0 }
+                if present.isEmpty { return nil }
+                guard present.count == values.count else {
+                    throw CardanoChainError.valueError("Blockfrost proposal has only some of \(name)")
+                }
+                return present
             }
             // Blockfrost sends extra_entropy as the nonce's hash in hex, or null
             // for the neutral nonce.
             let extraEntropy = try params.extraEntropy.map { hex -> Nonce in
                 try Nonce(hash: LedgerValues.hexBytes(hex, "Blockfrost proposal extra_entropy"))
             }
-            let executionCosts: ExUnitPrices?
-            if let memPrice = try nonNegative(params.priceMem, "price_mem"),
-               let stepPrice = try nonNegative(params.priceStep, "price_step") {
-                executionCosts = ExUnitPrices(memPrice: memPrice, stepPrice: stepPrice)
-            } else {
-                executionCosts = nil
+            let executionCosts = try pair(
+                nonNegative(params.priceMem, "price_mem"), nonNegative(params.priceStep, "price_step"),
+                "the execution prices"
+            ).map { ExUnitPrices(memPrice: $0.0, stepPrice: $0.1) }
+            let poolThresholds = try all([
+                unit(params.pvtMotionNoConfidence, "pvt_motion_no_confidence"),
+                unit(params.pvtCommitteeNormal, "pvt_committee_normal"),
+                unit(params.pvtCommitteeNoConfidence, "pvt_committee_no_confidence"),
+                unit(params.pvtHardForkInitiation, "pvt_hard_fork_initiation"),
+                unit(params.pvtPPSecurityGroup ?? params.pvtppSecurityGroup, "pvt_p_p_security_group"),
+            ], "the pool voting thresholds").map {
+                PoolVotingThresholds(
+                    motionNoConfidence: $0[0], committeeNormal: $0[1], committeeNoConfidence: $0[2],
+                    hardForkInitiation: $0[3], ppSecurityGroup: $0[4])
+            }
+            // CDDL order.
+            let drepThresholds = try all([
+                unit(params.dvtMotionNoConfidence, "dvt_motion_no_confidence"),
+                unit(params.dvtCommitteeNormal, "dvt_committee_normal"),
+                unit(params.dvtCommitteeNoConfidence, "dvt_committee_no_confidence"),
+                unit(params.dvtUpdateToConstitution, "dvt_update_to_constitution"),
+                unit(params.dvtHardForkInitiation, "dvt_hard_fork_initiation"),
+                unit(params.dvtPPNetworkGroup, "dvt_p_p_network_group"),
+                unit(params.dvtPPEconomicGroup, "dvt_p_p_economic_group"),
+                unit(params.dvtPPTechnicalGroup, "dvt_p_p_technical_group"),
+                unit(params.dvtPPGovGroup, "dvt_p_p_gov_group"),
+                unit(params.dvtTreasuryWithdrawal, "dvt_treasury_withdrawal"),
+            ], "the DRep voting thresholds").map { try DrepVotingThresholds(thresholds: $0) }
+            let protocolVersion = try pair(
+                int(params.protocolMajorVer, "protocol_major_ver") as Int?,
+                int(params.protocolMinorVer, "protocol_minor_ver") as Int?, "the protocol version"
+            ).map { ProtocolVersion(major: $0.0, minor: $0.1) }
+            // The endpoint keys cost models by parameter name, which loses Plutus V3's
+            // ledger order; the description's lists keep it.
+            let contents = try describedContents(govActionData, tag: "ParameterChange", count: 3)
+            guard let described = contents[1] as? [String: Any] else {
+                throw CardanoChainError.valueError("Blockfrost governance_description update is not an object")
+            }
+            let costModels = try described["costModels"].map { _ in
+                try LedgerGovActionJSON.protocolParamUpdate(
+                    described.filter { $0.key == "costModels" }, "Blockfrost governance_description").costModels
+            } ?? nil
+            if params.costModels != nil, costModels == nil {
+                throw CardanoChainError.valueError("Blockfrost proposal has cost models its description does not")
             }
 
             let update = ProtocolParamUpdate(
@@ -1258,21 +1304,31 @@ public actor BlockFrostChainContext: ChainContext {
                 treasuryGrowthRate: try unit(params.tau, "tau"),
                 decentralizationConstant: try unit(params.decentralisationParam, "decentralisation_param"),
                 extraEntropy: extraEntropy,
-                protocolVersion: (params.protocolMajorVer != nil && params.protocolMinorVer != nil) ? ProtocolVersion(major: params.protocolMajorVer!, minor: params.protocolMinorVer!) : nil,
+                protocolVersion: protocolVersion,
+                minUtxoValue: try int(params.minUtxo, "min_utxo"),
                 minPoolCost: try int(params.minPoolCost, "min_pool_cost"),
                 adaPerUtxoByte: try int(params.coinsPerUtxoSize, "coins_per_utxo_size"),
-                costModels: nil, // Mapping cost models is complex due to different versions
+                costModels: costModels,
                 executionCosts: executionCosts,
                 maxTxExUnits: try exUnits(params.maxTxExMem, params.maxTxExSteps, "max_tx_ex"),
                 maxBlockExUnits: try exUnits(params.maxBlockExMem, params.maxBlockExSteps, "max_block_ex"),
                 maxValueSize: try int(params.maxValSize, "max_val_size"),
                 collateralPercentage: try int(params.collateralPercent, "collateral_percent"),
-                maxCollateralInputs: try int(params.maxCollateralInputs, "max_collateral_inputs")
+                maxCollateralInputs: try int(params.maxCollateralInputs, "max_collateral_inputs"),
+                poolVotingThresholds: poolThresholds,
+                drepVotingThresholds: drepThresholds,
+                minCommitteeSize: try int(params.committeeMinSize, "committee_min_size"),
+                committeeTermLimit: try int(params.committeeMaxTermLength, "committee_max_term_length"),
+                governanceActionValidityPeriod: try int(params.govActionLifetime, "gov_action_lifetime"),
+                governanceActionDeposit: try int(params.govActionDeposit, "gov_action_deposit"),
+                drepDeposit: try int(params.drepDeposit, "drep_deposit"),
+                drepInactivityPeriod: try int(params.drepActivity, "drep_activity"),
+                minFeeRefScriptCoinsPerByte: try nonNegative(
+                    params.minFeeRefScriptCostPerByte, "min_fee_ref_script_cost_per_byte")
             )
             // The update is read from Blockfrost's typed endpoint; the previous
             // action and the policy hash only from `governance_description`:
             // `{"tag": "ParameterChange", "contents": [prevId, update, policyHash]}`.
-            let contents = try describedContents(govActionData, tag: "ParameterChange", count: 3)
             govAction = .parameterChangeAction(LedgerGovActionJSON.parameterChange(
                 prev: try LedgerGovActionJSON.prevActionID(contents[0], "Blockfrost previous action"),
                 update: update,

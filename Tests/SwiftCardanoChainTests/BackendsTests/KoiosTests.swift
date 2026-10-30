@@ -140,21 +140,22 @@ struct KoiosChainContextTests {
         }
     }
 
-    @Test("Test decodeProtocolParameters round-trips an OpenAPIObjectContainer")
+    @Test("Test decodeProtocolParameters reads Koios's typed protocol parameters")
     func testDecodeProtocolParametersFromContainer() throws {
-        let container = try JSONDecoder().decode(
-            OpenAPIObjectContainer.self,
+        let params = try JSONDecoder().decode(
+            Components.Schemas.CliProtocolParams.self,
             from: Data(KoiosMockResponses.protocolParams.utf8)
         )
 
-        let protocolParameters = try KoiosChainContext.decodeProtocolParameters(from: container)
+        let protocolParameters = try KoiosChainContext.decodeProtocolParameters(from: params)
 
         #expect(protocolParameters.txFeePerByte == 44)
         #expect(protocolParameters.maxTxSize == 16384)
         #expect(protocolParameters.dRepVotingThresholds.ppGovGroup == unit(3, 4))
 
+        // An empty response has none of the required parameters.
         #expect(throws: CardanoChainError.self) {
-            _ = try KoiosChainContext.decodeProtocolParameters(from: OpenAPIObjectContainer())
+            _ = try KoiosChainContext.decodeProtocolParameters(from: Components.Schemas.CliProtocolParams())
         }
     }
 

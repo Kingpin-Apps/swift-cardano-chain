@@ -238,14 +238,15 @@ struct GovActionPreviousIDTests {
         #expect(update.credentialEpochs == [Self.added: 500])
     }
 
-    @Test("An Ogmios committee update that removes members throws, since SwiftOgmios cannot decode who")
+    @Test("Ogmios keeps a committee update's removals and additions apart")
     func ogmiosCommitteeRemoved() async throws {
         let action = """
-            {"type": "constitutionalCommittee",
-             "members": {"removed": [{"id": "\(Self.removedHash)", "from": "verificationKey"}]},
+            {"type": "constitutionalCommittee", \(Self.ogmiosAncestor(true))
+             "members": {"added": [{"id": "\(Self.addedHash)", "from": "script", "mandate": {"epoch": 500}}],
+                         "removed": [{"id": "\(Self.removedHash)", "from": "verificationKey"}]},
              "quorum": "2/3"}
             """
-        await #expect(throws: CardanoChainError.self) { _ = try await self.ogmios(action) }
+        Self.check(try await ogmios(action), previous: true)
     }
 
     static let guardrails = "fa24fb305126805cf2164c161d852a0e7330cf988f1fe558cf7d4a64"

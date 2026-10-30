@@ -364,8 +364,7 @@ public func tryResolveWithAssetName(
     
     // Must have exactly one holder
     guard holders.count == 1,
-          let paymentAddressContainer = holders.first?.paymentAddress,
-          let address = paymentAddressContainer.value as? String else {
+          let address = holders.first?.paymentAddress else {
         return nil
     }
     
@@ -537,7 +536,8 @@ public func verifyVirtualHandle(
     let utxos = try response.ok.body.json
     
     guard utxos.count == 1,
-          let inlineDatum = utxos.first?.inlineDatum?.value as? String else {
+          // The datum's CBOR in hex is `bytes`; `value` is its JSON form.
+          let inlineDatum = utxos.first?.inlineDatum?.bytes else {
         throw AdaHandleError.adahandleAPIError("Could not find inline datum for virtual handle", nil)
     }
     

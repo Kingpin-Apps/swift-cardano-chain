@@ -608,7 +608,7 @@ public actor OgmiosChainContext: ChainContext {
                 "Operational certificate not found for pool \(poolId)")
         }
 
-        let opCertCounter: Int = matchingPool.value
+        let opCertCounter: Int = try matchingPool.value.checked("Ogmios operational certificate counter")
 
         let onChainOpCertCount = opCertCounter
         let nextChainOpCertCount = onChainOpCertCount + 1
@@ -641,10 +641,8 @@ public actor OgmiosChainContext: ChainContext {
         )
 
         // Convert value
+        // SwiftOgmios reads an output's lovelace as UInt64, so it cannot be negative.
         let lovelaceAmount = entry.value.ada.lovelace
-        guard lovelaceAmount >= 0 else {
-            throw CardanoChainError.valueError("Ogmios output lovelace \(lovelaceAmount) is negative")
-        }
         var multiAssets = MultiAsset([:])
 
         if let assets = entry.value.assets {
@@ -807,8 +805,7 @@ public actor OgmiosChainContext: ChainContext {
 
         // The reference-script fee: `base` lovelace per byte, multiplied by
         // `multiplier` for every further `range` bytes. SwiftOgmios reads
-        // `base` and `multiplier` as Doubles; their shortest descriptions are
-        // the decimals Ogmios sent, read here exactly.
+        // `base` and `multiplier` as the exact decimals Ogmios sent.
         let referenceScripts = try params.minFeeReferenceScripts.map { fee -> MinReferenceScriptsSize in
             let multiplier = try LedgerValues.nonNegativeInterval(fee.multiplier, "Ogmios minFeeReferenceScripts.multiplier")
             // The ledger's multiplier is a PositiveInterval and its range a NonZero Word32.
@@ -955,7 +952,7 @@ public actor OgmiosChainContext: ChainContext {
             let metadataHash = ogmiosParams.metadata?.hash
         {
             let hashData = try LedgerValues.hash32(hex: metadataHash.description, "Ogmios pool metadata hash")
-            let url = try LedgerValues.url(metadataUrl.absoluteString, "Ogmios pool metadata URL")
+            let url = try LedgerValues.url(metadataUrl, "Ogmios pool metadata URL")
             let hash = PoolMetadataHash(payload: hashData)
             do {
                 poolMetadata = try await PoolMetadata.fetch(
@@ -1049,7 +1046,7 @@ public actor OgmiosChainContext: ChainContext {
 
             let anchor = try reg.metadata.map { ogmiosAnchor in
                 try LedgerValues.anchor(
-                    url: ogmiosAnchor.url.absoluteString, hash: ogmiosAnchor.hash, "Ogmios DRep anchor")
+                    url: ogmiosAnchor.url, hash: ogmiosAnchor.hash, "Ogmios DRep anchor")
             }
 
             return DRepInfo(
@@ -1486,7 +1483,7 @@ public actor OgmiosChainContext: ChainContext {
                 guard !values.isEmpty else {
                     throw CardanoChainError.valueError("\(what("plutusCostModels")) \(language) is empty")
                 }
-                byLanguage[id] = values.map(Int64.init)
+                byLanguage[id] = values
             }
             u.costModels = try CostModels(byLanguage)
         }
@@ -1597,16 +1594,11 @@ public actor OgmiosChainContext: ChainContext {
             ))
 
         case .constitutionalCommittee(let cc):
-            // SwiftOgmios decodes each removed member as a `Members` value, which
-            // has no room for the member's id, so who is removed cannot be read.
-            // Reporting no removals would be a different action; refuse instead.
-            if let removed = cc.members.removed, !removed.isEmpty {
-                throw CardanoChainError.notImplemented(
-                    "Ogmios committee update removes \(removed.count) member(s), which SwiftOgmios cannot decode")
-            }
-            // `coldCredentials` holds the members to remove (none here); the
-            // members to add go in `credentialEpochs` with their terms.
-            let coldCredentials: Set<CommitteeColdCredential> = []
+            // `coldCredentials` holds the members to remove; the members to add
+            // go in `credentialEpochs` with their terms.
+            let coldCredentials: Set<CommitteeColdCredential> = Set(try (cc.members.removed ?? []).map {
+                try makeCommitteeColdCredential(idHex: $0.id.value, from: $0.from)
+            })
             var credentialEpochs: [CommitteeColdCredential: UInt64] = [:]
             for member in cc.members.added ?? [] {
                 let cred = try makeCommitteeColdCredential(
@@ -1629,7 +1621,7 @@ public actor OgmiosChainContext: ChainContext {
 
         case .constitution(let c):
             let anchor = try LedgerValues.anchor(
-                url: c.metadata.url.absoluteString, hash: c.metadata.hash, "Ogmios constitution anchor")
+                url: c.metadata.url, hash: c.metadata.hash, "Ogmios constitution anchor")
             return .newConstitution(NewConstitution(
                 id: try previous(c.ancestor),
                 constitution: Constitution(anchor: anchor, scriptHash: try guardrails(c.guardrails))
@@ -1713,7 +1705,7 @@ public actor OgmiosChainContext: ChainContext {
         let deposit: Coin = try state.deposit.ada.lovelace.checked("Ogmios proposal deposit")
         let returnAddrData = try Address.fromBech32(state.returnAccount.value).toBytes()
         let anchor: SwiftCardanoCore.Anchor? = try LedgerValues.anchor(
-            url: state.metadata.url.absoluteString, hash: state.metadata.hash.description,
+            url: state.metadata.url, hash: state.metadata.hash.description,
             "Ogmios proposal anchor")
 
         let govAction = try mapOgmiosGovernanceAction(state.action)
