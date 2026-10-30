@@ -338,7 +338,7 @@ public actor YaciDevkitChainContext: ChainContext {
         fromShelleyGenesis data: Data,
         network: SwiftCardanoCore.Network
     ) throws -> GenesisParameters {
-        guard let json = Self.jsonObject(data) else {
+        guard let json = try? Self.genesisJSON(data, "Shelley genesis") else {
             throw CardanoChainError.yaciDevkitError("Shelley genesis is not a JSON object")
         }
 
@@ -363,7 +363,7 @@ public actor YaciDevkitChainContext: ChainContext {
             return integer
         }
 
-        guard let systemStartString = json["systemStart"] as? String else {
+        guard let systemStartString = json["systemStart"]?.string else {
             throw CardanoChainError.yaciDevkitError("Shelley genesis is missing systemStart")
         }
         guard let systemStart = Self.parseISO8601(systemStartString) else {
@@ -376,7 +376,7 @@ public actor YaciDevkitChainContext: ChainContext {
             epochLength: try requireInt(numbers.epochLength, "epochLength"),
             maxKesEvolutions: try requireInt(numbers.maxKESEvolutions, "maxKESEvolutions"),
             maxLovelaceSupply: try requireInt(numbers.maxLovelaceSupply, "maxLovelaceSupply"),
-            networkId: (json["networkId"] as? String) ?? network.description,
+            networkId: json["networkId"]?.string ?? network.description,
             networkMagic: try requireInt(numbers.networkMagic, "networkMagic"),
             securityParam: try requireInt(numbers.securityParam, "securityParam"),
             slotLength: try require(numbers.slotLength, "slotLength"),
@@ -446,40 +446,57 @@ public actor YaciDevkitChainContext: ChainContext {
     /// from the store's order is refused (`PPViewHashesDontMatch`). Genesis lists them in ledger
     /// order, and a devnet's cost models do not change.
     private func genesisCostModels() async throws -> (v1: [Int64]?, v2: [Int64]?, v3: [Int64]?) {
-        let alonzo = Self.jsonObject(try await genesisFile("alonzo"))
-        let conway = Self.jsonObject(try await genesisFile("conway"))
-        let models = alonzo?["costModels"] as? [String: Any]
+        try Self.genesisCostModels(
+            alonzo: try await genesisFile("alonzo"), conway: try await genesisFile("conway"))
+    }
 
-        func model(_ names: [String]) -> [Int64]? {
+    /// Every language's cost model in ledger order, from the Alonzo and Conway genesis documents.
+    static func genesisCostModels(alonzo: Data, conway: Data) throws
+        -> (v1: [Int64]?, v2: [Int64]?, v3: [Int64]?)
+    {
+        let alonzo = try genesisJSON(alonzo, "Yaci Alonzo genesis")
+        let conway = try genesisJSON(conway, "Yaci Conway genesis")
+        let models = alonzo["costModels"].nonNull
+        if let models, models.object == nil {
+            throw CardanoChainError.valueError("Yaci Alonzo genesis costModels is not an object")
+        }
+
+        func model(_ names: [String]) throws -> [Int64]? {
             for name in names {
-                if let list = Self.costList(models?[name]) { return list }
+                if let list = try costList(models?[name], "Yaci genesis \(name) cost model") { return list }
             }
             return nil
         }
         return (
-            v1: model(["PlutusV1", "plutusV1", "plutus:v1"]),
-            v2: model(["PlutusV2", "plutusV2", "plutus:v2"]),
-            v3: Self.costList(conway?["plutusV3CostModel"])
+            v1: try model(["PlutusV1", "plutusV1", "plutus:v1"]),
+            v2: try model(["PlutusV2", "plutusV2", "plutus:v2"]),
+            v3: try costList(conway["plutusV3CostModel"], "Yaci Conway genesis plutusV3CostModel")
                 ?? model(["PlutusV3", "plutusV3", "plutus:v3"])
         )
     }
 
-    /// Parse raw JSON bytes into a Foundation dictionary.
-    static func jsonObject(_ data: Data) -> [String: Any]? {
-        (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+    /// A genesis document decoded exactly: numbers as `Decimal`, never `Double`.
+    static func genesisJSON(_ data: Data, _ what: String) throws -> [String: ChainJSON] {
+        guard let object = try ChainJSON.decode(data, what).object else {
+            throw CardanoChainError.valueError("\(what) is not a JSON object")
+        }
+        return object
     }
 
     /// A cost model as a list of integers. A map is flattened in key order, which is ledger order
     /// for Plutus V1 and V2 — their parameter names sort alphabetically — but not for V3, which
-    /// is why V3 is read from the Conway genesis list instead.
-    static func costList(_ value: Any?) -> [Int64]? {
-        if let array = value as? [Any] {
-            return array.compactMap { ($0 as? NSNumber)?.int64Value }
+    /// is why V3 is read from the Conway genesis list instead. `nil` when absent or null; a
+    /// cost that is not a whole `Int64` throws rather than being dropped.
+    static func costList(_ value: ChainJSON?, _ what: String) throws -> [Int64]? {
+        func cost(_ value: ChainJSON) throws -> Int64 {
+            try LedgerValues.required(LedgerValues.integer(json: value, as: Int64.self, what), what)
         }
-        if let object = value as? [String: Any] {
-            return object.keys.sorted().compactMap { (object[$0] as? NSNumber)?.int64Value }
+        switch value.nonNull {
+        case nil: return nil
+        case .array(let array)?: return try array.map(cost)
+        case .object(let object)?: return try object.keys.sorted().map { try cost(object[$0]!) }
+        case let other?: throw CardanoChainError.valueError("\(what): \(other) is not a cost model")
         }
-        return nil
     }
 
     // MARK: - Protocol parameters
@@ -1173,40 +1190,37 @@ public actor YaciDevkitChainContext: ChainContext {
 
     /// The pools in a Shelley genesis document; none when it declares no `staking.pools`.
     static func genesisPools(from data: Data) throws -> [String: PoolParams] {
-        guard let genesis = jsonObject(data) else {
-            throw CardanoChainError.valueError("Yaci Shelley genesis is not a JSON object")
-        }
-        guard let staking = genesis["staking"], !(staking is NSNull) else { return [:] }
-        guard let pools = (staking as? [String: Any]).map({ $0["pools"] }) else {
+        let genesis = try genesisJSON(data, "Yaci Shelley genesis")
+        guard let staking = genesis["staking"].nonNull else { return [:] }
+        guard let stakingObject = staking.object else {
             throw CardanoChainError.valueError("Yaci Shelley genesis staking is not an object")
         }
-        guard let pools, !(pools is NSNull) else { return [:] }
-        guard let pools = pools as? [String: Any] else {
+        guard let pools = stakingObject["pools"].nonNull else { return [:] }
+        guard let pools = pools.object else {
             throw CardanoChainError.valueError("Yaci Shelley genesis staking.pools is not an object")
         }
 
         var result: [String: PoolParams] = [:]
         for (poolId, value) in pools {
-            guard let pool = value as? [String: Any] else {
+            guard let pool = value.object else {
                 throw CardanoChainError.valueError("Yaci genesis pool \(poolId) is not an object")
             }
-            let id = ((pool["publicKey"] as? String) ?? poolId).lowercased()
+            let id = (pool["publicKey"]?.string ?? poolId).lowercased()
             let poolKeyHash = try LedgerValues.hash(hex: id, as: PoolKeyHash.self, "Yaci genesis pool id")
 
-            guard let ownerList = pool["owners"] as? [Any] else {
+            guard let ownerList = pool["owners"]?.array else {
                 throw CardanoChainError.valueError("Yaci genesis pool \(id) has no owner list")
             }
             let owners: [VerificationKeyHash] = try ownerList.map { owner in
-                guard let owner = owner as? String else {
+                guard let text = owner.string else {
                     throw CardanoChainError.valueError("Yaci genesis pool \(id) owner \(owner) is not a string")
                 }
-                return try Self.poolOwner(owner)
+                return try Self.poolOwner(text)
             }
 
             var metadata: PoolMetadata? = nil
-            if let meta = pool["metadata"], !(meta is NSNull) {
-                guard let meta = meta as? [String: Any],
-                    let urlText = meta["url"] as? String, let hashHex = meta["hash"] as? String
+            if let meta = pool["metadata"].nonNull {
+                guard let urlText = meta["url"]?.string, let hashHex = meta["hash"]?.string
                 else {
                     throw CardanoChainError.valueError("Yaci genesis pool metadata is not a url and hash: \(meta)")
                 }
@@ -1219,20 +1233,19 @@ public actor YaciDevkitChainContext: ChainContext {
             result[id] = PoolParams(
                 poolOperator: poolKeyHash,
                 vrfKeyHash: try LedgerValues.hash(
-                    hex: LedgerValues.required(pool["vrf"] as? String, "Yaci genesis pool vrf"), as: VrfKeyHash.self,
+                    hex: LedgerValues.required(pool["vrf"]?.string, "Yaci genesis pool vrf"), as: VrfKeyHash.self,
                     "Yaci genesis pool vrf"),
                 pledge: try LedgerValues.required(
                     LedgerValues.integer(json: pool["pledge"], "Yaci genesis pool pledge"), "Yaci genesis pool pledge"),
                 cost: try LedgerValues.required(
                     LedgerValues.integer(json: pool["cost"], "Yaci genesis pool cost"), "Yaci genesis pool cost"),
-                // JSONSerialization reads the margin as a Double; its shortest
-                // description is the decimal in the genesis file.
+                // The margin is the exact decimal in the genesis file.
                 margin: try LedgerValues.required(
                     LedgerValues.unitInterval(json: pool["margin"], "Yaci genesis pool margin"),
                     "Yaci genesis pool margin"),
                 rewardAccount: try Self.genesisRewardAccount(pool["rewardAccount"]),
                 poolOwners: .list(owners),
-                relays: try LedgerValues.required(pool["relays"] as? [Any], "Yaci genesis pool \(id) relays")
+                relays: try LedgerValues.required(pool["relays"]?.array, "Yaci genesis pool \(id) relays")
                     .map { try Self.genesisRelay($0) },
                 poolMetadata: metadata
             )
@@ -1242,8 +1255,8 @@ public actor YaciDevkitChainContext: ChainContext {
 
     /// The reward account of a genesis pool, which genesis writes as a credential plus a network
     /// rather than as the 29-byte on-chain form.
-    static func genesisRewardAccount(_ any: Any?) throws -> RewardAccountHash {
-        RewardAccountHash(payload: try LedgerValues.rewardAccount(json: any, "Yaci genesis pool reward account"))
+    static func genesisRewardAccount(_ json: ChainJSON?) throws -> RewardAccountHash {
+        RewardAccountHash(payload: try LedgerValues.rewardAccount(json: json, "Yaci genesis pool reward account"))
     }
 
     /// One relay from a genesis pool, whose JSON tags the shape by key.
@@ -1251,17 +1264,17 @@ public actor YaciDevkitChainContext: ChainContext {
     /// An entry that is not one of the three shapes, an address that does not parse, a name
     /// missing from a named relay or longer than the ledger allows, all throw: a relay the ledger
     /// accepted always reads, so it means the genesis document is corrupt.
-    static func genesisRelay(_ any: Any) throws -> SwiftCardanoCore.Relay {
+    static func genesisRelay(_ json: ChainJSON) throws -> SwiftCardanoCore.Relay {
         let what = "Yaci genesis pool relay"
-        guard let entry = any as? [String: Any], entry.count == 1, let (kind, raw) = entry.first,
-            let fields = raw as? [String: Any]
+        guard let entry = json.object, entry.count == 1, let (kind, raw) = entry.first,
+            let fields = raw.object
         else {
-            throw CardanoChainError.valueError("\(what) \(any) is not a single tagged relay")
+            throw CardanoChainError.valueError("\(what) \(json) is not a single tagged relay")
         }
         func text(_ keys: String...) throws -> String? {
             for key in keys {
-                guard let value = fields[key], !(value is NSNull) else { continue }
-                guard let text = value as? String else {
+                guard let value = fields[key].nonNull else { continue }
+                guard let text = value.string else {
                     throw CardanoChainError.valueError("\(what) \(key) \(value) is not a string")
                 }
                 return text

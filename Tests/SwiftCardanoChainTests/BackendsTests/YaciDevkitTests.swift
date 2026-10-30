@@ -10,6 +10,11 @@ import Testing
 @Suite("Yaci DevKit Chain Context Tests")
 struct YaciDevkitChainContextTests {
 
+    /// `text` decoded as exact ledger JSON.
+    private func json(_ text: String) throws -> ChainJSON {
+        try ChainJSON.decode(Data(text.utf8), "test")
+    }
+
     // MARK: - Helpers
 
     private func makeContext(
@@ -328,11 +333,46 @@ struct YaciDevkitChainContextTests {
     }
 
     @Test("Test cost model list flattens a map in key order")
-    func testCostList() {
-        #expect(YaciDevkitChainContext.costList([1, 2, 3] as [Any]) == [1, 2, 3])
-        #expect(YaciDevkitChainContext.costList(["b": 2, "a": 1] as [String: Any]) == [1, 2])
-        #expect(YaciDevkitChainContext.costList("nonsense") == nil)
-        #expect(YaciDevkitChainContext.costList(nil) == nil)
+    func testCostList() throws {
+        #expect(try YaciDevkitChainContext.costList(json("[1, 2, 3]"), "test") == [1, 2, 3])
+        #expect(try YaciDevkitChainContext.costList(json(#"{"b": 2, "a": 1}"#), "test") == [1, 2])
+        #expect(try YaciDevkitChainContext.costList(json("null"), "test") == nil)
+        #expect(try YaciDevkitChainContext.costList(nil, "test") == nil)
+        // A cost that is not a whole Int64, or not a cost model at all, throws instead of being dropped.
+        #expect(throws: CardanoChainError.self) { try YaciDevkitChainContext.costList(json(#""nonsense""#), "test") }
+        #expect(throws: CardanoChainError.self) { try YaciDevkitChainContext.costList(json("[1, 2.5]"), "test") }
+        #expect(throws: CardanoChainError.self) {
+            try YaciDevkitChainContext.costList(json("[9223372036854775808]"), "test")
+        }
+        // Int64.max survives (a Double would round it).
+        #expect(try YaciDevkitChainContext.costList(json("[9223372036854775807, -9223372036854775808]"), "test")
+            == [Int64.max, Int64.min])
+    }
+
+    @Test("Genesis cost models are read exactly from the Alonzo and Conway documents")
+    func testGenesisCostModels() throws {
+        let models = try YaciDevkitChainContext.genesisCostModels(
+            alonzo: Data(#"{"costModels": {"PlutusV1": {"b": 2, "a": 1}, "PlutusV2": [3, 4]}}"#.utf8),
+            conway: Data(#"{"plutusV3CostModel": [9007199254740993]}"#.utf8))
+        #expect(models.v1 == [1, 2])
+        #expect(models.v2 == [3, 4])
+        // 2^53 + 1, which a Double cannot hold.
+        #expect(models.v3 == [9_007_199_254_740_993])
+        #expect(throws: CardanoChainError.self) {
+            try YaciDevkitChainContext.genesisCostModels(alonzo: Data("not json".utf8), conway: Data("{}".utf8))
+        }
+    }
+
+    @Test("A genesis pool margin is the exact decimal in the file")
+    func testGenesisPoolMarginExact() throws {
+        let genesis = YaciMockData.shelleyGenesisWithPool()
+        // Swap the margin for one with more digits than a Double holds.
+        let marginRange = try #require(genesis.range(of: #""margin"\s*:\s*[0-9.eE+-]+"#, options: .regularExpression))
+        let exact = genesis.replacingCharacters(in: marginRange, with: #""margin": 0.1234567890123456789"#)
+        let parsed = try YaciDevkitChainContext.genesisPools(from: Data(exact.utf8))
+        let pool = try #require(parsed.values.first)
+        #expect(pool.margin.numerator == 1_234_567_890_123_456_789)
+        #expect(pool.margin.denominator == 10_000_000_000_000_000_000)
     }
 
     // MARK: - UTxOs
@@ -732,7 +772,7 @@ struct YaciDevkitChainContextTests {
     @Test("Test genesis relay shapes are keyed by name")
     func testGenesisRelayMapping() throws {
         let addr = try YaciDevkitChainContext.genesisRelay(
-            ["single host address": ["IPv4": "198.51.100.4", "IPv6": NSNull(), "port": 3001]])
+            json(#"{"single host address": {"IPv4": "198.51.100.4", "IPv6": null, "port": 3001}}"#))
         guard case .singleHostAddr(let a) = addr else {
             Issue.record("Expected a single host address, got \(addr)")
             return
@@ -741,7 +781,7 @@ struct YaciDevkitChainContextTests {
         #expect(a.port == 3001)
 
         let named = try YaciDevkitChainContext.genesisRelay(
-            ["single host name": ["dnsName": "relay.genesis.example", "port": 3001]])
+            json(#"{"single host name": {"dnsName": "relay.genesis.example", "port": 3001}}"#))
         guard case .singleHostName(let host) = named else {
             Issue.record("Expected a single host name, got \(named)")
             return
@@ -749,7 +789,7 @@ struct YaciDevkitChainContextTests {
         #expect(host.dnsName == "relay.genesis.example")
 
         let srv = try YaciDevkitChainContext.genesisRelay(
-            ["multi host name": ["dnsName": "_cardano._tcp.genesis.example"]])
+            json(#"{"multi host name": {"dnsName": "_cardano._tcp.genesis.example"}}"#))
         guard case .multiHostName = srv else {
             Issue.record("Expected a multi host name")
             return
@@ -757,7 +797,7 @@ struct YaciDevkitChainContextTests {
 
         // An address relay with neither address is one the ledger allows, not one to drop.
         guard case .singleHostAddr(let bare) = try YaciDevkitChainContext.genesisRelay(
-            ["single host address": ["IPv4": NSNull(), "IPv6": NSNull(), "port": NSNull()]])
+            json(#"{"single host address": {"IPv4": null, "IPv6": null, "port": null}}"#))
         else {
             Issue.record("Expected a single host address")
             return
@@ -781,7 +821,7 @@ struct YaciDevkitChainContextTests {
 
     @Test("A genesis relay that does not read throws instead of being dropped", arguments: badGenesisRelays)
     func testGenesisRelayRejects(_ json: String) throws {
-        let entry = try JSONSerialization.jsonObject(with: Data(json.utf8))
+        let entry = try self.json(json)
         #expect(throws: CardanoChainError.self) { try YaciDevkitChainContext.genesisRelay(entry) }
     }
 
@@ -800,15 +840,15 @@ struct YaciDevkitChainContextTests {
     func testGenesisRewardAccount() throws {
         let keyHash = "11a14edf73b08a0a27cb98b2c57eb37c780df18fcfcf6785ed5df84a"
         let testnet = try YaciDevkitChainContext.genesisRewardAccount(
-            ["credential": ["keyHash": keyHash], "network": "Testnet"])
+            json(#"{"credential": {"keyHash": "\#(keyHash)"}, "network": "Testnet"}"#))
         #expect(testnet.payload.first == 0xE0)
 
         let mainnet = try YaciDevkitChainContext.genesisRewardAccount(
-            ["credential": ["keyHash": keyHash], "network": "Mainnet"])
+            json(#"{"credential": {"keyHash": "\#(keyHash)"}, "network": "Mainnet"}"#))
         #expect(mainnet.payload.first == 0xE1)
 
         let script = try YaciDevkitChainContext.genesisRewardAccount(
-            ["credential": ["scriptHash": keyHash], "network": "Testnet"])
+            json(#"{"credential": {"scriptHash": "\#(keyHash)"}, "network": "Testnet"}"#))
         #expect(script.payload.first == 0xF0)
     }
 
