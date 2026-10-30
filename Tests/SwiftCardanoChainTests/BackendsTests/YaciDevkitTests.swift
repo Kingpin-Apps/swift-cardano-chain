@@ -687,6 +687,24 @@ struct YaciDevkitChainContextTests {
         }
     }
 
+    static let badGenesisOwners: [String] = [
+        #""owners":["not hex"]"#,
+        // 29 bytes: not a key hash.
+        #""owners":["\#(String(repeating: "00", count: 29))"]"#,
+        #""owners":[42]"#,
+    ]
+
+    @Test("A genesis pool owner that does not parse throws instead of being dropped", arguments: badGenesisOwners)
+    func testGenesisPoolBadOwner(_ owners: String) async throws {
+        let genesis = YaciMockData.shelleyGenesisWithPool()
+            .replacingOccurrences(of: #""owners":["\#(YaciMockData.ccHotHex)"]"#, with: owners)
+        #expect(genesis != YaciMockData.shelleyGenesisWithPool())
+        let context = try makeContext(admin: MockYaciDevkitAdmin(overrides: ["shelley": genesis]))
+        await #expect(throws: CardanoChainError.self) {
+            _ = try await context.stakePoolInfo(poolId: YaciMockData.genesisPoolHex)
+        }
+    }
+
     @Test("Test genesis relay shapes are keyed by name")
     func testGenesisRelayMapping() {
         let addr = YaciDevkitChainContext.genesisRelay(

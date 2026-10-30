@@ -1181,8 +1181,15 @@ public actor YaciDevkitChainContext: ChainContext {
             let id = ((pool["publicKey"] as? String) ?? poolId).lowercased()
             let poolKeyHash = try LedgerValues.hash(hex: id, as: PoolKeyHash.self, "Yaci genesis pool id")
 
-            let owners: [VerificationKeyHash] = ((pool["owners"] as? [String]) ?? [])
-                .compactMap { try? Self.poolOwner($0) }
+            guard let ownerList = pool["owners"] as? [Any] else {
+                throw CardanoChainError.valueError("Yaci genesis pool \(id) has no owner list")
+            }
+            let owners: [VerificationKeyHash] = try ownerList.map { owner in
+                guard let owner = owner as? String else {
+                    throw CardanoChainError.valueError("Yaci genesis pool \(id) owner \(owner) is not a string")
+                }
+                return try Self.poolOwner(owner)
+            }
 
             var metadata: PoolMetadata? = nil
             if let meta = pool["metadata"], !(meta is NSNull) {
