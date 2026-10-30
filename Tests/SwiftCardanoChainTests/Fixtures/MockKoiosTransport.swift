@@ -132,7 +132,7 @@ struct KoiosMockTransport: ClientTransport {
                     "inline_datum": null,
                     "reference_script": null,
                     "asset_list": [
-                        {"policy_id": "b0d07d45fe9514f80213f4020e5a61241458be626841cde717cb38a76e7574636f696e", "asset_name": "6574636f696e", "quantity": "50"}
+                        {"policy_id": "b0d07d45fe9514f80213f4020e5a61241458be626841cde717cb38a7", "asset_name": "6574636f696e", "quantity": "50"}
                     ],
                     "is_spent": false
                 }]
@@ -154,7 +154,7 @@ struct KoiosMockTransport: ClientTransport {
                     "inline_datum": null,
                     "reference_script": null,
                     "asset_list": [
-                        {"policy_id": "b0d07d45fe9514f80213f4020e5a61241458be626841cde717cb38a76e7574636f696e", "asset_name": "6574636f696e", "quantity": "50"}
+                        {"policy_id": "b0d07d45fe9514f80213f4020e5a61241458be626841cde717cb38a7", "asset_name": "6574636f696e", "quantity": "50"}
                     ],
                     "is_spent": false
                 }]

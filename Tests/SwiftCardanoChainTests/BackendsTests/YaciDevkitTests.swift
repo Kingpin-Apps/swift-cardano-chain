@@ -168,7 +168,7 @@ struct YaciDevkitChainContextTests {
         let context = try makeContext()
         let genesis = try await context.genesisParameters()
 
-        #expect(genesis.activeSlotsCoefficient == 0.05)
+        #expect(genesis.activeSlotsCoefficient == unit(1, 20))
         #expect(genesis.epochLength == 86400)
         #expect(genesis.maxKesEvolutions == 62)
         #expect(genesis.maxLovelaceSupply == 45_000_000_000_000_000)
@@ -247,10 +247,14 @@ struct YaciDevkitChainContextTests {
         #expect(params.stakePoolDeposit == 500_000_000)
         #expect(params.minPoolCost == 170_000_000)
         #expect(params.protocolVersion.major == 10)
-        #expect(params.executionUnitPrices.priceMemory == 0.0577)
+        #expect(params.executionUnitPrices.priceMemory == nonNegative(577, 10_000))
+        #expect(params.executionUnitPrices.priceSteps == nonNegative(721, 10_000_000))
+        #expect(params.monetaryExpansion == unit(3, 1000))
+        #expect(params.poolPledgeInfluence == nonNegative(3, 10))
+        #expect(params.minFeeRefScriptCostPerByte == nonNegative(15, 1))
         #expect(params.maxTxExecutionUnits.steps == 10_000_000_000)
-        #expect(params.dRepVotingThresholds.ppGovGroup == 0.75)
-        #expect(params.poolVotingThresholds.ppSecurityGroup == 0.51)
+        #expect(params.dRepVotingThresholds.ppGovGroup == unit(3, 4))
+        #expect(params.poolVotingThresholds.ppSecurityGroup == unit(51, 100))
         #expect(params.govActionLifetime == 6)
     }
 

@@ -228,9 +228,10 @@ struct MockTransport: ClientTransport {
                         dvtPPGovGroup: 0.75,
                         dvtTreasuryWithdrawal: 0.67,
                         committeeMinSize: "7",
-                        committeeMaxTermLength: "100000000000",
-                        govActionLifetime: "500000000",
-                        govActionDeposit: "20",
+                        // Preview's values. Each is a ledger `EpochInterval` (Word32) or `Coin`.
+                        committeeMaxTermLength: "365",
+                        govActionLifetime: "30",
+                        govActionDeposit: "100000000000",
                         drepDeposit: "500000000",
                         drepActivity: "20",
                         pvtppSecurityGroup:  0.51,

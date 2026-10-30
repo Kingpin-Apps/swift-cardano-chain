@@ -1,3 +1,4 @@
+import BigInt
 import Foundation
 import OpenAPIRuntime
 import SwiftCardanoCore
@@ -340,15 +341,25 @@ public actor YaciDevkitChainContext: ChainContext {
             throw CardanoChainError.yaciDevkitError("Shelley genesis is not a JSON object")
         }
 
-        func requireInt(_ key: String) throws -> Int {
-            guard let value = (json[key] as? NSNumber)?.intValue ?? (json[key] as? String).flatMap(Int.init)
-            else { throw CardanoChainError.yaciDevkitError("Shelley genesis is missing \(key)") }
+        // The numbers are read again from the JSON text, as Decimals, so the
+        // active slot coefficient and slot length are exact.
+        let numbers: ShelleyGenesisNumbers
+        do {
+            numbers = try JSONDecoder().decode(ShelleyGenesisNumbers.self, from: data)
+        } catch {
+            throw CardanoChainError.yaciDevkitError("Shelley genesis numbers are invalid: \(error)")
+        }
+        func require(_ value: Decimal?, _ key: String) throws -> Decimal {
+            guard let value else { throw CardanoChainError.yaciDevkitError("Shelley genesis is missing \(key)") }
             return value
         }
-        func requireDouble(_ key: String) throws -> Double {
-            guard let value = (json[key] as? NSNumber)?.doubleValue ?? (json[key] as? String).flatMap(Double.init)
-            else { throw CardanoChainError.yaciDevkitError("Shelley genesis is missing \(key)") }
-            return value
+        func requireInt<T: FixedWidthInteger>(_ value: Decimal?, _ key: String) throws -> T {
+            let value = try require(value, key)
+            guard let integer = T(exactly: NSDecimalNumber(decimal: value).uint64Value),
+                  Decimal(string: integer.description) == value else {
+                throw CardanoChainError.yaciDevkitError("Shelley genesis \(key) \(value) is not a whole \(T.self)")
+            }
+            return integer
         }
 
         guard let systemStartString = json["systemStart"] as? String else {
@@ -359,19 +370,63 @@ public actor YaciDevkitChainContext: ChainContext {
         }
 
         return GenesisParameters(
-            activeSlotsCoefficient: try requireDouble("activeSlotsCoeff"),
-            epochLength: try requireInt("epochLength"),
-            maxKesEvolutions: try requireInt("maxKESEvolutions"),
-            maxLovelaceSupply: try requireInt("maxLovelaceSupply"),
+            activeSlotsCoefficient: try LedgerValues.unitInterval(
+                try require(numbers.activeSlotsCoeff, "activeSlotsCoeff"), "Shelley genesis activeSlotsCoeff"),
+            epochLength: try requireInt(numbers.epochLength, "epochLength"),
+            maxKesEvolutions: try requireInt(numbers.maxKESEvolutions, "maxKESEvolutions"),
+            maxLovelaceSupply: try requireInt(numbers.maxLovelaceSupply, "maxLovelaceSupply"),
             networkId: (json["networkId"] as? String) ?? network.description,
-            networkMagic: try requireInt("networkMagic"),
-            securityParam: try requireInt("securityParam"),
-            slotLength: try requireInt("slotLength"),
-            slotsPerKesPeriod: try requireInt("slotsPerKESPeriod"),
+            networkMagic: try requireInt(numbers.networkMagic, "networkMagic"),
+            securityParam: try requireInt(numbers.securityParam, "securityParam"),
+            slotLength: try require(numbers.slotLength, "slotLength"),
+            slotsPerKesPeriod: try requireInt(numbers.slotsPerKESPeriod, "slotsPerKESPeriod"),
             systemStart: systemStart,
-            updateQuorum: try requireInt("updateQuorum"),
+            updateQuorum: try requireInt(numbers.updateQuorum, "updateQuorum"),
             era: .conway
         )
+    }
+
+    /// The numbers of a Shelley genesis file, each read exactly from its JSON
+    /// text (or from a string holding one).
+    private struct ShelleyGenesisNumbers: Decodable {
+        let activeSlotsCoeff: Decimal?
+        let epochLength: Decimal?
+        let maxKESEvolutions: Decimal?
+        let maxLovelaceSupply: Decimal?
+        let networkMagic: Decimal?
+        let securityParam: Decimal?
+        let slotLength: Decimal?
+        let slotsPerKESPeriod: Decimal?
+        let updateQuorum: Decimal?
+
+        private enum CodingKeys: String, CodingKey {
+            case activeSlotsCoeff, epochLength, maxKESEvolutions, maxLovelaceSupply, networkMagic,
+                 securityParam, slotLength, slotsPerKESPeriod, updateQuorum
+        }
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            func number(_ key: CodingKeys) throws -> Decimal? {
+                guard c.contains(key), try !c.decodeNil(forKey: key) else { return nil }
+                if let text = try? c.decode(String.self, forKey: key) {
+                    guard let value = Decimal(string: text, locale: Locale(identifier: "en_US_POSIX")) else {
+                        throw DecodingError.dataCorruptedError(
+                            forKey: key, in: c, debugDescription: "\(text) is not a number")
+                    }
+                    return value
+                }
+                return try c.decode(Decimal.self, forKey: key)
+            }
+            activeSlotsCoeff = try number(.activeSlotsCoeff)
+            epochLength = try number(.epochLength)
+            maxKESEvolutions = try number(.maxKESEvolutions)
+            maxLovelaceSupply = try number(.maxLovelaceSupply)
+            networkMagic = try number(.networkMagic)
+            securityParam = try number(.securityParam)
+            slotLength = try number(.slotLength)
+            slotsPerKESPeriod = try number(.slotsPerKESPeriod)
+            updateQuorum = try number(.updateQuorum)
+        }
     }
 
     static func parseISO8601(_ string: String) -> Date? {
@@ -476,11 +531,22 @@ public actor YaciDevkitChainContext: ChainContext {
             }
             return value
         }
-        func requireInt64(_ value: String?, _ name: String) throws -> Int64 {
-            guard let value, let parsed = Int64(value) else {
-                throw CardanoChainError.yaciDevkitError("Protocol parameters are missing \(name)")
-            }
-            return parsed
+        // Yaci's client reads each ratio as a Double; its shortest description
+        // is the decimal Yaci sent, read here exactly.
+        func unit(_ value: Double?, _ name: String) throws -> UnitInterval {
+            try LedgerValues.unitInterval(value ?? 0, "Yaci protocol parameter \(name)")
+        }
+        func nonNegative(_ value: Double?, _ name: String) throws -> NonNegativeInterval {
+            try LedgerValues.nonNegativeInterval(try require(value, name), "Yaci protocol parameter \(name)")
+        }
+        func int<T: FixedWidthInteger, S: BinaryInteger>(_ value: S?, _ name: String) throws -> T {
+            try LedgerValues.integer(try require(value, name), as: T.self, "Yaci protocol parameter \(name)")
+        }
+        func int<T: FixedWidthInteger>(_ value: Double?, _ name: String) throws -> T {
+            try LedgerValues.integer(try require(value, name), as: T.self, "Yaci protocol parameter \(name)")
+        }
+        func int<T: FixedWidthInteger>(_ text: String?, _ name: String) throws -> T {
+            try LedgerValues.integer(text: try require(text, name), as: T.self, "Yaci protocol parameter \(name)")
         }
 
         // Each language's costs arrive keyed by operation name; flattening in key order matches
@@ -501,69 +567,71 @@ public actor YaciDevkitChainContext: ChainContext {
         )
 
         return ProtocolParameters(
-            collateralPercentage: Int64(try require(params.collateralPercent, "collateral_percent")),
-            committeeMaxTermLength: Int64(params.committeeMaxTermLength ?? 0),
-            committeeMinSize: Int64(params.committeeMinSize ?? 0),
+            collateralPercentage: try int(params.collateralPercent, "collateral_percent"),
+            committeeMaxTermLength: try int(params.committeeMaxTermLength ?? 0, "committee_max_term_length"),
+            committeeMinSize: try int(params.committeeMinSize ?? 0, "committee_min_size"),
             costModels: costModels,
-            dRepActivity: Int64(params.drepActivity ?? 0),
-            dRepDeposit: Int64(params.drepDeposit ?? 0),
+            dRepActivity: try int(params.drepActivity ?? 0, "drep_activity"),
+            dRepDeposit: try int(params.drepDeposit ?? 0, "drep_deposit"),
             dRepVotingThresholds: DRepVotingThresholds(
-                committeeNoConfidence: params.dvtCommitteeNoConfidence ?? 0,
-                committeeNormal: params.dvtCommitteeNormal ?? 0,
-                hardForkInitiation: params.dvtHardForkInitiation ?? 0,
-                motionNoConfidence: params.dvtMotionNoConfidence ?? 0,
-                ppEconomicGroup: params.dvtPpeconomicGroup ?? 0,
-                ppGovGroup: params.dvtPpgovGroup ?? 0,
-                ppNetworkGroup: params.dvtPpnetworkGroup ?? 0,
-                ppTechnicalGroup: params.dvtPptechnicalGroup ?? 0,
-                treasuryWithdrawal: params.dvtTreasuryWithdrawal ?? 0,
-                updateToConstitution: params.dvtUpdateToConstitution ?? 0
+                committeeNoConfidence: try unit(params.dvtCommitteeNoConfidence, "dvt_committee_no_confidence"),
+                committeeNormal: try unit(params.dvtCommitteeNormal, "dvt_committee_normal"),
+                hardForkInitiation: try unit(params.dvtHardForkInitiation, "dvt_hard_fork_initiation"),
+                motionNoConfidence: try unit(params.dvtMotionNoConfidence, "dvt_motion_no_confidence"),
+                ppEconomicGroup: try unit(params.dvtPpeconomicGroup, "dvt_ppeconomic_group"),
+                ppGovGroup: try unit(params.dvtPpgovGroup, "dvt_ppgov_group"),
+                ppNetworkGroup: try unit(params.dvtPpnetworkGroup, "dvt_ppnetwork_group"),
+                ppTechnicalGroup: try unit(params.dvtPptechnicalGroup, "dvt_pptechnical_group"),
+                treasuryWithdrawal: try unit(params.dvtTreasuryWithdrawal, "dvt_treasury_withdrawal"),
+                updateToConstitution: try unit(params.dvtUpdateToConstitution, "dvt_update_to_constitution")
             ),
             executionUnitPrices: ExecutionUnitPrices(
-                priceMemory: try require(params.priceMem, "price_mem"),
-                priceSteps: try require(params.priceStep, "price_step")
+                priceMemory: try nonNegative(params.priceMem, "price_mem"),
+                priceSteps: try nonNegative(params.priceStep, "price_step")
             ),
-            govActionDeposit: Int64(params.govActionDeposit ?? 0),
-            govActionLifetime: Int64(params.govActionLifetime ?? 0),
-            maxBlockBodySize: Int64(try require(params.maxBlockSize, "max_block_size")),
+            govActionDeposit: try int(params.govActionDeposit ?? 0, "gov_action_deposit"),
+            govActionLifetime: try int(params.govActionLifetime ?? 0, "gov_action_lifetime"),
+            maxBlockBodySize: try int(params.maxBlockSize, "max_block_size"),
             maxBlockExecutionUnits: ProtocolParametersExecutionUnits(
-                memory: try requireInt64(params.maxBlockExMem, "max_block_ex_mem"),
-                steps: try requireInt64(params.maxBlockExSteps, "max_block_ex_steps")
+                memory: try int(params.maxBlockExMem, "max_block_ex_mem"),
+                steps: try int(params.maxBlockExSteps, "max_block_ex_steps")
             ),
-            maxBlockHeaderSize: Int64(try require(params.maxBlockHeaderSize, "max_block_header_size")),
-            maxCollateralInputs: Int64(try require(params.maxCollateralInputs, "max_collateral_inputs")),
+            maxBlockHeaderSize: try int(params.maxBlockHeaderSize, "max_block_header_size"),
+            maxCollateralInputs: try int(params.maxCollateralInputs, "max_collateral_inputs"),
             maxTxExecutionUnits: ProtocolParametersExecutionUnits(
-                memory: try requireInt64(params.maxTxExMem, "max_tx_ex_mem"),
-                steps: try requireInt64(params.maxTxExSteps, "max_tx_ex_steps")
+                memory: try int(params.maxTxExMem, "max_tx_ex_mem"),
+                steps: try int(params.maxTxExSteps, "max_tx_ex_steps")
             ),
-            maxTxSize: Int64(try require(params.maxTxSize, "max_tx_size")),
-            maxValueSize: try requireInt64(params.maxValSize, "max_val_size"),
-            minFeeRefScriptCostPerByte: params.minFeeRefScriptCostPerByte.map { Int64($0) },
-            minPoolCost: try requireInt64(params.minPoolCost, "min_pool_cost"),
-            monetaryExpansion: try require(params.rho, "rho"),
-            poolPledgeInfluence: try require(params.a0, "a0"),
-            poolRetireMaxEpoch: Int64(try require(params.eMax, "e_max")),
+            maxTxSize: try int(params.maxTxSize, "max_tx_size"),
+            maxValueSize: try int(params.maxValSize, "max_val_size"),
+            minFeeRefScriptCostPerByte: try params.minFeeRefScriptCostPerByte.map {
+                try LedgerValues.nonNegativeInterval($0, "Yaci protocol parameter min_fee_ref_script_cost_per_byte")
+            },
+            minPoolCost: try int(params.minPoolCost, "min_pool_cost"),
+            monetaryExpansion: try unit(try require(params.rho, "rho"), "rho"),
+            poolPledgeInfluence: try nonNegative(params.a0, "a0"),
+            poolRetireMaxEpoch: try int(params.eMax, "e_max"),
             poolVotingThresholds: ProtocolParametersPoolVotingThresholds(
-                committeeNoConfidence: params.pvtCommitteeNoConfidence ?? 0,
-                committeeNormal: params.pvtCommitteeNormal ?? 0,
-                hardForkInitiation: params.pvtHardForkInitiation ?? 0,
-                motionNoConfidence: params.pvtMotionNoConfidence ?? 0,
+                committeeNoConfidence: try unit(params.pvtCommitteeNoConfidence, "pvt_committee_no_confidence"),
+                committeeNormal: try unit(params.pvtCommitteeNormal, "pvt_committee_normal"),
+                hardForkInitiation: try unit(params.pvtHardForkInitiation, "pvt_hard_fork_initiation"),
+                motionNoConfidence: try unit(params.pvtMotionNoConfidence, "pvt_motion_no_confidence"),
                 // Yaci Store spells this parameter two ways across releases.
-                ppSecurityGroup: params.pvtppSecurityGroup ?? params.pvtPPSecurityGroup ?? 0
+                ppSecurityGroup: try unit(params.pvtppSecurityGroup ?? params.pvtPPSecurityGroup, "pvt_pp_security_group")
             ),
             protocolVersion: ProtocolParametersProtocolVersion(
-                major: Int(try require(params.protocolMajorVer, "protocol_major_ver")),
-                minor: Int(params.protocolMinorVer ?? 0)
+                major: try int(params.protocolMajorVer, "protocol_major_ver"),
+                minor: try int(params.protocolMinorVer ?? 0, "protocol_minor_ver")
             ),
-            stakeAddressDeposit: try requireInt64(params.keyDeposit, "key_deposit"),
-            stakePoolDeposit: try requireInt64(params.poolDeposit, "pool_deposit"),
-            stakePoolTargetNum: Int64(try require(params.nOpt, "n_opt")),
-            treasuryCut: try require(params.tau, "tau"),
-            txFeeFixed: Int64(try require(params.minFeeB, "min_fee_b")),
-            txFeePerByte: Int64(try require(params.minFeeA, "min_fee_a")),
+            stakeAddressDeposit: try int(params.keyDeposit, "key_deposit"),
+            stakePoolDeposit: try int(params.poolDeposit, "pool_deposit"),
+            stakePoolTargetNum: try int(params.nOpt, "n_opt"),
+            treasuryCut: try unit(try require(params.tau, "tau"), "tau"),
+            txFeeFixed: try int(params.minFeeB, "min_fee_b"),
+            txFeePerByte: try int(params.minFeeA, "min_fee_a"),
             // Babbage and later report the cost per byte; Yaci's Alonzo-era `coins_per_utxo_word`
             // is deprecated and a DevKit devnet is Conway, so only the byte form is read.
-            utxoCostPerByte: try requireInt64(params.coinsPerUtxoSize, "coins_per_utxo_size")
+            utxoCostPerByte: try int(params.coinsPerUtxoSize, "coins_per_utxo_size")
         )
     }
 
@@ -582,10 +650,12 @@ public actor YaciDevkitChainContext: ChainContext {
             guard let txHash = row.txHash, let outputIndex = row.outputIndex else { continue }
             let input = TransactionInput(
                 transactionId: try TransactionId(from: .string(txHash)),
-                index: UInt16(outputIndex)
+                index: try LedgerValues.integer(outputIndex, "Yaci output index")
             )
-            let units: [(unit: String, quantity: Int64)] = (row.amount ?? []).compactMap { item in
-                guard let quantity = item.quantity.flatMap({ Int64($0) }) else { return nil }
+            let units: [(unit: String, quantity: BigInt)] = try (row.amount ?? []).compactMap { item in
+                guard let quantity = try item.quantity.map({
+                    try LedgerValues.bigInt(text: $0, "Yaci quantity")
+                }) else { return nil }
                 if let unit = item.unit, !unit.isEmpty { return (unit, quantity) }
                 guard let policy = item.policyId else { return nil }
                 return (policy + (item.assetName ?? ""), quantity)
@@ -633,15 +703,17 @@ public actor YaciDevkitChainContext: ChainContext {
 
         guard let address = row.ownerAddr, !address.isEmpty else { return nil }
 
-        let units: [(unit: String, quantity: Int64)] = (row.amounts ?? []).compactMap { item in
-            guard let quantity = item.quantity.map({ Int64($0) }) else { return nil }
+        // Yaci's client reads these quantities as Int, so one above Int.max
+        // cannot arrive here.
+        let units: [(unit: String, quantity: BigInt)] = (row.amounts ?? []).compactMap { item in
+            guard let quantity = item.quantity.map({ BigInt($0) }) else { return nil }
             if let unit = item.unit, !unit.isEmpty { return (unit, quantity) }
             guard let policy = item.policyId else { return nil }
             return (policy + (item.assetName ?? ""), quantity)
         }
         let txOut = try await makeOutput(
             address: address,
-            lovelace: row.lovelaceAmount.map { Int64($0) },
+            lovelace: row.lovelaceAmount.map { BigInt($0) },
             units: units,
             dataHash: row.dataHash,
             inlineDatum: row.inlineDatum,
@@ -658,13 +730,13 @@ public actor YaciDevkitChainContext: ChainContext {
     /// Build a `TransactionOutput` from Yaci's flattened representation.
     private func makeOutput(
         address: String,
-        lovelace: Int64?,
-        units: [(unit: String, quantity: Int64)],
+        lovelace: BigInt?,
+        units: [(unit: String, quantity: BigInt)],
         dataHash: String?,
         inlineDatum: String?,
         referenceScriptHash: String?
     ) async throws -> TransactionOutput {
-        var coin = lovelace ?? 0
+        var coin: BigInt = lovelace ?? 0
         var multiAsset = MultiAsset([:])
         for (unit, quantity) in units {
             if unit == "lovelace" {
@@ -1107,9 +1179,17 @@ public actor YaciDevkitChainContext: ChainContext {
             result[id] = PoolParams(
                 poolOperator: PoolKeyHash(payload: idData),
                 vrfKeyHash: VrfKeyHash(payload: Data(hex: (pool["vrf"] as? String) ?? "")),
-                pledge: (pool["pledge"] as? NSNumber)?.intValue ?? 0,
-                cost: (pool["cost"] as? NSNumber)?.intValue ?? 0,
-                margin: makeUnitInterval((pool["margin"] as? NSNumber)?.doubleValue ?? 0),
+                pledge: try (pool["pledge"] as? NSNumber).map {
+                    try LedgerValues.integer(text: $0.stringValue, "Yaci genesis pool pledge")
+                } ?? 0,
+                cost: try (pool["cost"] as? NSNumber).map {
+                    try LedgerValues.integer(text: $0.stringValue, "Yaci genesis pool cost")
+                } ?? 0,
+                // JSONSerialization reads the margin as a Double; its shortest
+                // description is the decimal in the genesis file.
+                margin: try (pool["margin"] as? NSNumber).map {
+                    try LedgerValues.unitInterval($0.doubleValue, "Yaci genesis pool margin")
+                } ?? UnitInterval(numerator: 0, denominator: 1),
                 rewardAccount: Self.genesisRewardAccount(pool["rewardAccount"]),
                 poolOwners: .list(owners),
                 relays: ((pool["relays"] as? [Any]) ?? []).compactMap { Self.genesisRelay($0) },
@@ -1153,10 +1233,11 @@ public actor YaciDevkitChainContext: ChainContext {
             return .singleHostAddr(SingleHostAddr(port: port, ipv4: ipv4, ipv6: ipv6))
         case "singlehostname":
             guard let dns = (fields["dnsName"] ?? fields["hostname"]) as? String else { return nil }
-            return .singleHostName(SingleHostName(port: port, dnsName: dns))
+            // A name the ledger would refuse is dropped, like any other unrecognised entry.
+            return (try? SingleHostName(port: port, dnsName: dns)).map { .singleHostName($0) }
         case "multihostname":
             guard let dns = (fields["dnsName"] ?? fields["hostname"]) as? String else { return nil }
-            return .multiHostName(MultiHostName(dnsName: dns))
+            return (try? MultiHostName(dnsName: dns)).map { .multiHostName($0) }
         default:
             return nil
         }
@@ -1314,10 +1395,11 @@ public actor YaciDevkitChainContext: ChainContext {
             return .singleHostAddr(SingleHostAddr(port: port, ipv4: ipv4, ipv6: ipv6))
         }
         guard let dns = relay.dnsName, !dns.isEmpty else { return nil }
+        // A name the ledger would refuse (too long) is dropped, like a relay with no fields.
         if let port {
-            return .singleHostName(SingleHostName(port: port, dnsName: dns))
+            return (try? SingleHostName(port: port, dnsName: dns)).map { .singleHostName($0) }
         }
-        return .multiHostName(MultiHostName(dnsName: dns))
+        return (try? MultiHostName(dnsName: dns)).map { .multiHostName($0) }
     }
 
     /// Map one registered pool owner onto its staking key hash.
@@ -1380,16 +1462,18 @@ public actor YaciDevkitChainContext: ChainContext {
         if let numerator = registration.marginNumerator, let denominator = registration.marginDenominator,
             denominator > 0, numerator >= 0
         {
-            margin = UnitInterval(numerator: UInt64(numerator), denominator: UInt64(denominator))
+            let (n, d) = (try LedgerValues.integer(numerator, as: UInt64.self, "Yaci pool margin numerator"),
+                          try LedgerValues.integer(denominator, as: UInt64.self, "Yaci pool margin denominator"))
+            margin = try LedgerValues.unitInterval(text: "\(n)/\(d)", "Yaci pool margin")
         } else {
-            margin = makeUnitInterval(registration.margin ?? 0)
+            margin = try LedgerValues.unitInterval(registration.margin ?? 0, "Yaci pool margin")
         }
 
         return PoolParams(
             poolOperator: PoolKeyHash(payload: Data(hex: registration.poolId ?? "")),
             vrfKeyHash: VrfKeyHash(payload: Data(hex: registration.vrfKeyHash ?? "")),
-            pledge: registration.pledge ?? 0,
-            cost: registration.cost ?? 0,
+            pledge: try LedgerValues.integer(registration.pledge ?? 0, "Yaci pool pledge"),
+            cost: try LedgerValues.integer(registration.cost ?? 0, "Yaci pool cost"),
             margin: margin,
             rewardAccount: try rewardAccount(
                 bech32: registration.rewardAccount, hex: registration.rewardAccount
@@ -1408,9 +1492,10 @@ public actor YaciDevkitChainContext: ChainContext {
         return PoolParams(
             poolOperator: PoolKeyHash(payload: Data(hex: details.poolHash ?? "")),
             vrfKeyHash: VrfKeyHash(payload: Data(hex: details.vrfKeyHash ?? "")),
-            pledge: details.pledge.flatMap { Int($0) } ?? 0,
-            cost: details.cost.flatMap { Int($0) } ?? 0,
-            margin: makeUnitInterval(details.margin.flatMap { Double($0) } ?? 0),
+            pledge: try LedgerValues.integer(text: details.pledge ?? "0", "Yaci pool pledge"),
+            cost: try LedgerValues.integer(text: details.cost ?? "0", "Yaci pool cost"),
+            // Yaci sends this margin as decimal text, read here exactly.
+            margin: try LedgerValues.unitInterval(text: details.margin ?? "0", "Yaci pool margin"),
             rewardAccount: try rewardAccount(bech32: details.rewardAccount, hex: details.rewardAccount),
             poolOwners: .list(try (details.poolOwners ?? []).map { try poolOwner($0) }),
             relays: (details.relays ?? []).compactMap { relay(from: $0) },
@@ -2004,16 +2089,7 @@ public actor YaciDevkitChainContext: ChainContext {
 
     /// Parse a threshold that may arrive as `{numerator, denominator}`, a decimal, or a string.
     static func unitInterval(_ any: Any?) -> UnitInterval? {
-        if let dict = any as? [String: Any],
-            let numerator = (dict["numerator"] as? NSNumber)?.int64Value,
-            let denominator = (dict["denominator"] as? NSNumber)?.int64Value,
-            denominator > 0, numerator >= 0
-        {
-            return UnitInterval(numerator: UInt64(numerator), denominator: UInt64(denominator))
-        }
-        let value = (any as? NSNumber)?.doubleValue ?? (any as? String).flatMap(Double.init)
-        guard let value, value >= 0, value <= 1 else { return nil }
-        return makeUnitInterval(value)
+        try? LedgerValues.unitInterval(json: any, "Yaci threshold")
     }
 
     // MARK: - Constitutional committee

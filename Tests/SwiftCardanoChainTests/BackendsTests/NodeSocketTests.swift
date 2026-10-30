@@ -116,14 +116,15 @@ struct NodeSocketChainContextTests {
             genesis, network: .preview)
 
         #expect(params.activeSlotsCoefficient == genesis.activeSlotsCoeff)
-        #expect(params.epochLength == Int(genesis.epochLength))
-        #expect(params.maxKesEvolutions == Int(genesis.maxKESEvolutions))
-        #expect(params.maxLovelaceSupply == Int(genesis.maxLovelaceSupply))
+        #expect(params.activeSlotsCoefficient == unit(1, 20))
+        #expect(params.epochLength == genesis.epochLength)
+        #expect(params.maxKesEvolutions == genesis.maxKESEvolutions)
+        #expect(params.maxLovelaceSupply == genesis.maxLovelaceSupply)
         #expect(params.networkId == genesis.networkId)
-        #expect(params.networkMagic == Int(genesis.networkMagic))
-        #expect(params.slotLength == Int(genesis.slotLength))
-        #expect(params.securityParam == Int(genesis.securityParam))
-        #expect(params.slotsPerKesPeriod == Int(genesis.slotsPerKESPeriod))
+        #expect(params.networkMagic == genesis.networkMagic)
+        #expect(params.slotLength == genesis.slotLength)
+        #expect(params.securityParam == genesis.securityParam)
+        #expect(params.slotsPerKesPeriod == genesis.slotsPerKESPeriod)
         #expect(
             params.systemStart
                 == ISO8601DateFormatter().date(from: genesis.systemStart))

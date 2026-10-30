@@ -294,7 +294,7 @@ public actor NodeSocketChainContext: ChainContext {
         let (slotInEpoch, slotsToEpochEnd) = Self.epochSlotPosition(
             absoluteSlot: slotInt,
             network: network,
-            shelleyEpochLength: epochLength
+            shelleyEpochLength: epochLength.flatMap { Int(exactly: $0) }
         )
 
         let syncProgress = Self.syncProgressString(
@@ -790,14 +790,14 @@ public actor NodeSocketChainContext: ChainContext {
 
         return GenesisParameters(
             activeSlotsCoefficient: genesis.activeSlotsCoeff,
-            epochLength: Int(genesis.epochLength),
-            maxKesEvolutions: Int(genesis.maxKESEvolutions),
-            maxLovelaceSupply: Int(genesis.maxLovelaceSupply),
+            epochLength: genesis.epochLength,
+            maxKesEvolutions: genesis.maxKESEvolutions,
+            maxLovelaceSupply: genesis.maxLovelaceSupply,
             networkId: genesis.networkId,
-            networkMagic: Int(genesis.networkMagic),
-            securityParam: Int(genesis.securityParam),
-            slotLength: Int(genesis.slotLength),
-            slotsPerKesPeriod: Int(genesis.slotsPerKESPeriod),
+            networkMagic: genesis.networkMagic,
+            securityParam: genesis.securityParam,
+            slotLength: genesis.slotLength,
+            slotsPerKesPeriod: genesis.slotsPerKESPeriod,
             systemStart: systemStartDate,
             updateQuorum: genesis.updateQuorum
         )
@@ -871,12 +871,14 @@ public actor NodeSocketChainContext: ChainContext {
         absoluteSlot: Int,
         network: Network,
         systemStart: Date?,
-        shelleySlotLengthSeconds: Int?
+        shelleySlotLengthSeconds: Decimal?
     ) -> String? {
         guard let systemStart,
               let shelleySlotLengthSeconds,
               shelleySlotLengthSeconds > 0
         else { return nil }
+        // A percentage to two places, so a Double is precise enough here.
+        let slotSeconds = NSDecimalNumber(decimal: shelleySlotLengthSeconds).doubleValue
 
         let byronTotalSlots = byronTransitionEpoch(for: network) * byronEpochLength
         let tipSecondsSinceStart: Double
@@ -884,7 +886,7 @@ public actor NodeSocketChainContext: ChainContext {
             tipSecondsSinceStart = Double(absoluteSlot * byronSlotLengthSeconds)
         } else {
             let byronSeconds = Double(byronTotalSlots * byronSlotLengthSeconds)
-            let shelleySeconds = Double((absoluteSlot - byronTotalSlots) * shelleySlotLengthSeconds)
+            let shelleySeconds = Double(absoluteSlot - byronTotalSlots) * slotSeconds
             tipSecondsSinceStart = byronSeconds + shelleySeconds
         }
 

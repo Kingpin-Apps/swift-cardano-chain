@@ -48,6 +48,7 @@ let package = Package(
         // Direct dep (was transitive via SwiftCardanoUtils, now trait-gated out): OfflineTransfer
         // uses FilePath. Apple package, iOS-safe.
         .package(url: "https://github.com/apple/swift-system.git", from: "1.8.1"),
+        .package(url: "https://github.com/attaswift/BigInt.git", "5.7.0"..<"7.0.0"),
     ],
     targets: [
         .target(
@@ -67,6 +68,7 @@ let package = Package(
                 .product(name: "SwiftCardanoNetwork", package: "swift-cardano-network"),
                 .product(name: "SwiftCardanoUPLC", package: "swift-cardano-uplc"),
                 .product(name: "SystemPackage", package: "swift-system"),
+                "BigInt",
             ],
             swiftSettings: [
                 .define("CLIBACKENDS", .when(traits: ["CLIBackends"])),

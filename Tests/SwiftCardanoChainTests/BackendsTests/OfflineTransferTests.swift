@@ -30,13 +30,13 @@ private func makeMinimalProtocolParameters() -> ProtocolParameters {
         dRepActivity: 20,
         dRepDeposit: 500_000_000,
         dRepVotingThresholds: DRepVotingThresholds(
-            committeeNoConfidence: 0.67, committeeNormal: 0.67,
-            hardForkInitiation: 0.6, motionNoConfidence: 0.6,
-            ppEconomicGroup: 0.67, ppGovGroup: 0.75,
-            ppNetworkGroup: 0.67, ppTechnicalGroup: 0.67,
-            treasuryWithdrawal: 0.67, updateToConstitution: 0.75
+            committeeNoConfidence: unit(67, 100), committeeNormal: unit(67, 100),
+            hardForkInitiation: unit(3, 5), motionNoConfidence: unit(3, 5),
+            ppEconomicGroup: unit(67, 100), ppGovGroup: unit(3, 4),
+            ppNetworkGroup: unit(67, 100), ppTechnicalGroup: unit(67, 100),
+            treasuryWithdrawal: unit(67, 100), updateToConstitution: unit(3, 4)
         ),
-        executionUnitPrices: ExecutionUnitPrices(priceMemory: 0.0577, priceSteps: 0.0000721),
+        executionUnitPrices: ExecutionUnitPrices(priceMemory: nonNegative(577, 10_000), priceSteps: nonNegative(721, 10_000_000)),
         govActionDeposit: 100_000_000_000,
         govActionLifetime: 6,
         maxBlockBodySize: 90112,
@@ -49,19 +49,19 @@ private func makeMinimalProtocolParameters() -> ProtocolParameters {
         maxTxSize: 16384,
         maxValueSize: 5000,
         minPoolCost: 170_000_000,
-        monetaryExpansion: 0.003,
-        poolPledgeInfluence: 0.3,
+        monetaryExpansion: unit(3, 1000),
+        poolPledgeInfluence: nonNegative(3, 10),
         poolRetireMaxEpoch: 18,
         poolVotingThresholds: ProtocolParametersPoolVotingThresholds(
-            committeeNoConfidence: 0.51, committeeNormal: 0.51,
-            hardForkInitiation: 0.51, motionNoConfidence: 0.51,
-            ppSecurityGroup: 0.51
+            committeeNoConfidence: unit(51, 100), committeeNormal: unit(51, 100),
+            hardForkInitiation: unit(51, 100), motionNoConfidence: unit(51, 100),
+            ppSecurityGroup: unit(51, 100)
         ),
         protocolVersion: ProtocolParametersProtocolVersion(major: 9, minor: 0),
         stakeAddressDeposit: 2_000_000,
         stakePoolDeposit: 500_000_000,
         stakePoolTargetNum: 500,
-        treasuryCut: 0.2,
+        treasuryCut: unit(1, 5),
         txFeeFixed: 155_381,
         txFeePerByte: 44,
         utxoCostPerByte: 4310
@@ -70,7 +70,7 @@ private func makeMinimalProtocolParameters() -> ProtocolParameters {
 
 private func makeMinimalGenesisParameters() -> GenesisParameters {
     GenesisParameters(
-        activeSlotsCoefficient: 0.05,
+        activeSlotsCoefficient: unit(1, 20),
         epochLength: 432_000,
         maxKesEvolutions: 62,
         maxLovelaceSupply: 45_000_000_000_000_000,
@@ -205,7 +205,7 @@ struct OfflineTransferChainContextTests {
         let genesis = try await context.genesisParameters()
         #expect(genesis.epochLength == 432_000)
         #expect(genesis.slotLength == 1)
-        #expect(genesis.activeSlotsCoefficient == 0.05)
+        #expect(genesis.activeSlotsCoefficient == unit(1, 20))
         #expect(genesis.networkMagic == 2)
         #expect(genesis.systemStart == Date(timeIntervalSince1970: 1_506_203_091))
     }
@@ -764,5 +764,65 @@ struct OfflineTransferChainContextTests {
         #expect(FileManager.default.fileExists(atPath: path.string))
         #expect(transfer.history.count == 1)
         #expect(transfer.history[0].action == .new)
+    }
+}
+
+// MARK: - Epoch and slot from the clock
+
+@Suite("OfflineTransfer reads the epoch and slot from the clock")
+struct OfflineTransferChainPositionTests {
+    /// Mainnet's Shelley hard fork: slot 4,492,800, epoch 208, began at this time.
+    let shelleyStart = Date(timeIntervalSince1970: 1_596_059_091)
+    let mainnetStart = Date(timeIntervalSince1970: 1_506_203_091)
+
+    func position(_ date: Date, _ network: Network, start: Date, epochLength: UInt64 = 432_000,
+                  slotLength: Decimal = 1) throws -> (epoch: Int, slot: Int) {
+        try OfflineTransferChainContext.chainPosition(
+            at: date, network: network, systemStart: start, epochLength: epochLength, slotLength: slotLength)
+    }
+
+    @Test("Mainnet's first Shelley slot")
+    func mainnetShelleyStart() throws {
+        let p = try position(shelleyStart, .mainnet, start: mainnetStart)
+        #expect(p.slot == 4_492_800)
+        #expect(p.epoch == 208)
+    }
+
+    @Test("Mainnet's last Byron slot is twenty seconds earlier")
+    func mainnetLastByronSlot() throws {
+        let p = try position(shelleyStart.addingTimeInterval(-20), .mainnet, start: mainnetStart)
+        #expect(p.slot == 4_492_799)
+        #expect(p.epoch == 207)
+    }
+
+    @Test("Mainnet, one Shelley epoch on")
+    func mainnetOneEpochOn() throws {
+        let p = try position(shelleyStart.addingTimeInterval(432_000 + 5), .mainnet, start: mainnetStart)
+        #expect(p.slot == 4_492_800 + 432_005)
+        #expect(p.epoch == 209)
+    }
+
+    @Test("Preview has had one-second slots throughout")
+    func preview() throws {
+        let start = Date(timeIntervalSince1970: 1_666_656_000)
+        let p = try position(start.addingTimeInterval(3 * 86_400 + 7), .preview, start: start, epochLength: 86_400)
+        #expect(p.slot == 259_207)
+        #expect(p.epoch == 3)
+    }
+
+    @Test("Another network is read from its genesis, with sub-second slots")
+    func customNetwork() throws {
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        let p = try position(start.addingTimeInterval(12.35), .custom(42), start: start,
+                             epochLength: 100, slotLength: Decimal(string: "0.1")!)
+        #expect(p.slot == 123)
+        #expect(p.epoch == 1)
+    }
+
+    @Test("A slot length that is not a whole number of milliseconds is refused")
+    func badSlotLength() throws {
+        #expect(throws: CardanoChainError.self) {
+            try position(Date(), .custom(42), start: Date(), slotLength: Decimal(string: "0.0001")!)
+        }
     }
 }

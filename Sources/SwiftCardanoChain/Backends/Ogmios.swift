@@ -1,3 +1,4 @@
+import BigInt
 import Foundation
 import SwiftCardanoCore
 import SwiftCardanoNetwork
@@ -163,8 +164,9 @@ public actor OgmiosChainContext: ChainContext {
 
         switch response {
         case .shelley(let genesis):
-            // Parse activeSlotsCoefficient string (e.g., "1/20") to Double
-            let activeSlots = self.parseRatioString(genesis.activeSlotsCoefficient) ?? 0.05
+            // Ogmios sends the active slot coefficient as a fraction, e.g. "1/20".
+            let activeSlots = try LedgerValues.unitInterval(
+                text: genesis.activeSlotsCoefficient, "Ogmios genesis activeSlotsCoefficient")
 
             // Parse startTime string to Date
             let formatter = ISO8601DateFormatter()
@@ -172,16 +174,17 @@ public actor OgmiosChainContext: ChainContext {
 
             return GenesisParameters(
                 activeSlotsCoefficient: activeSlots,
-                epochLength: Int(genesis.epochLength),
-                maxKesEvolutions: Int(genesis.maxKesEvolutions),
-                maxLovelaceSupply: Int(genesis.maxLovelaceSupply),
+                epochLength: genesis.epochLength,
+                maxKesEvolutions: genesis.maxKesEvolutions,
+                maxLovelaceSupply: genesis.maxLovelaceSupply,
                 networkId: self._network.description,
-                networkMagic: Int(genesis.networkMagic),
-                securityParam: Int(genesis.securityParameter),
-                slotLength: Int(genesis.slotLength.milliseconds / 1000),
-                slotsPerKesPeriod: Int(genesis.slotsPerKesPeriod),
+                networkMagic: genesis.networkMagic,
+                securityParam: genesis.securityParameter,
+                // Seconds, exactly: a 200 ms slot is 0.2, not 0.
+                slotLength: Decimal(genesis.slotLength.milliseconds) / 1000,
+                slotsPerKesPeriod: genesis.slotsPerKesPeriod,
                 systemStart: systemStartDate,
-                updateQuorum: Int(genesis.updateQuorum)
+                updateQuorum: genesis.updateQuorum
             )
         default:
             throw CardanoChainError.operationError("Unexpected genesis configuration era")
@@ -622,11 +625,14 @@ public actor OgmiosChainContext: ChainContext {
     private func convertUtxoEntry(_ entry: SwiftOgmios.UtxoEntry) throws -> SwiftCardanoCore.UTxO {
         let txIn = TransactionInput(
             transactionId: try TransactionId(from: .string(entry.transaction.id)),
-            index: UInt16(entry.index)
+            index: try LedgerValues.integer(entry.index, "Ogmios output index")
         )
 
         // Convert value
         let lovelaceAmount = entry.value.ada.lovelace
+        guard lovelaceAmount >= 0 else {
+            throw CardanoChainError.valueError("Ogmios output lovelace \(lovelaceAmount) is negative")
+        }
         var multiAssets = MultiAsset([:])
 
         if let assets = entry.value.assets {
@@ -636,7 +642,7 @@ public actor OgmiosChainContext: ChainContext {
 
                 for (assetNameHex, quantity) in assetMap {
                     let assetName = try AssetName(payload: Data(hex: assetNameHex))
-                    asset[assetName] = Int64(quantity)
+                    asset[assetName] = BigInt(quantity)
                 }
 
                 multiAssets[policyId] = asset
@@ -644,7 +650,7 @@ public actor OgmiosChainContext: ChainContext {
         }
 
         let amount = Value(
-            coin: Int64(lovelaceAmount),
+            coin: BigInt(lovelaceAmount),
             multiAsset: multiAssets
         )
 
@@ -720,38 +726,57 @@ public actor OgmiosChainContext: ChainContext {
             costModels = ProtocolParametersCostModels(PlutusV1: [], PlutusV2: [], PlutusV3: [])
         }
 
+        let zeroUnit = UnitInterval(numerator: 0, denominator: 1)
+        let zeroNonNegative = NonNegativeInterval(numerator: 0, denominator: 1)
+
         // Convert execution unit prices - provide default values
         let executionPrices: ExecutionUnitPrices
         if let prices = params.scriptExecutionPrices {
             executionPrices = ExecutionUnitPrices(
-                priceMemory: parseRatio(prices.memory) ?? 0,
-                priceSteps: parseRatio(prices.cpu) ?? 0
+                priceMemory: try nonNegativeInterval(prices.memory, "scriptExecutionPrices.memory"),
+                priceSteps: try nonNegativeInterval(prices.cpu, "scriptExecutionPrices.cpu")
             )
         } else {
-            executionPrices = ExecutionUnitPrices(priceMemory: 0, priceSteps: 0)
+            executionPrices = ExecutionUnitPrices(priceMemory: zeroNonNegative, priceSteps: zeroNonNegative)
         }
 
         // Convert DRep voting thresholds - provide default values
         let dRepVotingThresholds: DRepVotingThresholds
         if let thresholds = params.delegateRepresentativeVotingThresholds {
             dRepVotingThresholds = DRepVotingThresholds(
-                committeeNoConfidence: parseRatio(thresholds.noConfidence) ?? 0,
-                committeeNormal: parseRatio(thresholds.constitutionalCommittee.default) ?? 0,
-                hardForkInitiation: parseRatio(thresholds.hardForkInitiation) ?? 0,
-                motionNoConfidence: parseRatio(thresholds.noConfidence) ?? 0,
-                ppEconomicGroup: parseRatio(thresholds.protocolParametersUpdate.economic) ?? 0,
-                ppGovGroup: parseRatio(thresholds.protocolParametersUpdate.governance) ?? 0,
-                ppNetworkGroup: parseRatio(thresholds.protocolParametersUpdate.network) ?? 0,
-                ppTechnicalGroup: parseRatio(thresholds.protocolParametersUpdate.technical) ?? 0,
-                treasuryWithdrawal: parseRatio(thresholds.treasuryWithdrawals) ?? 0,
-                updateToConstitution: parseRatio(thresholds.constitution) ?? 0
+                committeeNoConfidence: try unitInterval(
+                    thresholds.constitutionalCommittee.stateOfNoConfidence,
+                    "delegateRepresentativeVotingThresholds.constitutionalCommittee.stateOfNoConfidence"),
+                committeeNormal: try unitInterval(
+                    thresholds.constitutionalCommittee.default,
+                    "delegateRepresentativeVotingThresholds.constitutionalCommittee.default"),
+                hardForkInitiation: try unitInterval(
+                    thresholds.hardForkInitiation, "delegateRepresentativeVotingThresholds.hardForkInitiation"),
+                motionNoConfidence: try unitInterval(
+                    thresholds.noConfidence, "delegateRepresentativeVotingThresholds.noConfidence"),
+                ppEconomicGroup: try unitInterval(
+                    thresholds.protocolParametersUpdate.economic,
+                    "delegateRepresentativeVotingThresholds.protocolParametersUpdate.economic"),
+                ppGovGroup: try unitInterval(
+                    thresholds.protocolParametersUpdate.governance,
+                    "delegateRepresentativeVotingThresholds.protocolParametersUpdate.governance"),
+                ppNetworkGroup: try unitInterval(
+                    thresholds.protocolParametersUpdate.network,
+                    "delegateRepresentativeVotingThresholds.protocolParametersUpdate.network"),
+                ppTechnicalGroup: try unitInterval(
+                    thresholds.protocolParametersUpdate.technical,
+                    "delegateRepresentativeVotingThresholds.protocolParametersUpdate.technical"),
+                treasuryWithdrawal: try unitInterval(
+                    thresholds.treasuryWithdrawals, "delegateRepresentativeVotingThresholds.treasuryWithdrawals"),
+                updateToConstitution: try unitInterval(
+                    thresholds.constitution, "delegateRepresentativeVotingThresholds.constitution")
             )
         } else {
             dRepVotingThresholds = DRepVotingThresholds(
-                committeeNoConfidence: 0, committeeNormal: 0, hardForkInitiation: 0,
-                motionNoConfidence: 0, ppEconomicGroup: 0, ppGovGroup: 0,
-                ppNetworkGroup: 0, ppTechnicalGroup: 0, treasuryWithdrawal: 0,
-                updateToConstitution: 0
+                committeeNoConfidence: zeroUnit, committeeNormal: zeroUnit, hardForkInitiation: zeroUnit,
+                motionNoConfidence: zeroUnit, ppEconomicGroup: zeroUnit, ppGovGroup: zeroUnit,
+                ppNetworkGroup: zeroUnit, ppTechnicalGroup: zeroUnit, treasuryWithdrawal: zeroUnit,
+                updateToConstitution: zeroUnit
             )
         }
 
@@ -759,104 +784,113 @@ public actor OgmiosChainContext: ChainContext {
         let poolVotingThresholds: ProtocolParametersPoolVotingThresholds
         if let thresholds = params.stakePoolVotingThresholds {
             poolVotingThresholds = ProtocolParametersPoolVotingThresholds(
-                committeeNoConfidence: parseRatio(thresholds.noConfidence) ?? 0,
-                committeeNormal: parseRatio(thresholds.constitutionalCommittee.default) ?? 0,
-                hardForkInitiation: parseRatio(thresholds.hardForkInitiation) ?? 0,
-                motionNoConfidence: parseRatio(thresholds.noConfidence) ?? 0,
-                ppSecurityGroup: parseRatio(thresholds.protocolParametersUpdate.security) ?? 0
+                committeeNoConfidence: try unitInterval(
+                    thresholds.constitutionalCommittee.stateOfNoConfidence,
+                    "stakePoolVotingThresholds.constitutionalCommittee.stateOfNoConfidence"),
+                committeeNormal: try unitInterval(
+                    thresholds.constitutionalCommittee.default,
+                    "stakePoolVotingThresholds.constitutionalCommittee.default"),
+                hardForkInitiation: try unitInterval(
+                    thresholds.hardForkInitiation, "stakePoolVotingThresholds.hardForkInitiation"),
+                motionNoConfidence: try unitInterval(
+                    thresholds.noConfidence, "stakePoolVotingThresholds.noConfidence"),
+                ppSecurityGroup: try unitInterval(
+                    thresholds.protocolParametersUpdate.security,
+                    "stakePoolVotingThresholds.protocolParametersUpdate.security")
             )
         } else {
             poolVotingThresholds = ProtocolParametersPoolVotingThresholds(
-                committeeNoConfidence: 0, committeeNormal: 0, hardForkInitiation: 0,
-                motionNoConfidence: 0, ppSecurityGroup: 0
+                committeeNoConfidence: zeroUnit, committeeNormal: zeroUnit, hardForkInitiation: zeroUnit,
+                motionNoConfidence: zeroUnit, ppSecurityGroup: zeroUnit
             )
         }
 
         // Convert execution units - provide default values
         let maxBlockExUnits: ProtocolParametersExecutionUnits
         if let units = params.maxExecutionUnitsPerBlock {
-            maxBlockExUnits = ProtocolParametersExecutionUnits(
-                memory: Int64(units.memory),
-                steps: Int64(units.cpu)
-            )
+            maxBlockExUnits = ProtocolParametersExecutionUnits(memory: units.memory, steps: units.cpu)
         } else {
             maxBlockExUnits = ProtocolParametersExecutionUnits(memory: 0, steps: 0)
         }
 
         let maxTxExUnits: ProtocolParametersExecutionUnits
         if let units = params.maxExecutionUnitsPerTransaction {
-            maxTxExUnits = ProtocolParametersExecutionUnits(
-                memory: Int64(units.memory),
-                steps: Int64(units.cpu)
-            )
+            maxTxExUnits = ProtocolParametersExecutionUnits(memory: units.memory, steps: units.cpu)
         } else {
             maxTxExUnits = ProtocolParametersExecutionUnits(memory: 0, steps: 0)
         }
 
+        // SwiftOgmios reads `minFeeReferenceScripts.base` as a Double; its
+        // shortest description is the decimal Ogmios sent.
+        let minFeeRefScriptCostPerByte = try params.minFeeReferenceScripts.map {
+            try LedgerValues.nonNegativeInterval($0.base, "Ogmios minFeeReferenceScripts.base")
+        }
+
+        func integer<T: FixedWidthInteger, S: BinaryInteger>(_ value: S, _ what: String) throws -> T {
+            try LedgerValues.integer(value, as: T.self, "Ogmios \(what)")
+        }
+        func lovelace(_ value: ValueAdaOnly, _ what: String) throws -> Coin {
+            try integer(value.ada.lovelace, what)
+        }
+
         return SwiftCardanoCore.ProtocolParameters(
-            collateralPercentage: params.collateralPercentage != nil
-                ? Int64(params.collateralPercentage!) : 150,
-            committeeMaxTermLength: params.constitutionalCommitteeMaxTermLength != nil
-                ? Int64(params.constitutionalCommitteeMaxTermLength!) : 0,
-            committeeMinSize: params.constitutionalCommitteeMinSize != nil
-                ? Int64(params.constitutionalCommitteeMinSize!) : 0,
+            collateralPercentage: try params.collateralPercentage.map { try integer($0, "collateralPercentage") } ?? 150,
+            committeeMaxTermLength: try params.constitutionalCommitteeMaxTermLength.map {
+                try integer($0, "constitutionalCommitteeMaxTermLength")
+            } ?? 0,
+            committeeMinSize: try params.constitutionalCommitteeMinSize.map {
+                try integer($0, "constitutionalCommitteeMinSize")
+            } ?? 0,
             costModels: costModels,
-            dRepActivity: params.delegateRepresentativeMaxIdleTime != nil
-                ? Int64(params.delegateRepresentativeMaxIdleTime!) : 0,
-            dRepDeposit: params.delegateRepresentativeDeposit != nil
-                ? Int64(params.delegateRepresentativeDeposit!.ada.lovelace) : 0,
+            dRepActivity: try params.delegateRepresentativeMaxIdleTime.map {
+                try integer($0, "delegateRepresentativeMaxIdleTime")
+            } ?? 0,
+            dRepDeposit: try params.delegateRepresentativeDeposit.map {
+                try lovelace($0, "delegateRepresentativeDeposit")
+            } ?? 0,
             dRepVotingThresholds: dRepVotingThresholds,
             executionUnitPrices: executionPrices,
-            govActionDeposit: params.governanceActionDeposit != nil
-                ? Int64(params.governanceActionDeposit!.ada.lovelace) : 0,
-            govActionLifetime: params.governanceActionLifetime != nil
-                ? Int64(params.governanceActionLifetime!) : 0,
-            maxBlockBodySize: Int64(params.maxBlockBodySize.bytes),
+            govActionDeposit: try params.governanceActionDeposit.map {
+                try lovelace($0, "governanceActionDeposit")
+            } ?? 0,
+            govActionLifetime: try params.governanceActionLifetime.map {
+                try integer($0, "governanceActionLifetime")
+            } ?? 0,
+            maxBlockBodySize: try integer(params.maxBlockBodySize.bytes, "maxBlockBodySize"),
             maxBlockExecutionUnits: maxBlockExUnits,
-            maxBlockHeaderSize: Int64(params.maxBlockHeaderSize.bytes),
-            maxCollateralInputs: params.maxCollateralInputs != nil
-                ? Int64(params.maxCollateralInputs!) : 3,
+            maxBlockHeaderSize: try integer(params.maxBlockHeaderSize.bytes, "maxBlockHeaderSize"),
+            maxCollateralInputs: try params.maxCollateralInputs.map { try integer($0, "maxCollateralInputs") } ?? 3,
             maxTxExecutionUnits: maxTxExUnits,
-            maxTxSize: params.maxTransactionSize != nil
-                ? Int64(params.maxTransactionSize!.bytes) : 16384,
-            maxValueSize: params.maxValueSize != nil ? Int64(params.maxValueSize!.bytes) : 5000,
-            minFeeRefScriptCostPerByte: params.minFeeReferenceScripts != nil
-                ? Int64(params.minFeeReferenceScripts!.base) : nil,
-            minPoolCost: Int64(params.minStakePoolCost.ada.lovelace),
-            monetaryExpansion: parseRatio(params.monetaryExpansion) ?? 0,
-            poolPledgeInfluence: parseRatio(params.stakePoolPledgeInfluence) ?? 0,
-            poolRetireMaxEpoch: Int64(params.stakePoolRetirementEpochBound),
+            maxTxSize: try params.maxTransactionSize.map { try integer($0.bytes, "maxTransactionSize") } ?? 16384,
+            maxValueSize: try params.maxValueSize.map { try integer($0.bytes, "maxValueSize") } ?? 5000,
+            minFeeRefScriptCostPerByte: minFeeRefScriptCostPerByte,
+            minPoolCost: try lovelace(params.minStakePoolCost, "minStakePoolCost"),
+            monetaryExpansion: try unitInterval(params.monetaryExpansion, "monetaryExpansion"),
+            poolPledgeInfluence: try nonNegativeInterval(params.stakePoolPledgeInfluence, "stakePoolPledgeInfluence"),
+            poolRetireMaxEpoch: try integer(params.stakePoolRetirementEpochBound, "stakePoolRetirementEpochBound"),
             poolVotingThresholds: poolVotingThresholds,
             protocolVersion: ProtocolParametersProtocolVersion(
-                major: Int(params.version.major),
-                minor: Int(params.version.minor)
+                major: params.version.major,
+                minor: params.version.minor
             ),
-            stakeAddressDeposit: Int64(params.stakeCredentialDeposit.ada.lovelace),
-            stakePoolDeposit: Int64(params.stakePoolDeposit.ada.lovelace),
-            stakePoolTargetNum: Int64(params.desiredNumberOfStakePools),
-            treasuryCut: parseRatio(params.treasuryExpansion) ?? 0,
-            txFeeFixed: Int64(params.minFeeConstant.ada.lovelace),
-            txFeePerByte: Int64(params.minFeeCoefficient),
-            utxoCostPerByte: Int64(params.minUtxoDepositCoefficient)
+            stakeAddressDeposit: try lovelace(params.stakeCredentialDeposit, "stakeCredentialDeposit"),
+            stakePoolDeposit: try lovelace(params.stakePoolDeposit, "stakePoolDeposit"),
+            stakePoolTargetNum: try integer(params.desiredNumberOfStakePools, "desiredNumberOfStakePools"),
+            treasuryCut: try unitInterval(params.treasuryExpansion, "treasuryExpansion"),
+            txFeeFixed: try lovelace(params.minFeeConstant, "minFeeConstant"),
+            txFeePerByte: params.minFeeCoefficient,
+            utxoCostPerByte: params.minUtxoDepositCoefficient
         )
     }
 
-    /// Parses a Ratio type (which stores value as "numerator/denominator" string) to Double.
-    private func parseRatio(_ ratio: SwiftOgmios.Ratio) -> Double? {
-        return parseRatioString(ratio.value)
+    /// An Ogmios ratio, sent as `"numerator/denominator"`, as an exact unit interval.
+    private func unitInterval(_ ratio: SwiftOgmios.Ratio, _ what: String) throws -> UnitInterval {
+        try LedgerValues.unitInterval(text: ratio.value, "Ogmios \(what)")
     }
 
-    /// Parses a ratio string like "1/20" to a Double.
-    private func parseRatioString(_ ratioString: String) -> Double? {
-        let parts = ratioString.split(separator: "/")
-        guard parts.count == 2,
-            let numerator = Double(parts[0]),
-            let denominator = Double(parts[1]),
-            denominator != 0
-        else {
-            return nil
-        }
-        return numerator / denominator
+    /// An Ogmios ratio, sent as `"numerator/denominator"`, as an exact non-negative interval.
+    private func nonNegativeInterval(_ ratio: SwiftOgmios.Ratio, _ what: String) throws -> NonNegativeInterval {
+        try LedgerValues.nonNegativeInterval(text: ratio.value, "Ogmios \(what)")
     }
 
     /// Get the stake pool information.
@@ -882,7 +916,7 @@ public actor OgmiosChainContext: ChainContext {
         let ogmiosParams = entry.value
 
         // Map Relays
-        let relays: [SwiftCardanoCore.Relay] = ogmiosParams.relays.compactMap { relay in
+        let relays: [SwiftCardanoCore.Relay] = try ogmiosParams.relays.map { relay in
             switch relay {
             case .singleHostAddr(let ip):
                 let ipv4 = ip.ipv4.flatMap { IPv4Address($0) }
@@ -892,18 +926,15 @@ public actor OgmiosChainContext: ChainContext {
                 )
             case .singleHostName(let name):
                 return .singleHostName(
-                    SingleHostName(port: name.port.map { Int($0) }, dnsName: name.hostname)
+                    try SingleHostName(port: name.port.map { Int($0) }, dnsName: name.hostname)
                 )
             case .multiHostName(let name):
-                return .multiHostName(MultiHostName(dnsName: name.hostname))
+                return .multiHostName(try MultiHostName(dnsName: name.hostname))
             }
         }
 
         // Convert margin (Ratio) to UnitInterval
-        let marginDouble = parseRatio(ogmiosParams.margin) ?? 0.0
-        let marginDenom: UInt64 = 100_000_000
-        let marginNum = UInt64((marginDouble * Double(marginDenom)).rounded())
-        let margin = UnitInterval(numerator: marginNum, denominator: marginDenom)
+        let margin = try unitInterval(ogmiosParams.margin, "stake pool margin")
 
         let poolOperator = try PoolOperator(from: poolId)
         let vrfKeyHash = VrfKeyHash(
@@ -938,8 +969,8 @@ public actor OgmiosChainContext: ChainContext {
         let params = PoolParams(
             poolOperator: poolOperator.poolKeyHash,
             vrfKeyHash: vrfKeyHash,
-            pledge: Int(ogmiosParams.pledge.ada.lovelace),
-            cost: Int(ogmiosParams.cost.ada.lovelace),
+            pledge: try LedgerValues.integer(ogmiosParams.pledge.ada.lovelace, "Ogmios stake pool pledge"),
+            cost: try LedgerValues.integer(ogmiosParams.cost.ada.lovelace, "Ogmios stake pool cost"),
             margin: margin,
             rewardAccount: rewardAccountHash,
             poolOwners: poolOwners,

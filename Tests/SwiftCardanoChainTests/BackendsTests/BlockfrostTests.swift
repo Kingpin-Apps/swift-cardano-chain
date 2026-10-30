@@ -63,7 +63,7 @@ struct BlockfrostChainContextTests {
         
         let genesisParameters = try await chainContext.genesisParameters()
         
-        #expect(genesisParameters.activeSlotsCoefficient == 0.05)
+        #expect(genesisParameters.activeSlotsCoefficient == unit(1, 20))
         #expect(genesisParameters.epochLength == 432000)
         #expect(genesisParameters.maxKesEvolutions == 62)
         #expect(genesisParameters.maxLovelaceSupply == 45000000000000000)
@@ -98,6 +98,22 @@ struct BlockfrostChainContextTests {
         #expect(protocolParameters.costModels.PlutusV2.count == 175)
         #expect(protocolParameters.costModels.PlutusV3.count == 297)
         #expect(protocolParameters.costModels.PlutusV1.first == 100788)
+
+        // Blockfrost's ratios arrive as JSON decimals and are read exactly.
+        #expect(protocolParameters.executionUnitPrices.priceMemory == nonNegative(577, 10_000))
+        #expect(protocolParameters.executionUnitPrices.priceSteps == nonNegative(721, 10_000_000))
+        #expect(protocolParameters.monetaryExpansion == unit(3, 1000))
+        #expect(protocolParameters.treasuryCut == unit(1, 5))
+        #expect(protocolParameters.poolPledgeInfluence == nonNegative(3, 10))
+        #expect(protocolParameters.minFeeRefScriptCostPerByte == nonNegative(15, 1))
+        #expect(protocolParameters.committeeMaxTermLength == 365)
+        #expect(protocolParameters.govActionLifetime == 30)
+        #expect(protocolParameters.govActionDeposit == 100_000_000_000)
+        // Each pool threshold comes from its own field.
+        #expect(protocolParameters.poolVotingThresholds.motionNoConfidence == unit(51, 100))
+        #expect(protocolParameters.poolVotingThresholds.committeeNoConfidence == unit(67, 100))
+        #expect(protocolParameters.dRepVotingThresholds.committeeNormal == unit(3, 4))
+        #expect(protocolParameters.dRepVotingThresholds.committeeNoConfidence == unit(3, 5))
     }
     
     @Test("Test utxos")
@@ -447,44 +463,6 @@ struct BlockfrostChainContextTests {
         #expect(all.first?.govActionId.govActionIndex == 1)
     }
 
-    @Test("makeUnitInterval converts a Double to a rational approximation")
-    func testMakeUnitInterval() {
-        // 0.003 (monetary expansion rate) ≈ 3000 / 1_000_000.
-        let rho = makeUnitInterval(0.003)
-        #expect(rho.numerator == 3_000)
-        #expect(rho.denominator == 1_000_000)
-        #expect(abs(Double(rho.numerator) / Double(rho.denominator) - 0.003) < 1e-9)
-
-        // 0.2 (treasury growth rate) ≈ 200000 / 1_000_000.
-        let tau = makeUnitInterval(0.2)
-        #expect(tau.numerator == 200_000)
-        #expect(tau.denominator == 1_000_000)
-
-        // Below 0 is clamped to 0; above 1 is clamped to 1.
-        #expect(makeUnitInterval(-0.5).numerator == 0)
-        #expect(makeUnitInterval(1.7).numerator == 1_000_000)
-
-        // Custom precision honoured.
-        let coarse = makeUnitInterval(0.5, precision: 10)
-        #expect(coarse.numerator == 5)
-        #expect(coarse.denominator == 10)
-    }
-
-    @Test("makeNonNegativeInterval converts a Double to a rational approximation")
-    func testMakeNonNegativeInterval() {
-        // 0.3 (pool pledge influence) ≈ 300000 / 1_000_000.
-        let a0 = makeNonNegativeInterval(0.3)
-        #expect(a0.lowerBound == 300_000)
-        #expect(a0.upperBound == 1_000_000)
-
-        // Negative is clamped to 0; values > 1 are allowed (non-negative,
-        // not unit-bounded).
-        #expect(makeNonNegativeInterval(-0.1).lowerBound == 0)
-        let big = makeNonNegativeInterval(2.5)
-        #expect(big.lowerBound == 2_500_000)
-        #expect(big.upperBound == 1_000_000)
-    }
-
     @Test("Test govActionInfo populates parameter-change ratios")
     func testGovActionInfoParameterChangeRatios() async throws {
         let chainContext = try await BlockFrostChainContext(
@@ -509,15 +487,10 @@ struct BlockfrostChainContextTests {
         }
 
         let update = action.protocolParamUpdate
-        let expansion = try #require(update.expansionRate)
-        #expect(expansion.numerator == 3_000)
-        #expect(expansion.denominator == 1_000_000)
-        let treasury = try #require(update.treasuryGrowthRate)
-        #expect(treasury.numerator == 200_000)
-        let decentralization = try #require(update.decentralizationConstant)
-        #expect(decentralization.numerator == 500_000)
-        let pledge = try #require(update.poolPledgeInfluence)
-        #expect(pledge.lowerBound == 300_000)
+        #expect(update.expansionRate == unit(3, 1000))
+        #expect(update.treasuryGrowthRate == unit(1, 5))
+        #expect(update.decentralizationConstant == unit(1, 2))
+        #expect(update.poolPledgeInfluence == nonNegative(3, 10))
     }
 
     @Test("Test committeeState")

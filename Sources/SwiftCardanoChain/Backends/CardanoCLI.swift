@@ -163,9 +163,14 @@ public actor CardanoCliChainContext: ChainContext {
 
         // Set the refetch chain tip interval if not provided
         if self.refetchChainTipInterval == 0 {
-            self.refetchChainTipInterval =
-                Double((genesis.slotLength!))
-                / (genesis.activeSlotsCoefficient!)
+            // slotLength / f, with f = n/d: slotLength × d / n.
+            guard let slotLength = genesis.slotLength,
+                  let f = genesis.activeSlotsCoefficient, f.numerator > 0 else {
+                throw CardanoChainError.valueError("Genesis has no slot length or active slot coefficient")
+            }
+            self.refetchChainTipInterval = NSDecimalNumber(
+                decimal: slotLength * Decimal(f.denominator) / Decimal(f.numerator)
+            ).doubleValue
         }
 
         return genesis
@@ -417,19 +422,20 @@ public actor CardanoCliChainContext: ChainContext {
 
         for (asset, amount) in utxoValue {
             if asset == "lovelace" {
-                if let lovelace = amount as? Int {
-                    value.coin = Int64(lovelace)
+                if let lovelace = try LedgerValues.bigInt(json: amount, "cardano-cli lovelace") {
+                    value.coin = lovelace
                 }
             } else {
                 let policyId = asset
-                guard let assets = amount as? [String: Int] else { continue }
+                guard let assets = amount as? [String: Any] else { continue }
                 for (assetHexName, assetAmount) in assets {
                     let policy = try ScriptHash(from: .string(policyId))
                     let assetName = AssetName(from: assetHexName)
                     if multiAsset[policy] == nil {
                         multiAsset[policy] = Asset([:])
                     }
-                    multiAsset[policy]?[assetName] = Int64(assetAmount)
+                    multiAsset[policy]?[assetName] = try LedgerValues.bigInt(
+                        json: assetAmount, "cardano-cli asset quantity")
                 }
             }
         }
@@ -1561,60 +1567,34 @@ public actor CardanoCliChainContext: ChainContext {
     /// the rest of the update is still returned. Field-name keys mirror what
     /// `cardano-cli conway query gov-state` emits.
     private func parseProtocolParamUpdate(_ d: [String: Any]) -> ProtocolParamUpdate {
+        // Each value is read exactly; one that does not fit its ledger type
+        // (negative, too large, a ratio above one) is left nil, like a missing one.
         func coin(_ key: String) -> Coin? {
-            if let v = d[key] as? Int { return Coin(v) }
-            if let v = (d[key] as? NSNumber)?.intValue { return Coin(v) }
-            return nil
+            try? LedgerValues.integer(json: d[key], "cardano-cli \(key)")
         }
         func uint32(_ key: String) -> UInt32? {
-            if let v = d[key] as? Int { return UInt32(v) }
-            if let v = (d[key] as? NSNumber)?.intValue { return UInt32(v) }
-            return nil
+            try? LedgerValues.integer(json: d[key], "cardano-cli \(key)")
         }
         func uint16(_ key: String) -> UInt16? {
-            if let v = d[key] as? Int { return UInt16(v) }
-            if let v = (d[key] as? NSNumber)?.intValue { return UInt16(v) }
-            return nil
+            try? LedgerValues.integer(json: d[key], "cardano-cli \(key)")
         }
         func epochInterval(_ key: String) -> EpochInterval? {
-            if let v = d[key] as? Int { return EpochInterval(v) }
-            if let v = (d[key] as? NSNumber)?.intValue { return EpochInterval(v) }
-            return nil
+            try? LedgerValues.integer(json: d[key], "cardano-cli \(key)")
         }
         func nni(_ key: String) -> NonNegativeInterval? {
-            if let pair = d[key] as? [String: Any],
-               let num = (pair["numerator"] as? NSNumber)?.uint64Value,
-               let den = (pair["denominator"] as? NSNumber)?.uint64Value {
-                return NonNegativeInterval(lowerBound: num, upperBound: den)
-            }
-            if let dbl = (d[key] as? NSNumber)?.doubleValue {
-                let scale: UInt64 = 1_000_000_000
-                return NonNegativeInterval(
-                    lowerBound: UInt64((dbl * Double(scale)).rounded()),
-                    upperBound: scale
-                )
-            }
-            return nil
+            try? LedgerValues.nonNegativeInterval(json: d[key], "cardano-cli \(key)")
         }
         func unit(_ key: String) -> UnitInterval? {
-            if let pair = d[key] as? [String: Any],
-               let num = (pair["numerator"] as? NSNumber)?.uint64Value,
-               let den = (pair["denominator"] as? NSNumber)?.uint64Value {
-                return UnitInterval(numerator: num, denominator: den)
-            }
-            if let dbl = (d[key] as? NSNumber)?.doubleValue {
-                let scale: UInt64 = 1_000_000_000
-                return UnitInterval(
-                    numerator: UInt64((dbl * Double(scale)).rounded()),
-                    denominator: scale
-                )
-            }
-            return nil
+            try? LedgerValues.unitInterval(json: d[key], "cardano-cli \(key)")
         }
         func exUnits(_ key: String) -> ExUnits? {
             guard let pair = d[key] as? [String: Any] else { return nil }
-            let mem = (pair["memory"] as? NSNumber)?.uint64Value ?? (pair["mem"] as? NSNumber)?.uint64Value ?? 0
-            let steps = (pair["steps"] as? NSNumber)?.uint64Value ?? (pair["step"] as? NSNumber)?.uint64Value ?? 0
+            func value(_ keys: String...) -> UInt64 {
+                keys.lazy.compactMap { try? LedgerValues.integer(json: pair[$0], as: UInt64.self, "cardano-cli \(key)") }
+                    .first ?? 0
+            }
+            let mem = value("memory", "mem")
+            let steps = value("steps", "step")
             return ExUnits(mem: mem, steps: steps)
         }
 
@@ -1657,16 +1637,8 @@ public actor CardanoCliChainContext: ChainContext {
         u.maxTxExUnits = exUnits("maxTxExecutionUnits") ?? exUnits("maxTxExUnits")
 
         if let prices = d["executionUnitPrices"] as? [String: Any] ?? d["executionCosts"] as? [String: Any] {
-            let mem: NonNegativeInterval?
-            let step: NonNegativeInterval?
-            if let dbl = (prices["priceMemory"] as? NSNumber)?.doubleValue {
-                let s: UInt64 = 1_000_000_000
-                mem = NonNegativeInterval(lowerBound: UInt64((dbl * Double(s)).rounded()), upperBound: s)
-            } else { mem = nil }
-            if let dbl = (prices["priceSteps"] as? NSNumber)?.doubleValue {
-                let s: UInt64 = 1_000_000_000
-                step = NonNegativeInterval(lowerBound: UInt64((dbl * Double(s)).rounded()), upperBound: s)
-            } else { step = nil }
+            let mem = try? LedgerValues.nonNegativeInterval(json: prices["priceMemory"], "cardano-cli priceMemory")
+            let step = try? LedgerValues.nonNegativeInterval(json: prices["priceSteps"], "cardano-cli priceSteps")
             if let mem, let step {
                 u.executionCosts = ExUnitPrices(memPrice: mem, stepPrice: step)
             }
@@ -1695,14 +1667,7 @@ public actor CardanoCliChainContext: ChainContext {
 
         if let pvt = d["poolVotingThresholds"] as? [String: Any] {
             func ui(_ key: String) -> UnitInterval? {
-                if let dbl = (pvt[key] as? NSNumber)?.doubleValue {
-                    let s: UInt64 = 1_000_000_000
-                    return UnitInterval(
-                        numerator: UInt64((dbl * Double(s)).rounded()),
-                        denominator: s
-                    )
-                }
-                return nil
+                try? LedgerValues.unitInterval(json: pvt[key], "cardano-cli \(key)")
             }
             if let cnc = ui("committeeNoConfidence"),
                let cn = ui("committeeNormal"),
@@ -1711,10 +1676,10 @@ public actor CardanoCliChainContext: ChainContext {
                let psg = ui("ppSecurityGroup")
             {
                 u.poolVotingThresholds = PoolVotingThresholds(
-                    committeeNoConfidence: cnc,
-                    committeeNormal: cn,
-                    hardForkInitiation: hfi,
                     motionNoConfidence: mnc,
+                    committeeNormal: cn,
+                    committeeNoConfidence: cnc,
+                    hardForkInitiation: hfi,
                     ppSecurityGroup: psg
                 )
             }
@@ -1722,14 +1687,7 @@ public actor CardanoCliChainContext: ChainContext {
 
         if let dvt = d["dRepVotingThresholds"] as? [String: Any] {
             func ui(_ key: String) -> UnitInterval? {
-                if let dbl = (dvt[key] as? NSNumber)?.doubleValue {
-                    let s: UInt64 = 1_000_000_000
-                    return UnitInterval(
-                        numerator: UInt64((dbl * Double(s)).rounded()),
-                        denominator: s
-                    )
-                }
-                return nil
+                try? LedgerValues.unitInterval(json: dvt[key], "cardano-cli \(key)")
             }
             let order: [(String, KeyPath<[String: UnitInterval?], UnitInterval?>)] = []  // unused; we'll inline
             _ = order
@@ -1747,7 +1705,7 @@ public actor CardanoCliChainContext: ChainContext {
                 // CDDL order: motionNoConfidence, committeeNormal, committeeNoConfidence,
                 //             updateToConstitution, hardForkInitiation, ppNetworkGroup,
                 //             ppEconomicGroup, ppTechnicalGroup, ppGovGroup, treasuryWithdrawal
-                u.drepVotingThresholds = DrepVotingThresholds(thresholds: [mnc, cn, cnc, utc, hfi, net, eco, tech, gov, tw])
+                u.drepVotingThresholds = try? DrepVotingThresholds(thresholds: [mnc, cn, cnc, utc, hfi, net, eco, tech, gov, tw])
             }
         }
 

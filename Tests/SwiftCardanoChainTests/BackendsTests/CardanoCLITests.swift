@@ -78,7 +78,7 @@ struct CardanoCLIContextTests {
 
         let genesisParameters = try await chainContext.genesisParameters()
 
-        #expect(genesisParameters.activeSlotsCoefficient == 0.05)
+        #expect(genesisParameters.activeSlotsCoefficient == unit(1, 20))
         #expect(genesisParameters.epochLength == 86400)
         #expect(genesisParameters.maxKesEvolutions == 62)
         #expect(genesisParameters.maxLovelaceSupply == 45_000_000_000_000_000)
@@ -125,6 +125,9 @@ struct CardanoCLIContextTests {
 
         #expect(protocolParameters.txFeePerByte == 44)
         #expect(protocolParameters.txFeeFixed == 155381)
+        // cardano-cli writes the ratios as JSON decimals; core reads them exactly.
+        #expect(protocolParameters.executionUnitPrices.priceSteps == nonNegative(721, 10_000_000))
+        #expect(protocolParameters.monetaryExpansion == unit(3, 1000))
     }
 
     @Test("Test utxos")

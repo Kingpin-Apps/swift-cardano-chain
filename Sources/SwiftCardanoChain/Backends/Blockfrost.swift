@@ -1,3 +1,4 @@
+import BigInt
 import Foundation
 import OpenAPIRuntime
 import SwiftBlockfrostAPI
@@ -142,18 +143,24 @@ public actor BlockFrostChainContext: ChainContext {
         let response = try await api.client.getGenesis()
         do {
             let genesis = try response.ok.body.json
+            func int<T: FixedWidthInteger>(_ value: Int, _ field: String) throws -> T {
+                try LedgerValues.integer(value, as: T.self, "Blockfrost genesis \(field)")
+            }
             return GenesisParameters(
-                activeSlotsCoefficient: genesis.activeSlotsCoefficient,
-                epochLength: genesis.epochLength,
-                maxKesEvolutions: genesis.maxKesEvolutions,
-                maxLovelaceSupply: Int(genesis.maxLovelaceSupply)!,
+                activeSlotsCoefficient: try LedgerValues.unitInterval(
+                    genesis.activeSlotsCoefficient, "Blockfrost genesis active_slots_coefficient"),
+                epochLength: try int(genesis.epochLength, "epoch_length"),
+                maxKesEvolutions: try int(genesis.maxKesEvolutions, "max_kes_evolutions"),
+                maxLovelaceSupply: try LedgerValues.integer(
+                    text: genesis.maxLovelaceSupply, "Blockfrost genesis max_lovelace_supply"),
                 networkId: _network.description,
-                networkMagic: genesis.networkMagic,
-                securityParam: genesis.securityParam,
-                slotLength: genesis.slotLength,
-                slotsPerKesPeriod: genesis.slotsPerKesPeriod,
+                networkMagic: try int(genesis.networkMagic, "network_magic"),
+                securityParam: try int(genesis.securityParam, "security_param"),
+                // Blockfrost sends the slot length in whole seconds.
+                slotLength: Decimal(genesis.slotLength),
+                slotsPerKesPeriod: try int(genesis.slotsPerKesPeriod, "slots_per_kes_period"),
                 systemStart: Date(timeIntervalSince1970: TimeInterval(genesis.systemStart)),
-                updateQuorum: genesis.updateQuorum
+                updateQuorum: try int(genesis.updateQuorum, "update_quorum")
             )
         } catch {
             throw CardanoChainError.blockfrostError("Failed to get getGenesis: \(response)")
@@ -278,73 +285,90 @@ public actor BlockFrostChainContext: ChainContext {
                 return list.compactMap { ($0 as? NSNumber)?.int64Value }
             }
 
+            let p = protocolParams
+            // Blockfrost's client reads each ratio as a Double; its shortest
+            // description is the decimal Blockfrost sent, read here exactly.
+            func unit(_ value: Double?, _ field: String) throws -> UnitInterval {
+                try LedgerValues.unitInterval(LedgerValues.required(value, "Blockfrost \(field)"), "Blockfrost \(field)")
+            }
+            func nonNegative(_ value: Double?, _ field: String) throws -> NonNegativeInterval {
+                try LedgerValues.nonNegativeInterval(
+                    LedgerValues.required(value, "Blockfrost \(field)"), "Blockfrost \(field)")
+            }
+            func int<T: FixedWidthInteger>(_ value: Int?, _ field: String) throws -> T {
+                try LedgerValues.integer(LedgerValues.required(value, "Blockfrost \(field)"), as: T.self, "Blockfrost \(field)")
+            }
+            func int<T: FixedWidthInteger>(_ text: String?, _ field: String) throws -> T {
+                try LedgerValues.integer(
+                    text: LedgerValues.required(text, "Blockfrost \(field)"), as: T.self, "Blockfrost \(field)")
+            }
+
             return ProtocolParameters(
-                collateralPercentage: Int64(protocolParams.collateralPercent!),
-                committeeMaxTermLength: Int64(protocolParams.committeeMaxTermLength!)!,
-                committeeMinSize: Int64(protocolParams.committeeMinSize!)!,
+                collateralPercentage: try int(p.collateralPercent, "collateral_percent"),
+                committeeMaxTermLength: try int(p.committeeMaxTermLength, "committee_max_term_length"),
+                committeeMinSize: try int(p.committeeMinSize, "committee_min_size"),
                 costModels: ProtocolParametersCostModels(
                     PlutusV1: costModel("PlutusV1"),
                     PlutusV2: costModel("PlutusV2"),
                     PlutusV3: costModel("PlutusV3")
                 ),
-                dRepActivity: Int64(protocolParams.drepActivity!)!,
-                dRepDeposit: Int64(protocolParams.drepDeposit!)!,
+                dRepActivity: try int(p.drepActivity, "drep_activity"),
+                dRepDeposit: try int(p.drepDeposit, "drep_deposit"),
                 dRepVotingThresholds: DRepVotingThresholds(
-                    committeeNoConfidence: protocolParams.dvtCommitteeNoConfidence!,
-                    committeeNormal: protocolParams.dvtCommitteeNormal!,
-                    hardForkInitiation: protocolParams.dvtHardForkInitiation!,
-                    motionNoConfidence: protocolParams.dvtMotionNoConfidence!,
-                    ppEconomicGroup: protocolParams.dvtPPEconomicGroup!,
-                    ppGovGroup: protocolParams.dvtPPGovGroup!,
-                    ppNetworkGroup: protocolParams.dvtPPNetworkGroup!,
-                    ppTechnicalGroup: protocolParams.dvtPPTechnicalGroup!,
-                    treasuryWithdrawal: protocolParams.dvtTreasuryWithdrawal!,
-                    updateToConstitution: protocolParams.dvtUpdateToConstitution!
+                    committeeNoConfidence: try unit(p.dvtCommitteeNoConfidence, "dvt_committee_no_confidence"),
+                    committeeNormal: try unit(p.dvtCommitteeNormal, "dvt_committee_normal"),
+                    hardForkInitiation: try unit(p.dvtHardForkInitiation, "dvt_hard_fork_initiation"),
+                    motionNoConfidence: try unit(p.dvtMotionNoConfidence, "dvt_motion_no_confidence"),
+                    ppEconomicGroup: try unit(p.dvtPPEconomicGroup, "dvt_p_p_economic_group"),
+                    ppGovGroup: try unit(p.dvtPPGovGroup, "dvt_p_p_gov_group"),
+                    ppNetworkGroup: try unit(p.dvtPPNetworkGroup, "dvt_p_p_network_group"),
+                    ppTechnicalGroup: try unit(p.dvtPPTechnicalGroup, "dvt_p_p_technical_group"),
+                    treasuryWithdrawal: try unit(p.dvtTreasuryWithdrawal, "dvt_treasury_withdrawal"),
+                    updateToConstitution: try unit(p.dvtUpdateToConstitution, "dvt_update_to_constitution")
                 ),
                 executionUnitPrices: ExecutionUnitPrices(
-                    priceMemory: protocolParams.priceMem!,
-                    priceSteps: protocolParams.priceStep!
+                    priceMemory: try nonNegative(p.priceMem, "price_mem"),
+                    priceSteps: try nonNegative(p.priceStep, "price_step")
                 ),
-                govActionDeposit: Int64(protocolParams.govActionDeposit!)!,
-                govActionLifetime: Int64(protocolParams.govActionLifetime!)!,
-                maxBlockBodySize: Int64(protocolParams.maxBlockSize),
+                govActionDeposit: try int(p.govActionDeposit, "gov_action_deposit"),
+                govActionLifetime: try int(p.govActionLifetime, "gov_action_lifetime"),
+                maxBlockBodySize: try int(p.maxBlockSize, "max_block_size"),
                 maxBlockExecutionUnits: ProtocolParametersExecutionUnits(
-                    memory: Int64(protocolParams.maxBlockExMem!)!,
-                    steps: Int64(protocolParams.maxBlockExSteps!)!
+                    memory: try int(p.maxBlockExMem, "max_block_ex_mem"),
+                    steps: try int(p.maxBlockExSteps, "max_block_ex_steps")
                 ),
-                maxBlockHeaderSize: Int64(protocolParams.maxBlockHeaderSize),
-                maxCollateralInputs: Int64(protocolParams.maxCollateralInputs!),
+                maxBlockHeaderSize: try int(p.maxBlockHeaderSize, "max_block_header_size"),
+                maxCollateralInputs: try int(p.maxCollateralInputs, "max_collateral_inputs"),
                 maxTxExecutionUnits: ProtocolParametersExecutionUnits(
-                    memory: Int64(protocolParams.maxTxExMem!)!,
-                    steps: Int64(protocolParams.maxTxExSteps!)!
+                    memory: try int(p.maxTxExMem, "max_tx_ex_mem"),
+                    steps: try int(p.maxTxExSteps, "max_tx_ex_steps")
                 ),
-                maxTxSize: Int64(protocolParams.maxTxSize),
-                maxValueSize: Int64(protocolParams.maxValSize!)!,
-                minFeeRefScriptCostPerByte: Int64(
-                    protocolParams.minFeeRefScriptCostPerByte!
-                ),
-                minPoolCost: Int64(protocolParams.minPoolCost)!,
-                monetaryExpansion: protocolParams.rho,
-                poolPledgeInfluence: protocolParams.a0,
-                poolRetireMaxEpoch: Int64(protocolParams.eMax),
+                maxTxSize: try int(p.maxTxSize, "max_tx_size"),
+                maxValueSize: try int(p.maxValSize, "max_val_size"),
+                minFeeRefScriptCostPerByte: try nonNegative(
+                    p.minFeeRefScriptCostPerByte, "min_fee_ref_script_cost_per_byte"),
+                minPoolCost: try int(p.minPoolCost, "min_pool_cost"),
+                monetaryExpansion: try unit(p.rho, "rho"),
+                poolPledgeInfluence: try nonNegative(p.a0, "a0"),
+                poolRetireMaxEpoch: try int(p.eMax, "e_max"),
                 poolVotingThresholds: ProtocolParametersPoolVotingThresholds(
-                    committeeNoConfidence: protocolParams.pvtMotionNoConfidence!,
-                    committeeNormal: protocolParams.pvtCommitteeNormal!,
-                    hardForkInitiation: protocolParams.pvtHardForkInitiation!,
-                    motionNoConfidence: protocolParams.pvtMotionNoConfidence!,
-                    ppSecurityGroup: protocolParams.pvtPPSecurityGroup!
+                    committeeNoConfidence: try unit(p.pvtCommitteeNoConfidence, "pvt_committee_no_confidence"),
+                    committeeNormal: try unit(p.pvtCommitteeNormal, "pvt_committee_normal"),
+                    hardForkInitiation: try unit(p.pvtHardForkInitiation, "pvt_hard_fork_initiation"),
+                    motionNoConfidence: try unit(p.pvtMotionNoConfidence, "pvt_motion_no_confidence"),
+                    ppSecurityGroup: try unit(p.pvtPPSecurityGroup, "pvt_p_p_security_group")
                 ),
                 protocolVersion: ProtocolParametersProtocolVersion(
-                    major: protocolParams.protocolMajorVer,
-                    minor: protocolParams.protocolMinorVer
+                    major: try int(p.protocolMajorVer, "protocol_major_ver"),
+                    minor: try int(p.protocolMinorVer, "protocol_minor_ver")
                 ),
-                stakeAddressDeposit: Int64(protocolParams.keyDeposit)!,
-                stakePoolDeposit: Int64(protocolParams.poolDeposit)!,
-                stakePoolTargetNum: Int64(protocolParams.nOpt),
-                treasuryCut: protocolParams.tau,
-                txFeeFixed: Int64(protocolParams.minFeeB),
-                txFeePerByte: Int64(protocolParams.minFeeA),
-                utxoCostPerByte: Int64(protocolParams.coinsPerUtxoSize!)!
+                stakeAddressDeposit: try int(p.keyDeposit, "key_deposit"),
+                stakePoolDeposit: try int(p.poolDeposit, "pool_deposit"),
+                stakePoolTargetNum: try int(p.nOpt, "n_opt"),
+                treasuryCut: try unit(p.tau, "tau"),
+                txFeeFixed: try int(p.minFeeB, "min_fee_b"),
+                txFeePerByte: try int(p.minFeeA, "min_fee_a"),
+                utxoCostPerByte: try int(p.coinsPerUtxoSize, "coins_per_utxo_size")
             )
 
         } catch {
@@ -521,7 +545,7 @@ public actor BlockFrostChainContext: ChainContext {
             for result in results {
                 let txIn = TransactionInput(
                     transactionId: try TransactionId(from: .string(result.txHash)),
-                    index: UInt16(result.outputIndex)
+                    index: try LedgerValues.integer(result.outputIndex, "Blockfrost output index")
                 )
 
                 var lovelaceAmount: UInt64 = 0
@@ -529,7 +553,7 @@ public actor BlockFrostChainContext: ChainContext {
 
                 for item in result.amount {
                     if item.unit == "lovelace" {
-                        lovelaceAmount = UInt64(item.quantity) ?? 0
+                        lovelaceAmount = try LedgerValues.integer(text: item.quantity, "Blockfrost lovelace quantity")
                     } else {
                         // The utxo contains Multi-asset
                         let data = Data(hex: item.unit)
@@ -543,12 +567,12 @@ public actor BlockFrostChainContext: ChainContext {
                         if multiAssets[policyId] == nil {
                             multiAssets[policyId] = Asset([:])
                         }
-                        multiAssets[policyId]?[assetName] = Int64(item.quantity) ?? 0
+                        multiAssets[policyId]?[assetName] = try LedgerValues.bigInt(text: item.quantity, "Blockfrost asset quantity")
                     }
                 }
 
                 let amount = Value(
-                    coin: Int64(lovelaceAmount),
+                    coin: BigInt(lovelaceAmount),
                     multiAsset: multiAssets
                 )
 
@@ -624,7 +648,7 @@ public actor BlockFrostChainContext: ChainContext {
 
             let txIn = TransactionInput(
                 transactionId: try TransactionId(from: .string(txHash)),
-                index: UInt16(outputIndex)
+                index: try LedgerValues.integer(outputIndex, "Blockfrost output index")
             )
 
             var lovelaceAmount: UInt64 = 0
@@ -632,7 +656,7 @@ public actor BlockFrostChainContext: ChainContext {
 
             for item in result.amount {
                 if item.unit == "lovelace" {
-                    lovelaceAmount = UInt64(item.quantity) ?? 0
+                    lovelaceAmount = try LedgerValues.integer(text: item.quantity, "Blockfrost lovelace quantity")
                 } else {
                     let data = Data(hex: item.unit)
                     let policyId = ScriptHash(payload: data.prefix(SCRIPT_HASH_SIZE))
@@ -640,12 +664,12 @@ public actor BlockFrostChainContext: ChainContext {
                     if multiAssets[policyId] == nil {
                         multiAssets[policyId] = Asset([:])
                     }
-                    multiAssets[policyId]?[assetName] = Int64(item.quantity) ?? 0
+                    multiAssets[policyId]?[assetName] = try LedgerValues.bigInt(text: item.quantity, "Blockfrost asset quantity")
                 }
             }
 
             let amount = Value(
-                coin: Int64(lovelaceAmount),
+                coin: BigInt(lovelaceAmount),
                 multiAsset: multiAssets
             )
 
@@ -972,23 +996,22 @@ public actor BlockFrostChainContext: ChainContext {
         }
 
         // Map relays
-        let relays: [SwiftCardanoCore.Relay] = relaysData.compactMap { relay in
+        let relays: [SwiftCardanoCore.Relay] = try relaysData.compactMap { relay in
             if let ipv4String = relay.ipv4, let ipv4 = IPv4Address(ipv4String) {
                 return .singleHostAddr(SingleHostAddr(port: relay.port, ipv4: ipv4, ipv6: nil))
             } else if let ipv6String = relay.ipv6, let ipv6 = IPv6Address(ipv6String) {
                 return .singleHostAddr(SingleHostAddr(port: relay.port, ipv4: nil, ipv6: ipv6))
             } else if let dns = relay.dns {
-                return .singleHostName(SingleHostName(port: relay.port, dnsName: dns))
+                return .singleHostName(try SingleHostName(port: relay.port, dnsName: dns))
             } else if let dnsSrv = relay.dnsSrv {
-                return .multiHostName(MultiHostName(dnsName: dnsSrv))
+                return .multiHostName(try MultiHostName(dnsName: dnsSrv))
             }
             return nil
         }
 
-        // Convert margin (Double) to UnitInterval using 10^8 denominator for precision
-        let marginDenom: UInt64 = 100_000_000
-        let marginNum = UInt64((pool.marginCost * Double(marginDenom)).rounded())
-        let margin = UnitInterval(numerator: marginNum, denominator: marginDenom)
+        // Blockfrost's client reads the margin as a Double; its shortest
+        // description is the decimal Blockfrost sent, read here exactly.
+        let margin = try LedgerValues.unitInterval(pool.marginCost, "Blockfrost pool margin_cost")
 
         let poolOperator = try PoolOperator(from: poolId)
         let vrfKeyHash = VrfKeyHash(payload: Data(hex: pool.vrfKey))
@@ -1015,8 +1038,8 @@ public actor BlockFrostChainContext: ChainContext {
         let params = PoolParams(
             poolOperator: poolOperator.poolKeyHash,
             vrfKeyHash: vrfKeyHash,
-            pledge: Int(UInt64(pool.declaredPledge) ?? 0),
-            cost: Int(UInt64(pool.fixedCost) ?? 0),
+            pledge: try LedgerValues.integer(text: pool.declaredPledge, "Blockfrost pool declared_pledge"),
+            cost: try LedgerValues.integer(text: pool.fixedCost, "Blockfrost pool fixed_cost"),
             margin: margin,
             rewardAccount: rewardAccountHash,
             poolOwners: poolOwners,
@@ -1165,32 +1188,67 @@ public actor BlockFrostChainContext: ChainContext {
             )
             let params = try paramsResponse.ok.body.json.parameters
             
-            // Construct ProtocolParamUpdate from Blockfrost params
+            // Construct ProtocolParamUpdate from Blockfrost params. Blockfrost's
+            // client reads each ratio as a Double; its shortest description is
+            // the decimal Blockfrost sent, read here exactly.
+            func int<T: FixedWidthInteger>(_ value: Int?, _ field: String) throws -> T? {
+                try value.map { try LedgerValues.integer($0, as: T.self, "Blockfrost proposal \(field)") }
+            }
+            func int<T: FixedWidthInteger>(_ text: String?, _ field: String) throws -> T? {
+                try text.map { try LedgerValues.integer(text: $0, as: T.self, "Blockfrost proposal \(field)") }
+            }
+            func unit(_ value: Double?, _ field: String) throws -> UnitInterval? {
+                try value.map { try LedgerValues.unitInterval($0, "Blockfrost proposal \(field)") }
+            }
+            func nonNegative(_ value: Double?, _ field: String) throws -> NonNegativeInterval? {
+                try value.map { try LedgerValues.nonNegativeInterval($0, "Blockfrost proposal \(field)") }
+            }
+            func exUnits(_ mem: String?, _ steps: String?, _ field: String) throws -> ExUnits? {
+                guard let mem: UInt64 = try int(mem, "\(field)_mem"),
+                      let steps: UInt64 = try int(steps, "\(field)_steps") else { return nil }
+                return ExUnits(mem: mem, steps: steps)
+            }
+            // Blockfrost sends extra_entropy as the nonce's hash in hex, or null
+            // for the neutral nonce.
+            let extraEntropy = try params.extraEntropy.map { hex -> Nonce in
+                guard let hash = Data(hexString: hex) else {
+                    throw CardanoChainError.valueError("Blockfrost proposal extra_entropy \(hex) is not hex")
+                }
+                return try Nonce(hash: hash)
+            }
+            let executionCosts: ExUnitPrices?
+            if let memPrice = try nonNegative(params.priceMem, "price_mem"),
+               let stepPrice = try nonNegative(params.priceStep, "price_step") {
+                executionCosts = ExUnitPrices(memPrice: memPrice, stepPrice: stepPrice)
+            } else {
+                executionCosts = nil
+            }
+
             let update = ProtocolParamUpdate(
-                minFeeA: params.minFeeA != nil ? Coin(params.minFeeA!) : nil,
-                minFeeB: params.minFeeB != nil ? Coin(params.minFeeB!) : nil,
-                maxBlockBodySize: params.maxBlockSize != nil ? UInt32(params.maxBlockSize!) : nil,
-                maxTransactionSize: params.maxTxSize != nil ? UInt32(params.maxTxSize!) : nil,
-                maxBlockHeaderSize: params.maxBlockHeaderSize != nil ? UInt16(params.maxBlockHeaderSize!) : nil,
-                keyDeposit: params.keyDeposit != nil ? Coin(Int(params.keyDeposit!)!) : nil,
-                poolDeposit: params.poolDeposit != nil ? Coin(Int(params.poolDeposit!)!) : nil,
-                maximumEpoch: params.eMax != nil ? EpochInterval(params.eMax!) : nil,
-                nOpt: params.nOpt != nil ? UInt16(params.nOpt!) : nil,
-                poolPledgeInfluence: params.a0.map { makeNonNegativeInterval($0) },
-                expansionRate: params.rho.map { makeUnitInterval($0) },
-                treasuryGrowthRate: params.tau.map { makeUnitInterval($0) },
-                decentralizationConstant: params.decentralisationParam.map { makeUnitInterval($0) },
-                extraEntropy: params.extraEntropy != nil ? 0 : nil, // Placeholder as extraEntropy in ProtocolParamUpdate is UInt32
+                minFeeA: try int(params.minFeeA, "min_fee_a"),
+                minFeeB: try int(params.minFeeB, "min_fee_b"),
+                maxBlockBodySize: try int(params.maxBlockSize, "max_block_size"),
+                maxTransactionSize: try int(params.maxTxSize, "max_tx_size"),
+                maxBlockHeaderSize: try int(params.maxBlockHeaderSize, "max_block_header_size"),
+                keyDeposit: try int(params.keyDeposit, "key_deposit"),
+                poolDeposit: try int(params.poolDeposit, "pool_deposit"),
+                maximumEpoch: try int(params.eMax, "e_max"),
+                nOpt: try int(params.nOpt, "n_opt"),
+                poolPledgeInfluence: try nonNegative(params.a0, "a0"),
+                expansionRate: try unit(params.rho, "rho"),
+                treasuryGrowthRate: try unit(params.tau, "tau"),
+                decentralizationConstant: try unit(params.decentralisationParam, "decentralisation_param"),
+                extraEntropy: extraEntropy,
                 protocolVersion: (params.protocolMajorVer != nil && params.protocolMinorVer != nil) ? ProtocolVersion(major: params.protocolMajorVer!, minor: params.protocolMinorVer!) : nil,
-                minPoolCost: params.minPoolCost != nil ? Coin(Int64(params.minPoolCost!)!) : nil,
-                adaPerUtxoByte: params.coinsPerUtxoSize != nil ? Coin(Int64(params.coinsPerUtxoSize!)!) : nil,
+                minPoolCost: try int(params.minPoolCost, "min_pool_cost"),
+                adaPerUtxoByte: try int(params.coinsPerUtxoSize, "coins_per_utxo_size"),
                 costModels: nil, // Mapping cost models is complex due to different versions
-                executionCosts: (params.priceMem != nil && params.priceStep != nil) ? try? ExUnitPrices(from: .list([.float(params.priceMem!), .float(params.priceStep!)])) : nil,
-                maxTxExUnits: (params.maxTxExMem != nil && params.maxTxExSteps != nil) ? try? ExUnits(from: .list([.uint(UInt64(params.maxTxExMem!)!), .uint(UInt64(params.maxTxExSteps!)!)])) : nil,
-                maxBlockExUnits: (params.maxBlockExMem != nil && params.maxBlockExSteps != nil) ? try? ExUnits(from: .list([.uint(UInt64(params.maxBlockExMem!)!), .uint(UInt64(params.maxBlockExSteps!)!)])) : nil,
-                maxValueSize: params.maxValSize != nil ? UInt32(params.maxValSize!) : nil,
-                collateralPercentage: params.collateralPercent != nil ? UInt16(params.collateralPercent!) : nil,
-                maxCollateralInputs: params.maxCollateralInputs != nil ? UInt16(params.maxCollateralInputs!) : nil
+                executionCosts: executionCosts,
+                maxTxExUnits: try exUnits(params.maxTxExMem, params.maxTxExSteps, "max_tx_ex"),
+                maxBlockExUnits: try exUnits(params.maxBlockExMem, params.maxBlockExSteps, "max_block_ex"),
+                maxValueSize: try int(params.maxValSize, "max_val_size"),
+                collateralPercentage: try int(params.collateralPercent, "collateral_percent"),
+                maxCollateralInputs: try int(params.maxCollateralInputs, "max_collateral_inputs")
             )
             govAction = .parameterChangeAction(ParameterChangeAction(id: govActionID, protocolParamUpdate: update, policyHash: nil))
         case .noConfidence:
@@ -1245,7 +1303,8 @@ public actor BlockFrostChainContext: ChainContext {
             let withdrawalsData = try withdrawalsResponse.ok.body.json
             var withdrawals: [RewardAccount: Coin] = [:]
             for item in withdrawalsData {
-                withdrawals[RewardAccount(Data(hexString: item.stakeAddress) ?? Data())] = Coin(Int(item.amount)!)
+                withdrawals[RewardAccount(Data(hexString: item.stakeAddress) ?? Data())] = try LedgerValues.integer(
+                    text: item.amount, "Blockfrost proposal withdrawal amount")
             }
             govAction = .treasuryWithdrawalsAction(.init(withdrawals: withdrawals, policyHash: nil))
         @unknown default:
@@ -1629,24 +1688,6 @@ public actor BlockFrostChainContext: ChainContext {
 
         return CommitteeStateInfo(members: members, threshold: threshold)
     }
-}
-
-// Blockfrost returns protocol-parameter ratios as JSON doubles, but
-// `UnitInterval`/`NonNegativeInterval`'s primitive initializers reject
-// `.float` — they want a CBOR-tagged or list-form pair of integers.
-// Round to a fixed precision (6 decimal places by default, which covers
-// the precision Cardano actually publishes for these parameters).
-
-internal func makeUnitInterval(_ value: Double, precision: UInt64 = 1_000_000) -> UnitInterval {
-    let bounded = max(0.0, min(1.0, value))
-    let scaled = (bounded * Double(precision)).rounded()
-    return UnitInterval(numerator: UInt64(scaled), denominator: precision)
-}
-
-internal func makeNonNegativeInterval(_ value: Double, precision: UInt64 = 1_000_000) -> NonNegativeInterval {
-    let bounded = max(0.0, value)
-    let scaled = (bounded * Double(precision)).rounded()
-    return NonNegativeInterval(lowerBound: UInt64(scaled), upperBound: precision)
 }
 
 // MARK: - Transactions by hash

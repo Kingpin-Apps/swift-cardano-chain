@@ -1,3 +1,4 @@
+import BigInt
 import Foundation
 import OpenAPIRuntime
 import SwiftCardanoCore
@@ -166,53 +167,34 @@ public actor KoiosChainContext: ChainContext {
                 throw CardanoChainError.koiosError("Genesis response was empty")
             }
 
-            // Safely convert and unwrap expected fields. Many Koios fields are strings.
-            // Provide meaningful errors if any required field is missing.
-            func requireDouble(_ value: String?, name: String) throws -> Double {
-                guard let s = value, let d = Double(s) else {
-                    throw CardanoChainError.koiosError("Missing/invalid Double for \(name)")
-                }
-                return d
-            }
-            func requireInt(_ value: String?, name: String) throws -> Int {
-                guard let s = value, let i = Int(s) else {
-                    throw CardanoChainError.koiosError("Missing/invalid Int for \(name)")
-                }
-                return i
-            }
-            func requireUInt64(_ value: String?, name: String) throws -> UInt64 {
-                guard let s = value, let i = UInt64(s) else {
-                    throw CardanoChainError.koiosError("Missing/invalid UInt64 for \(name)")
-                }
-                return i
+            // Koios sends the genesis fields as strings, so each is read exactly
+            // from its text. Provide meaningful errors if any required field is missing.
+            func require<T: FixedWidthInteger>(_ value: String?, name: String) throws -> T {
+                try LedgerValues.integer(
+                    text: LedgerValues.required(value, "Koios genesis \(name)"), as: T.self, "Koios genesis \(name)")
             }
 
-            let activeSlotsCoefficient = try requireDouble(
-                genesis.activeslotcoeff, name: "activeslotcoeff")
-            let epochLength = try requireInt(genesis.epochlength, name: "epochlength")
-            let maxKesEvolutions = try requireInt(
-                genesis.maxkesrevolutions, name: "maxkesrevolutions")
-            let maxLovelaceSupply = try requireInt(
-                genesis.maxlovelacesupply, name: "maxlovelacesupply")
-            let networkMagic = try requireInt(genesis.networkmagic, name: "networkmagic")
-            let securityParam = try requireInt(genesis.securityparam, name: "securityparam")
-            let slotLength = try requireInt(genesis.slotlength, name: "slotlength")
-            let slotsPerKesPeriod = try requireInt(
-                genesis.slotsperkesperiod, name: "slotsperkesperiod")
-            let updateQuorum = try requireInt(genesis.updatequorum, name: "updatequorum")
+            let activeSlotsCoefficient = try LedgerValues.unitInterval(
+                text: LedgerValues.required(genesis.activeslotcoeff, "Koios genesis activeslotcoeff"),
+                "Koios genesis activeslotcoeff")
+            let slotLengthText = try LedgerValues.required(genesis.slotlength, "Koios genesis slotlength")
+            guard let slotLength = Decimal(string: slotLengthText, locale: Locale(identifier: "en_US_POSIX")),
+                  slotLength > 0 else {
+                throw CardanoChainError.koiosError("Invalid slot length \(slotLengthText) for slotlength")
+            }
 
             return GenesisParameters(
                 activeSlotsCoefficient: activeSlotsCoefficient,
-                epochLength: epochLength,
-                maxKesEvolutions: maxKesEvolutions,
-                maxLovelaceSupply: maxLovelaceSupply,
+                epochLength: try require(genesis.epochlength, name: "epochlength"),
+                maxKesEvolutions: try require(genesis.maxkesrevolutions, name: "maxkesrevolutions"),
+                maxLovelaceSupply: try require(genesis.maxlovelacesupply, name: "maxlovelacesupply"),
                 networkId: genesis.networkid!,
-                networkMagic: networkMagic,
-                securityParam: securityParam,
+                networkMagic: try require(genesis.networkmagic, name: "networkmagic"),
+                securityParam: try require(genesis.securityparam, name: "securityparam"),
                 slotLength: slotLength,
-                slotsPerKesPeriod: slotsPerKesPeriod,
+                slotsPerKesPeriod: try require(genesis.slotsperkesperiod, name: "slotsperkesperiod"),
                 systemStart: Date(timeIntervalSince1970: TimeInterval(genesis.systemstart!)),
-                updateQuorum: updateQuorum
+                updateQuorum: try require(genesis.updatequorum, name: "updatequorum")
             )
         } catch {
             throw CardanoChainError.koiosError("Failed to decode Genesis parameters: \(error)")
@@ -436,7 +418,7 @@ public actor KoiosChainContext: ChainContext {
                     transactionId: try TransactionId(
                         from: .string(result.txHash!)
                     ),
-                    index: UInt16(result.txIndex!)
+                    index: try LedgerValues.integer(result.txIndex!, "Koios output index")
                 )
 
                 var lovelaceAmount: UInt64 = 0
@@ -444,7 +426,7 @@ public actor KoiosChainContext: ChainContext {
 
                 // Koios returns `value` as a string holding the total lovelace on the UTxO
                 if let valueStr = result.value {
-                    lovelaceAmount = UInt64(valueStr) ?? 0
+                    lovelaceAmount = try LedgerValues.integer(text: valueStr, "Koios UTxO value")
                 }
 
                 // Multi-assets are returned separately in `asset_list`
@@ -461,12 +443,12 @@ public actor KoiosChainContext: ChainContext {
                         if multiAssets[policyId] == nil {
                             multiAssets[policyId] = Asset([:])
                         }
-                        multiAssets[policyId]?[assetName] = Int64(quantityStr) ?? 0
+                        multiAssets[policyId]?[assetName] = try LedgerValues.bigInt(text: quantityStr, "Koios asset quantity")
                     }
                 }
 
                 let amount = Value(
-                    coin: Int64(lovelaceAmount),
+                    coin: BigInt(lovelaceAmount),
                     multiAsset: multiAssets
                 )
 
@@ -544,7 +526,7 @@ public actor KoiosChainContext: ChainContext {
 
             let txIn = TransactionInput(
                 transactionId: try TransactionId(from: .string(txHashStr)),
-                index: UInt16(txIndexDouble)
+                index: try LedgerValues.integer(txIndexDouble, as: UInt16.self, "Koios output index")
             )
 
             var lovelaceAmount: UInt64 = 0
@@ -552,7 +534,7 @@ public actor KoiosChainContext: ChainContext {
 
             // Parse lovelace from value field
             if let valueStr = result.value {
-                lovelaceAmount = UInt64(valueStr) ?? 0
+                lovelaceAmount = try LedgerValues.integer(text: valueStr, "Koios UTxO value")
             }
 
             // Parse multi-assets from asset_list
@@ -569,12 +551,12 @@ public actor KoiosChainContext: ChainContext {
                     if multiAssets[policyId] == nil {
                         multiAssets[policyId] = Asset([:])
                     }
-                    multiAssets[policyId]?[assetName] = Int64(quantityStr) ?? 0
+                    multiAssets[policyId]?[assetName] = try LedgerValues.bigInt(text: quantityStr, "Koios asset quantity")
                 }
             }
 
             let amount = Value(
-                coin: Int64(lovelaceAmount),
+                coin: BigInt(lovelaceAmount),
                 multiAsset: multiAssets
             )
 
@@ -904,25 +886,24 @@ public actor KoiosChainContext: ChainContext {
 
         // Map relays
         let relays: [SwiftCardanoCore.Relay] =
-            pool.relays?.compactMap { relay in
+            try pool.relays?.compactMap { relay in
                 let port = relay.port.map { Int($0) }
                 if let ipv4String = relay.ipv4, let ipv4 = IPv4Address(ipv4String) {
                     return .singleHostAddr(SingleHostAddr(port: port, ipv4: ipv4, ipv6: nil))
                 } else if let ipv6String = relay.ipv6, let ipv6 = IPv6Address(ipv6String) {
                     return .singleHostAddr(SingleHostAddr(port: port, ipv4: nil, ipv6: ipv6))
                 } else if let dns = relay.dns {
-                    return .singleHostName(SingleHostName(port: port, dnsName: dns))
+                    return .singleHostName(try SingleHostName(port: port, dnsName: dns))
                 } else if let srv = relay.srv {
-                    return .multiHostName(MultiHostName(dnsName: srv))
+                    return .multiHostName(try MultiHostName(dnsName: srv))
                 }
                 return nil
             } ?? []
 
-        // Convert margin (Double) to UnitInterval using 10^8 denominator for precision
-        let marginDenom: UInt64 = 100_000_000
-        let marginDouble = pool.margin ?? 0.0
-        let marginNum = UInt64((marginDouble * Double(marginDenom)).rounded())
-        let margin = UnitInterval(numerator: marginNum, denominator: marginDenom)
+        // Koios's client reads the margin as a Double; its shortest
+        // description is the decimal Koios sent, read here exactly.
+        let margin = try pool.margin.map { try LedgerValues.unitInterval($0, "Koios pool margin") }
+            ?? UnitInterval(numerator: 0, denominator: 1)
 
         let poolOperator = try PoolOperator(from: poolId)
         let vrfKeyHash = VrfKeyHash(payload: Data(hex: pool.vrfKeyHash ?? ""))
@@ -969,8 +950,8 @@ public actor KoiosChainContext: ChainContext {
         let params = PoolParams(
             poolOperator: poolOperator.poolKeyHash,
             vrfKeyHash: vrfKeyHash,
-            pledge: Int(UInt64(pool.pledge ?? "0") ?? 0),
-            cost: Int(UInt64(pool.fixedCost ?? "0") ?? 0),
+            pledge: try LedgerValues.integer(text: pool.pledge ?? "0", "Koios pool pledge"),
+            cost: try LedgerValues.integer(text: pool.fixedCost ?? "0", "Koios pool fixed_cost"),
             margin: margin,
             rewardAccount: rewardAccount,
             poolOwners: poolOwners,

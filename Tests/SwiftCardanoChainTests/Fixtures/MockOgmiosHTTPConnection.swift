@@ -119,7 +119,23 @@ enum OgmiosMockData {
                 "delegateRepresentativeDeposit": {"ada": {"lovelace": 500000000}},
                 "delegateRepresentativeMaxIdleTime": 20,
                 "constitutionalCommitteeMinSize": 7,
-                "constitutionalCommitteeMaxTermLength": 146
+                "constitutionalCommitteeMaxTermLength": 146,
+                "delegateRepresentativeVotingThresholds": {
+                    "noConfidence": "67/100",
+                    "constitutionalCommittee": {"default": "2/3", "stateOfNoConfidence": "3/5"},
+                    "constitution": "3/4",
+                    "hardForkInitiation": "6/10",
+                    "protocolParametersUpdate": {
+                        "network": "67/100", "economic": "68/100", "technical": "69/100", "governance": "3/4"
+                    },
+                    "treasuryWithdrawals": "67/100"
+                },
+                "stakePoolVotingThresholds": {
+                    "noConfidence": "51/100",
+                    "constitutionalCommittee": {"default": "1/2", "stateOfNoConfidence": "13/25"},
+                    "hardForkInitiation": "51/100",
+                    "protocolParametersUpdate": {"security": "51/100"}
+                }
             },
             "id": null
         }

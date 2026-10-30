@@ -70,7 +70,7 @@ struct KoiosChainContextTests {
 
         let genesisParameters = try await chainContext.genesisParameters()
 
-        #expect(genesisParameters.activeSlotsCoefficient == 0.05)
+        #expect(genesisParameters.activeSlotsCoefficient == unit(1, 20))
         #expect(genesisParameters.epochLength == 432000)
         #expect(genesisParameters.maxKesEvolutions == 62)
         #expect(genesisParameters.maxLovelaceSupply == 45_000_000_000_000_000)
@@ -102,7 +102,10 @@ struct KoiosChainContextTests {
         #expect(protocolParameters.utxoCostPerByte == 4310)
         #expect(protocolParameters.protocolVersion.major == 10)
         #expect(protocolParameters.costModels.PlutusV1.count == 166)
-        #expect(protocolParameters.executionUnitPrices.priceMemory == 0.0577)
+        #expect(protocolParameters.executionUnitPrices.priceMemory == nonNegative(577, 10_000))
+        #expect(protocolParameters.executionUnitPrices.priceSteps == nonNegative(721, 10_000_000))
+        #expect(protocolParameters.monetaryExpansion == unit(3, 1000))
+        #expect(protocolParameters.minFeeRefScriptCostPerByte == nonNegative(15, 1))
     }
 
     @Test("Test protocolParameters throws on empty response")
@@ -148,7 +151,7 @@ struct KoiosChainContextTests {
 
         #expect(protocolParameters.txFeePerByte == 44)
         #expect(protocolParameters.maxTxSize == 16384)
-        #expect(protocolParameters.dRepVotingThresholds.ppGovGroup == 0.75)
+        #expect(protocolParameters.dRepVotingThresholds.ppGovGroup == unit(3, 4))
 
         #expect(throws: CardanoChainError.self) {
             _ = try KoiosChainContext.decodeProtocolParameters(from: OpenAPIObjectContainer())
@@ -182,7 +185,7 @@ struct KoiosChainContextTests {
 
         let policyId = try ScriptHash(
             from: .string(
-                "b0d07d45fe9514f80213f4020e5a61241458be626841cde717cb38a76e7574636f696e"
+                "b0d07d45fe9514f80213f4020e5a61241458be626841cde717cb38a7"
             )
         )
         let assetName = try AssetName(payload: Data(hex: "6574636f696e"))

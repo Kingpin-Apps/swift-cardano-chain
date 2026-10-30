@@ -249,7 +249,7 @@ struct OgmiosChainContextTests {
         let context = try await createMockOgmiosChainContext()
         let params = try await context.genesisParameters()
 
-        #expect(params.activeSlotsCoefficient == 0.05)  // "1/20"
+        #expect(params.activeSlotsCoefficient == unit(1, 20))  // "1/20"
         #expect(params.epochLength == 86400)
         #expect(params.maxKesEvolutions == 62)
         #expect(params.slotsPerKesPeriod == 129600)
@@ -406,23 +406,40 @@ struct OgmiosChainContextTests {
         }
     }
 
-    @Test("Test parseRatioString indirectly via genesisParameters")
-    func testParseRatioStringViaGenesisParameters() async throws {
-        // The genesisParameters method uses parseRatioString("1/20") → 0.05
-        let context = try await createMockOgmiosChainContext()
-        let params = try await context.genesisParameters()
-        let asc = try #require(params.activeSlotsCoefficient)
-        #expect(abs(asc - 0.05) < 0.0001)
-    }
-
-    @Test("Test parseRatioString indirectly via protocolParameters")
-    func testParseRatioStringViaProtocolParameters() async throws {
-        // protocolParameters uses parseRatio for stakePoolPledgeInfluence "3/10" → 0.3
+    @Test("Ogmios ratios are read exactly from their fractions")
+    func testRatiosViaProtocolParameters() async throws {
         let context = try await createMockOgmiosChainContext()
         let params = try await context.protocolParameters()
-        #expect(abs(params.poolPledgeInfluence - 0.3) < 0.0001)
-        #expect(abs(params.monetaryExpansion - 0.003) < 0.0001)  // "3/1000"
-        #expect(abs(params.treasuryCut - 0.2) < 0.0001)  // "1/5"
+        #expect(params.poolPledgeInfluence == nonNegative(3, 10))  // "3/10"
+        #expect(params.monetaryExpansion == unit(3, 1000))  // "3/1000"
+        #expect(params.treasuryCut == unit(1, 5))  // "1/5"
+        #expect(params.executionUnitPrices.priceMemory == nonNegative(577, 10_000))
+        #expect(params.executionUnitPrices.priceSteps == nonNegative(721, 10_000_000))
+        // SwiftOgmios reads `minFeeReferenceScripts.base` (15.0) as a Double.
+        #expect(params.minFeeRefScriptCostPerByte == nonNegative(15, 1))
+    }
+
+    @Test("Ogmios voting thresholds map to the ledger's fields, reduced")
+    func testVotingThresholdsViaProtocolParameters() async throws {
+        let context = try await createMockOgmiosChainContext()
+        let params = try await context.protocolParameters()
+        let drep = params.dRepVotingThresholds
+        #expect(drep.motionNoConfidence == unit(67, 100))
+        #expect(drep.committeeNormal == unit(2, 3))
+        #expect(drep.committeeNoConfidence == unit(3, 5))
+        #expect(drep.updateToConstitution == unit(3, 4))
+        #expect(drep.hardForkInitiation == unit(3, 5))  // "6/10", reduced
+        #expect(drep.ppNetworkGroup == unit(67, 100))
+        #expect(drep.ppEconomicGroup == unit(17, 25))  // "68/100", reduced
+        #expect(drep.ppTechnicalGroup == unit(69, 100))
+        #expect(drep.ppGovGroup == unit(3, 4))
+        #expect(drep.treasuryWithdrawal == unit(67, 100))
+        let pool = params.poolVotingThresholds
+        #expect(pool.motionNoConfidence == unit(51, 100))
+        #expect(pool.committeeNormal == unit(1, 2))
+        #expect(pool.committeeNoConfidence == unit(13, 25))
+        #expect(pool.hardForkInitiation == unit(51, 100))
+        #expect(pool.ppSecurityGroup == unit(51, 100))
     }
 
     @Test("Test epoch caching")

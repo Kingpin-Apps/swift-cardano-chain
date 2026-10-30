@@ -56,28 +56,17 @@ public actor OfflineTransferChainContext: ChainContext {
     }
 
     public func epoch() async throws -> Int {
-        let genesis = try await genesisParameters()
-        guard let systemStart = genesis.systemStart,
-              let epochLength = genesis.epochLength,
-              let slotLength = genesis.slotLength else {
-            throw CardanoChainError.offlineTransferError(
-                "Genesis parameters missing systemStart, epochLength, or slotLength."
-            )
-        }
-        let now = Date()
-        let elapsed = now.timeIntervalSince(systemStart)
-        let slotDurationSeconds = Double(slotLength)
-        let epochDurationSeconds = Double(epochLength) * slotDurationSeconds
-        guard epochDurationSeconds > 0 else {
-            throw CardanoChainError.offlineTransferError("Epoch duration is zero.")
-        }
-        return Int(elapsed / epochDurationSeconds)
+        try await chainPosition().epoch
     }
 
     public func lastBlockSlot() async throws -> Int {
-        let genesis = try await genesisParameters()
-        let currentEpoch = try await epoch()
+        try await chainPosition().slot
+    }
 
+    /// The current epoch and slot, worked out from the genesis parameters and
+    /// the clock — an offline transfer has no node to ask.
+    private func chainPosition() async throws -> (epoch: Int, slot: Int) {
+        let genesis = try await genesisParameters()
         guard let systemStart = genesis.systemStart,
               let epochLength = genesis.epochLength,
               let slotLength = genesis.slotLength else {
@@ -85,38 +74,62 @@ public actor OfflineTransferChainContext: ChainContext {
                 "Genesis parameters missing systemStart, epochLength, or slotLength."
             )
         }
+        return try Self.chainPosition(
+            at: Date(),
+            network: offlineTransfer.protocol.network ?? resolvedNetwork,
+            systemStart: systemStart,
+            epochLength: epochLength,
+            slotLength: slotLength
+        )
+    }
 
-        // Byron→Shelley hard fork transition epoch per network.
-        // mainnet=208, preprod=4, preview=0, everything else=0.
-        let network = offlineTransfer.protocol.network ?? resolvedNetwork
-        let byronTransitionEpoch: Int
+    /// The epoch and slot at `date`.
+    ///
+    /// Mainnet and pre-production began with a Byron era of 21,600 twenty-second
+    /// slots per epoch, so their slots are read from core's checked
+    /// ``SlotTimeline``; any other network is taken to have had uniform slots
+    /// of `slotLength` seconds from `systemStart`.
+    static func chainPosition(
+        at date: Date,
+        network: Network,
+        systemStart: Date,
+        epochLength: UInt64,
+        slotLength: Decimal
+    ) throws -> (epoch: Int, slot: Int) {
+        let timeline: SlotTimeline
+        let byronEpochs: UInt64
         switch network {
         case .mainnet:
-            byronTransitionEpoch = 208
+            (timeline, byronEpochs) = (.mainnet, 208)
         case .preprod:
-            byronTransitionEpoch = 4
+            (timeline, byronEpochs) = (.preprod, 4)
+        case .preview:
+            (timeline, byronEpochs) = (.preview, 0)
         default:
-            byronTransitionEpoch = 0
+            let milliseconds = slotLength * 1000
+            let slotMilliseconds = NSDecimalNumber(decimal: milliseconds).int64Value
+            guard slotMilliseconds > 0, Decimal(slotMilliseconds) == milliseconds else {
+                throw CardanoChainError.offlineTransferError(
+                    "Genesis slot length \(slotLength)s is not a whole number of milliseconds."
+                )
+            }
+            timeline = SlotTimeline(systemStart: systemStart, slotLengthMilliseconds: slotMilliseconds)
+            byronEpochs = 0
+        }
+        guard epochLength > 0 else {
+            throw CardanoChainError.offlineTransferError("Genesis epoch length is zero.")
         }
 
-        // Byron era: 21600 slots per epoch, 20-second slot interval.
-        let byronEpochLength = 21600
-        let byronSlotLengthSeconds = 20
-        let byronSlots = byronTransitionEpoch * byronEpochLength * byronSlotLengthSeconds
-
-        // Shelley+ era: slots from genesis parameters.
-        let slotDurationSeconds = Double(slotLength)
-        let shelleyEpochs = max(0, currentEpoch - byronTransitionEpoch)
-        let shelleySlots = shelleyEpochs * epochLength
-
-        // Slots elapsed in the current epoch.
-        let now = Date()
-        let elapsed = now.timeIntervalSince(systemStart)
-        let epochDurationSeconds = Double(epochLength) * slotDurationSeconds
-        let currentEpochElapsedSeconds = elapsed.truncatingRemainder(dividingBy: epochDurationSeconds)
-        let slotsInCurrentEpoch = Int(currentEpochElapsedSeconds / slotDurationSeconds)
-
-        return byronSlots + shelleySlots + slotsInCurrentEpoch
+        let slot = timeline.slot(atMilliseconds: Int64((date.timeIntervalSince1970 * 1000).rounded(.down)))
+        let byronEpochLength: UInt64 = 21600
+        let byronSlots = byronEpochs * byronEpochLength
+        let epoch = slot < byronSlots
+            ? slot / byronEpochLength
+            : byronEpochs + (slot - byronSlots) / epochLength
+        guard let epoch = Int(exactly: epoch), let slot = Int(exactly: slot) else {
+            throw CardanoChainError.offlineTransferError("Slot \(slot) is out of range.")
+        }
+        return (epoch, slot)
     }
 
     // MARK: - Initialiser

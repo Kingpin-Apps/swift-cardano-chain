@@ -1,3 +1,4 @@
+import BigInt
 import Foundation
 import SwiftCardanoCore
 import SwiftCardanoNetwork
@@ -309,15 +310,14 @@ public struct KupoChainContext: ChainContext {
             index: index
         )
 
-        guard let coin = Int64(exactly: match.value.coins) else {
+        guard match.value.coins >= 0 else {
             throw CardanoChainError.valueError("Kupo coin quantity \(match.value.coins) is out of range")
         }
+        let coin = BigInt(match.value.coins)
         var multiAsset = MultiAsset([:])
         for (unit, count) in match.value.assets?.additionalProperties ?? [:] {
             let parts = unit.split(separator: ".", maxSplits: 1).map(String.init)
-            guard let quantity = Int64(exactly: count) else {
-                throw CardanoChainError.valueError("Kupo asset quantity \(count) is out of range")
-            }
+            let quantity = BigInt(count)
             let policy = ScriptHash(payload: Data(hex: parts[0]))
             let name = try AssetName(payload: Data(hex: parts.count > 1 ? parts[1] : ""))
             var asset = multiAsset[policy] ?? Asset([:])
