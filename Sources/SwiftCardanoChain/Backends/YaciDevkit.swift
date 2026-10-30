@@ -514,7 +514,9 @@ public actor YaciDevkitChainContext: ChainContext {
         let params = try await perform("get protocol parameters") {
             try await api.client.getLatestProtocolParams().ok.body.json
         }
-        let genesis = (try? await genesisCostModels()) ?? (nil, nil, nil)
+        // The genesis files are the cost models' ledger-ordered source; failing to read them is
+        // an error, not a reason to use the store's alphabetical order.
+        let genesis = try await genesisCostModels()
         return try Self.decodeProtocolParameters(from: params, genesisCostModels: genesis)
     }
 
@@ -567,7 +569,8 @@ public actor YaciDevkitChainContext: ChainContext {
         let costModels = ProtocolParametersCostModels(
             PlutusV1: try genesisCostModels.v1 ?? storeModel(["PlutusV1", "plutusV1", "plutus:v1"]),
             PlutusV2: try genesisCostModels.v2 ?? storeModel(["PlutusV2", "plutusV2", "plutus:v2"]),
-            PlutusV3: try genesisCostModels.v3 ?? storeModel(["PlutusV3", "plutusV3", "plutus:v3"])
+            // The store's V3 map is not in ledger order, so V3 comes from genesis or not at all.
+            PlutusV3: try LedgerValues.required(genesisCostModels.v3, "Yaci genesis Plutus V3 cost model")
         )
 
         return ProtocolParameters(
@@ -1001,8 +1004,8 @@ public actor YaciDevkitChainContext: ChainContext {
         if let poolId = info.poolId, !poolId.isEmpty {
             stakeDelegation = try? Self.poolOperator(from: poolId)
         }
-        let voteDelegation = try? await latestVoteDelegation(stakeAddress: bech32)
-        let active = (try? await isStakeRegistered(address: bech32)) ?? false
+        let voteDelegation = try await latestVoteDelegation(stakeAddress: bech32)
+        let active = try await isStakeRegistered(address: bech32)
 
         return [
             StakeAddressInfo(
@@ -1313,7 +1316,7 @@ public actor YaciDevkitChainContext: ChainContext {
         // genesis it does serve must read.
         let genesisData = try? await genesisFile("shelley")
         let genesis = try genesisData.map { try Self.genesisPools(from: $0) } ?? [:]
-        let retirements = (try? await poolRetirements()) ?? [:]
+        let retirements = try await poolRetirements()
 
         var ids = Set(certificates.keys)
         ids.formUnion(genesis.keys)
@@ -1359,7 +1362,7 @@ public actor YaciDevkitChainContext: ChainContext {
         let poolIdHex = poolOperator.poolKeyHash.payload.toHex.lowercased()
         let currentEpoch = try await epoch()
 
-        let details = await poolDetails(poolOperator: poolOperator, epoch: currentEpoch)
+        let details = try await poolDetails(poolOperator: poolOperator, epoch: currentEpoch)
         let certificate = try await poolCertificates()[poolIdHex]
 
         // Parameters come from the registration certificate where there is one. It carries the
@@ -1387,27 +1390,25 @@ public actor YaciDevkitChainContext: ChainContext {
             status = try Self.poolStatus(retirement: certificate.retirement, epoch: currentEpoch)
         } else {
             status = try Self.poolStatus(
-                retirement: (try? await poolRetirements())?[poolIdHex], epoch: currentEpoch)
+                retirement: try await poolRetirements()[poolIdHex], epoch: currentEpoch)
         }
 
         return StakePoolInfo(poolParams: params, status: status)
     }
 
-    /// Yaci's per-epoch view of a pool, or `nil` when the store cannot answer for either form of
-    /// the pool's ID.
+    /// Yaci's per-epoch view of a pool, or `nil` when the store has none for either form of the
+    /// pool's ID (it answers with something other than 200, or with an empty record). A request
+    /// that fails, or a 200 whose body does not decode, throws.
     private func poolDetails(
         poolOperator: PoolOperator, epoch: Int
-    ) async -> Components.Schemas.PoolDetailsDto? {
-        let ids = [try? poolOperator.id(.bech32), poolOperator.poolKeyHash.payload.toHex]
-        for id in ids.compactMap({ $0 }) {
-            guard
-                let output = try? await api.client.getPoolDetails(
-                    path: .init(poolId: id, epoch: try epoch.checked("Yaci epoch"))
-                ),
-                case .ok(let ok) = output,
-                let details = try? ok.body.json,
-                details.poolId != nil || details.poolHash != nil
-            else { continue }
+    ) async throws -> Components.Schemas.PoolDetailsDto? {
+        let ids = [try poolOperator.id(.bech32), poolOperator.poolKeyHash.payload.toHex]
+        for id in ids {
+            let output = try await api.client.getPoolDetails(
+                path: .init(poolId: id, epoch: try epoch.checked("Yaci epoch")))
+            guard case .ok(let ok) = output else { continue }
+            let details = try ok.body.json
+            guard details.poolId != nil || details.poolHash != nil else { continue }
             return details
         }
         return nil
@@ -1580,10 +1581,9 @@ public actor YaciDevkitChainContext: ChainContext {
         var blocks: [Components.Schemas.PoolBlock] = []
         for epoch in [currentEpoch, currentEpoch - 1] where epoch >= 0 && blocks.isEmpty {
             for id in ids where blocks.isEmpty {
-                blocks =
-                    (try? await api.client.getBlocksBySlotLeaderEpoch(
-                        path: .init(poolId: id), query: .init(epoch: try epoch.checked("Yaci epoch"))
-                    ).ok.body.json) ?? []
+                blocks = try await api.client.getBlocksBySlotLeaderEpoch(
+                    path: .init(poolId: id), query: .init(epoch: try epoch.checked("Yaci epoch"))
+                ).ok.body.json
             }
         }
         guard let latest = blocks.max(by: { ($0.number ?? 0) < ($1.number ?? 0) }),
@@ -1692,14 +1692,13 @@ public actor YaciDevkitChainContext: ChainContext {
         )
     }
 
-    /// A DRep's live voting power, or `nil` when the local-state endpoint is unavailable.
+    /// A DRep's live voting power, or `nil` when the local-state endpoint does not answer with
+    /// 200 (it is only served while the cluster runs) or reports no amount.
     ///
-    /// - Throws: When Yaci reports an amount that is not a valid `Coin`.
+    /// - Throws: When the request fails, the body does not decode, or the amount is not a `Coin`.
     private func drepStake(hex: String) async throws -> Coin? {
-        guard let output = try? await api.client.getDRepStakeDistr(path: .init(dRepHash: hex)),
-            case .ok(let ok) = output,
-            let amount = try? ok.body.json.amount
-        else { return nil }
+        let output = try await api.client.getDRepStakeDistr(path: .init(dRepHash: hex))
+        guard case .ok(let ok) = output, let amount = try ok.body.json.amount else { return nil }
         return try amount.checked("Yaci DRep stake amount")
     }
 

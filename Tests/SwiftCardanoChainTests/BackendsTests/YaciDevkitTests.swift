@@ -270,16 +270,40 @@ struct YaciDevkitChainContextTests {
         #expect(params.costModels.PlutusV3.first == 100788)
     }
 
-    @Test("Test protocolParameters falls back to the store's cost models")
-    func testProtocolParametersCostModelsFromStore() async throws {
-        // With no genesis to read, the store's own maps are flattened in key order.
-        let admin = MockYaciDevkitAdmin(failing: ["alonzo", "conway"])
-        let context = try makeContext(admin: admin)
+    @Test("Test protocolParameters throws when the genesis cost models cannot be read")
+    func testProtocolParametersCostModelsNeedGenesis() async throws {
+        // The store's maps are alphabetical, which is not Plutus V3's ledger order, so a missing
+        // genesis is an error rather than a reason to use them.
+        let context = try makeContext(admin: MockYaciDevkitAdmin(failing: ["alonzo", "conway"]))
+        await #expect(throws: (any Error).self) { _ = try await context.protocolParameters() }
+    }
+
+    @Test("Test V1 and V2 cost models fall back to the store's maps, which are in ledger order")
+    func testProtocolParametersCostModelsV1V2FromStore() async throws {
+        // Genesis without V1/V2 models: the store's alphabetical maps are their ledger order.
+        let context = try makeContext(admin: MockYaciDevkitAdmin(overrides: ["alonzo": "{}"]))
         let params = try await context.protocolParameters()
 
         #expect(params.costModels.PlutusV1 == [1, 2])
         #expect(params.costModels.PlutusV2 == [7, 8, 9])
-        #expect(params.costModels.PlutusV3 == [1, 2, 3])
+        #expect(params.costModels.PlutusV3.count == 251)
+    }
+
+    static let failingCertificateLogs: [String] = ["getStakeRegistrations", "getDelegationsByAddress"]
+
+    @Test("stakeAddressInfo throws when a certificate log cannot be read, instead of reporting unregistered",
+          arguments: failingCertificateLogs)
+    func testStakeAddressInfoLogFailure(_ operation: String) async throws {
+        let context = try makeContext(transport: MockYaciTransport(failing: [operation: 500]))
+        await #expect(throws: (any Error).self) {
+            _ = try await context.stakeAddressInfo(address: try self.stakeAddress)
+        }
+    }
+
+    @Test("stakePools throws when the retirement log cannot be read, instead of treating every pool as live")
+    func testStakePoolsRetirementFailure() async throws {
+        let context = try makeContext(transport: MockYaciTransport(failing: ["getRetirements": 500]))
+        await #expect(throws: (any Error).self) { _ = try await context.stakePools() }
     }
 
     @Test("Test protocolParameters is cached per epoch")
