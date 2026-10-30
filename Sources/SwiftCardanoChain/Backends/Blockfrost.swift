@@ -1542,7 +1542,7 @@ public actor BlockFrostChainContext: ChainContext {
 
         return GovActionVotes(
             govActionId: govActionID,
-            govAction: info.govAction,
+            govAction: try LedgerValues.required(info.govAction, "Blockfrost proposal action"),
             committeeVotes: committeeVotes,
             dRepVotes: dRepVotes,
             stakePoolVotes: stakePoolVotes,

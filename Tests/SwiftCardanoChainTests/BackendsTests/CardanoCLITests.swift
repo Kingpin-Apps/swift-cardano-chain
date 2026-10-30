@@ -899,6 +899,28 @@ struct CardanoCLIContextTests {
         await #expect(throws: (any Error).self) { _ = try await context.drepStakeDistribution() }
     }
 
+    @Test("A proposal no longer in the gov state has no action body, not a stand-in info action")
+    func testGovActionInfoGoneProposal() async throws {
+        let config = createMockConfig()
+        let cli = try await CardanoCLI(
+            configuration: config, commandRunner: createCardaonCLIMockCommandRunner(config: config))
+        let context = try await CardanoCliChainContext(nodeConfig: FilePath(configFilePath!), network: .preview, cli: cli)
+        let gone = GovActionID(
+            transactionID: TransactionId(payload: Data(repeating: 0x77, count: 32)), govActionIndex: 0)
+        let info = try await context.govActionInfo(govActionID: gone)
+        #expect(info.govAction == nil)
+        #expect(info.status == .expired)
+
+        // One that is still there carries its action. (The mock serves each command's
+        // output once, so a fresh context.)
+        let present = try await cliContext(govAction: GovActionPreviousIDTests.ledgerHardFork(false))
+            .govActionInfo(govActionID: Self.cliProposal)
+        guard case .hardForkInitiationAction? = present.govAction else {
+            Issue.record("Expected the proposal's hard fork, got \(String(describing: present.govAction))")
+            return
+        }
+    }
+
     @Test("Test govActionsAll")
     func testGovActionsAll() async throws {
         let config = createMockConfig()

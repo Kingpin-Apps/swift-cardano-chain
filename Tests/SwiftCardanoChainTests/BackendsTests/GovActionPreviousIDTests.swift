@@ -75,7 +75,7 @@ struct GovActionPreviousIDTests {
             client: SwiftKoios.Client(
                 serverURL: try SwiftKoios.Network.preview.url(),
                 transport: KoiosMockTransport(overrides: ["proposal_list": "[\(row)]"])))
-        return try await context.govActionInfo(govActionID: Self.proposalID).govAction
+        return try #require(try await context.govActionInfo(govActionID: Self.proposalID).govAction)
     }
 
     @Test("Koios reads a hard fork's previous action, or none", arguments: withAndWithout)
@@ -116,7 +116,7 @@ struct GovActionPreviousIDTests {
             client: SwiftBlockfrostAPI.Client(
                 serverURL: URL(string: "https://cardano-preview.blockfrost.io/api/v0")!,
                 transport: Transport(proposal: proposal)))
-        return try await context.govActionInfo(govActionID: Self.proposalID).govAction
+        return try #require(try await context.govActionInfo(govActionID: Self.proposalID).govAction)
     }
 
     @Test("Blockfrost reads a hard fork's previous action, or none", arguments: withAndWithout)
@@ -200,7 +200,7 @@ struct GovActionPreviousIDTests {
             """
         let context = try await createMockOgmiosChainContext(
             overrides: ["queryLedgerState/governanceProposals": Data(result.utf8)])
-        return try await context.govActionInfo(govActionID: Self.proposalID).govAction
+        return try #require(try await context.govActionInfo(govActionID: Self.proposalID).govAction)
     }
 
     static func ogmiosAncestor(_ previous: Bool) -> String {

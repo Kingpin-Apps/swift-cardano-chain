@@ -9,7 +9,12 @@ public enum GovActionStatus: Codable, Sendable {
 
 public struct GovActionInfo: Codable, CustomStringConvertible, Equatable, Sendable {
     public var govActionId: GovActionID
-    public var govAction: GovAction
+    /// The action the proposal makes, or `nil` when its body is no longer
+    /// available — a backend that reads proposals from the ledger's current
+    /// governance state (cardano-cli) no longer has a proposal once it has
+    /// been enacted, expired or dropped, though it can still report that.
+    /// Never a stand-in action.
+    public var govAction: GovAction?
     public var proposedIn: UInt64?
     public var expiresAfter: UInt64?
     public var ratifiedEpoch: UInt64?

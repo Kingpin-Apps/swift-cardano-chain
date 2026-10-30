@@ -939,13 +939,9 @@ public actor CardanoCliChainContext: ChainContext {
                 && (inExpiredSet || missingFromProposals || expiredByEpoch))
             ? currentEpoch : nil
 
-        let parsedGovAction: GovAction
-        if let proposal {
-            parsedGovAction = try extractGovAction(proposal)
-        } else {
-            // When the proposal is no longer present, return a neutral placeholder action.
-            parsedGovAction = .infoAction(InfoAction())
-        }
+        // A proposal no longer in the gov state has no body to read: report its
+        // status without an action rather than standing in a different one.
+        let parsedGovAction: GovAction? = try proposal.map { try extractGovAction($0) }
 
         return GovActionInfo(
             govActionId: govActionID,
