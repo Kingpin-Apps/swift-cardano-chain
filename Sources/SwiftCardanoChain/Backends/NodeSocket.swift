@@ -52,6 +52,9 @@ public actor NodeSocketChainContext: ChainContext {
     private let _network: Network
     private var _genesisParameters: GenesisParameters?
     private var _genesisParametersFetch: Task<GenesisParameters, Error>?
+    /// Reads the genesis parameters in place of the node: the seam tests use
+    /// to drive ``slotTimeline()`` without a socket. `nil` reads them from the node.
+    private var genesisLoader: (@Sendable () async throws -> GenesisParameters)? = nil
     private var _protocolParameters: ProtocolParameters?
     private var _protocolParametersEpoch: Int?
     private var _protocolParametersFetch: Task<ProtocolParameters, Error>?
@@ -123,6 +126,7 @@ public actor NodeSocketChainContext: ChainContext {
     }
 
     private func fetchGenesisFromNode() async throws -> GenesisParameters {
+        if let genesisLoader { return try await genesisLoader() }
         let config = try await withClient { try await $0.queryGenesisConfig() }
         guard case .shelley(let shelley) = config else {
             throw CardanoChainError.operationError(
@@ -190,6 +194,20 @@ public actor NodeSocketChainContext: ChainContext {
         config.connection.socketPath = socketPath.string
         self._network = network
         self._networkConfig = config
+    }
+
+    /// A context whose genesis parameters come from `genesisLoader` instead
+    /// of the node. For tests.
+    init(
+        socketPath: FilePath,
+        network: Network = .mainnet,
+        genesisLoader: @escaping @Sendable () async throws -> GenesisParameters
+    ) {
+        var config = Self.networkConfigPreset(for: network)
+        config.connection.socketPath = socketPath.string
+        self._network = network
+        self._networkConfig = config
+        self.genesisLoader = genesisLoader
     }
 
 #if CLIBACKENDS
