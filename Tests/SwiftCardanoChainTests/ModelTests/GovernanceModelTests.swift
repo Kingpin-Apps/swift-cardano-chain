@@ -381,12 +381,12 @@ struct CommitteeStateInfoModelTests {
             status: .expired
         )
 
-        let state = CommitteeStateInfo(members: [memberA, memberB], threshold: 0.67)
+        let state = CommitteeStateInfo(members: [memberA, memberB], threshold: unit(67, 100))
 
         #expect(state.members.count == 2)
         #expect(state.members[0] == memberA)
         #expect(state.members[1] == memberB)
-        #expect(state.threshold == 0.67)
+        #expect(state.threshold == unit(67, 100))
     }
 
     @Test("Codable round-trip preserves keyHash and scriptHash members")
@@ -415,7 +415,7 @@ struct CommitteeStateInfoModelTests {
         )
         let original = CommitteeStateInfo(
             members: [keyHashMember, scriptHashMember],
-            threshold: 0.51
+            threshold: unit(51, 100)
         )
 
         let encoded = try JSONEncoder().encode(original)

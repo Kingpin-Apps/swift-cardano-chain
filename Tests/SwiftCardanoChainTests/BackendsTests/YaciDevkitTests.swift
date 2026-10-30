@@ -1114,7 +1114,7 @@ struct YaciDevkitChainContextTests {
         let context = try makeContext()
         let state = try await context.committeeState()
 
-        #expect(state.threshold == 2.0 / 3.0)
+        #expect(state.threshold == unit(2, 3))
         #expect(state.members.count == 2)
 
         let cold = CommitteeColdCredential(
@@ -1144,7 +1144,7 @@ struct YaciDevkitChainContextTests {
 
         let state = try await context.committeeState()
 
-        #expect(state.threshold == 0.6)
+        #expect(state.threshold == unit(3, 5))
         // The live view lists one member; the resigned cold key is still surfaced, as
         // unrecognized membership rather than silently dropped.
         #expect(state.members.count == 2)

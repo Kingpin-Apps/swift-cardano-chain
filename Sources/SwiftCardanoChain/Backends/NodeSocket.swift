@@ -731,11 +731,17 @@ public actor NodeSocketChainContext: ChainContext {
             )
         }
 
-        // A missing threshold is not 0: there is no committee to report one for.
-        guard let threshold = state.threshold?.quotient else {
-            throw CardanoChainError.valueError("The node reports no committee quorum threshold")
+        return CommitteeStateInfo(members: members, threshold: try Self.committeeThreshold(state.threshold))
+    }
+
+    /// The node's quorum fraction, exactly; `nil` when the ledger has no
+    /// committee (a state of no confidence).
+    ///
+    /// - Throws: When the fraction is negative, above one or too large.
+    static func committeeThreshold(_ fraction: Fraction?) throws -> UnitInterval? {
+        try fraction.map {
+            try LedgerValues.unitInterval(text: "\($0.numerator)/\($0.denominator)", "node committee quorum")
         }
-        return CommitteeStateInfo(members: members, threshold: threshold)
     }
 
     private static func mapProposal(

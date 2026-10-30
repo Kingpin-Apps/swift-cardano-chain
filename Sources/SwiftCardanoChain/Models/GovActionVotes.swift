@@ -198,11 +198,42 @@ public struct CommitteeStateInfo: Codable, Equatable, Sendable {
     }
 
     public var members: [Member]
-    /// Quorum threshold as a decimal in [0.0, 1.0].
-    public var threshold: Double
 
-    public init(members: [Member], threshold: Double) {
+    /// The committee's quorum: the ledger's exact fraction, or `nil` when the
+    /// ledger has no committee (a state of no confidence) and so no quorum.
+    ///
+    /// - Note: This was a `Double` before 0.14. It is now the exact
+    ///   `UnitInterval` the ledger holds, and optional, because a chain with no
+    ///   committee is a valid state rather than a quorum of 0.
+    public var threshold: UnitInterval?
+
+    public init(members: [Member], threshold: UnitInterval?) {
         self.members = members
         self.threshold = threshold
+    }
+
+    private enum CodingKeys: String, CodingKey { case members, threshold }
+
+    /// Reads the quorum as `{"numerator": n, "denominator": d}`, as written
+    /// now, or as the JSON number earlier versions wrote (read exactly from
+    /// its decimal text, so `0.67` is 67/100). `null` or absent is `nil`.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        members = try c.decode([Member].self, forKey: .members)
+        if try !c.contains(.threshold) || c.decodeNil(forKey: .threshold) {
+            threshold = nil
+        } else if let decimal = try? c.decode(Decimal.self, forKey: .threshold) {
+            threshold = try LedgerValues.unitInterval(decimal, "committee state threshold")
+        } else {
+            threshold = try c.decode(UnitInterval.self, forKey: .threshold)
+        }
+    }
+
+    /// Writes the quorum as core's `UnitInterval` JSON,
+    /// `{"numerator": n, "denominator": d}`, and leaves it out when `nil`.
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(members, forKey: .members)
+        try c.encodeIfPresent(threshold, forKey: .threshold)
     }
 }

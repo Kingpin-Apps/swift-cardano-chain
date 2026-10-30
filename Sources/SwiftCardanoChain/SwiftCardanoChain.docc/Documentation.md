@@ -239,11 +239,16 @@ let spoStake  = try await context.spoStakeDistribution()
 ### Constitutional Committee State
 
 ``ChainContext/committeeState()`` returns a ``CommitteeStateInfo`` capturing every
-cold→hot authorization, term expirations, and the active quorum threshold:
+cold→hot authorization, term expirations, and the active quorum threshold — the
+ledger's exact fraction, or `nil` when there is no committee (a state of no confidence):
 
 ```swift
 let state = try await context.committeeState()
-print("Quorum: \(state.threshold)")
+if let quorum = state.threshold {
+    print("Quorum: \(quorum.numerator)/\(quorum.denominator)")
+} else {
+    print("No committee")
+}
 for member in state.members {
     print("\(member.coldCredential) → \(member.hotCredential.map(String.init(describing:)) ?? "unauthorized")")
 }

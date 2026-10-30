@@ -353,7 +353,7 @@ struct OfflineTransferModelTests {
                     status: .active
                 )
             ],
-            threshold: 0.67
+            threshold: unit(67, 100)
         )
 
         try transfer.save(to: path)
@@ -390,7 +390,7 @@ struct OfflineTransferModelTests {
         #expect(loaded.drepStakeEntries.first?.stake == 305_554_989_074)
         #expect(loaded.spoStakeEntries.count == 1)
         #expect(loaded.spoStakeEntries.first?.stake == 1_234_567_890)
-        #expect(loaded.committeeStateSnapshot?.threshold == 0.67)
+        #expect(loaded.committeeStateSnapshot?.threshold == unit(67, 100))
         #expect(loaded.committeeStateSnapshot?.members.count == 1)
     }
 
@@ -431,5 +431,101 @@ private enum JSONObject {
     static func encode<T: Encodable>(_ value: T) throws -> [String: Any] {
         let data = try JSONEncoder().encode(value)
         return try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+    }
+}
+
+// MARK: - Committee quorum in offline-transfer files
+
+@Suite("The committee quorum in an offline-transfer file")
+struct OfflineTransferCommitteeQuorumTests {
+
+    private func tempPath() -> FilePath {
+        FilePath(FileManager.default.temporaryDirectory
+            .appendingPathComponent("committee-quorum-\(UUID().uuidString).json").path)
+    }
+
+    private func transfer(threshold: UnitInterval?) -> OfflineTransfer {
+        var transfer = OfflineTransfer(history: [OfflineTransferHistory(action: .new)])
+        transfer.committeeStateSnapshot = CommitteeStateInfo(members: [], threshold: threshold)
+        return transfer
+    }
+
+    @Test("A file written by an older version, with the quorum as a JSON number, reads exactly")
+    func oldNumberForm() throws {
+        let path = tempPath()
+        defer { try? FileManager.default.removeItem(atPath: path.string) }
+        try transfer(threshold: unit(67, 100)).save(to: path)
+
+        // Rewrite the quorum the way older versions wrote it: a bare number,
+        // as JSONEncoder writes the Double 0.67. (The text is edited directly:
+        // JSONSerialization would write 0.67000000000000004.)
+        let url = URL(fileURLWithPath: path.string)
+        let text = try String(contentsOf: url, encoding: .utf8)
+        let newForm = try #require(text.range(
+            of: #"\{\s*"denominator"\s*:\s*100,\s*"numerator"\s*:\s*67\s*\}"#, options: .regularExpression))
+        try text.replacingCharacters(in: newForm, with: "0.67").write(to: url, atomically: true, encoding: .utf8)
+        #expect(try String(contentsOf: url, encoding: .utf8).contains(#""threshold" : 0.67"#))
+
+        let loaded = try OfflineTransfer.load(from: path)
+        #expect(loaded.committeeStateSnapshot?.threshold == unit(67, 100))
+    }
+
+    @Test("The quorum is written as core's {numerator, denominator} and reads back")
+    func newFormRoundTrips() throws {
+        let path = tempPath()
+        defer { try? FileManager.default.removeItem(atPath: path.string) }
+        try transfer(threshold: unit(2, 3)).save(to: path)
+
+        let object = try #require(
+            try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: path.string)))
+                as? [String: Any])
+        let state = try #require(object["committee_state"] as? [String: Any])
+        let threshold = try #require(state["threshold"] as? [String: Any])
+        #expect(threshold["numerator"] as? Int == 2)
+        #expect(threshold["denominator"] as? Int == 3)
+        #expect(threshold.count == 2)
+
+        #expect(try OfflineTransfer.load(from: path).committeeStateSnapshot?.threshold == unit(2, 3))
+    }
+
+    @Test("No committee writes no quorum and reads back as nil")
+    func nilRoundTrips() throws {
+        let path = tempPath()
+        defer { try? FileManager.default.removeItem(atPath: path.string) }
+        try transfer(threshold: nil).save(to: path)
+
+        let object = try #require(
+            try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: path.string)))
+                as? [String: Any])
+        let state = try #require(object["committee_state"] as? [String: Any])
+        #expect(state["threshold"] == nil)
+
+        let loaded = try OfflineTransfer.load(from: path)
+        #expect(loaded.committeeStateSnapshot != nil)
+        #expect(loaded.committeeStateSnapshot?.threshold == nil)
+    }
+
+    static let quorumJSON: [String] = [
+        #"{"members": [], "threshold": null}"#,
+        #"{"members": []}"#,
+    ]
+
+    @Test("A null or absent quorum decodes as nil", arguments: quorumJSON)
+    func nullOrAbsent(_ json: String) throws {
+        let state = try JSONDecoder().decode(CommitteeStateInfo.self, from: Data(json.utf8))
+        #expect(state.threshold == nil)
+    }
+
+    static let badQuorumJSON: [String] = [
+        #"{"members": [], "threshold": 1.5}"#,
+        #"{"members": [], "threshold": {"numerator": 3, "denominator": 2}}"#,
+        #"{"members": [], "threshold": "two thirds"}"#,
+    ]
+
+    @Test("A quorum outside [0, 1] or of the wrong shape fails to decode", arguments: badQuorumJSON)
+    func badQuorum(_ json: String) {
+        #expect(throws: (any Error).self) {
+            try JSONDecoder().decode(CommitteeStateInfo.self, from: Data(json.utf8))
+        }
     }
 }

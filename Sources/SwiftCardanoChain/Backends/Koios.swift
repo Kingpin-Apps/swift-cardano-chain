@@ -1526,13 +1526,19 @@ public actor KoiosChainContext: ChainContext {
             )
         }
 
-        // A missing quorum is not 0: the ledger always has one while a committee exists.
-        let quorumNumerator: UInt64 = try LedgerValues.required(committeeInfo.quorumNumerator, "Koios quorum_numerator")
-            .checked("Koios quorum_numerator")
-        let quorumDenominator: UInt64 = try LedgerValues.required(committeeInfo.quorumDenominator, "Koios quorum_denominator")
-            .checked("Koios quorum_denominator")
-        let quorum = try LedgerValues.unitInterval(text: "\(quorumNumerator)/\(quorumDenominator)", "Koios committee quorum")
-        let threshold = Double(quorum.numerator) / Double(quorum.denominator)
+        // No quorum means no committee (a state of no confidence): nil. Half
+        // a fraction, or one outside [0, 1], is malformed and throws.
+        let threshold: UnitInterval?
+        switch (committeeInfo.quorumNumerator, committeeInfo.quorumDenominator) {
+        case (nil, nil):
+            threshold = nil
+        case let (numerator?, denominator?):
+            let n: UInt64 = try numerator.checked("Koios quorum_numerator")
+            let d: UInt64 = try denominator.checked("Koios quorum_denominator")
+            threshold = try LedgerValues.unitInterval(text: "\(n)/\(d)", "Koios committee quorum")
+        default:
+            throw CardanoChainError.koiosError("Koios reports only half of the committee quorum fraction")
+        }
 
         return CommitteeStateInfo(members: members, threshold: threshold)
     }

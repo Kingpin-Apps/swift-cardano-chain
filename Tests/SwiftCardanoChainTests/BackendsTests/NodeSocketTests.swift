@@ -149,6 +149,30 @@ struct NodeSocketChainContextTests {
         }
     }
 
+    // MARK: - Committee quorum
+
+    @Test("No committee (no confidence) is a nil threshold, not an error")
+    func testNoCommitteeThreshold() throws {
+        #expect(try NodeSocketChainContext.committeeThreshold(nil) == nil)
+    }
+
+    @Test("The node's quorum fraction is read exactly")
+    func testCommitteeThreshold() throws {
+        #expect(try NodeSocketChainContext.committeeThreshold(Fraction(numerator: 2, denominator: 3)) == unit(2, 3))
+        #expect(try NodeSocketChainContext.committeeThreshold(Fraction(numerator: 6, denominator: 10)) == unit(3, 5))
+    }
+
+    static let badFractions: [Fraction] = [
+        Fraction(numerator: 3, denominator: 2),
+        Fraction(numerator: -1, denominator: 2),
+        Fraction(numerator: 1, denominator: -2),
+    ]
+
+    @Test("A node quorum outside [0, 1] throws", arguments: badFractions)
+    func testBadCommitteeThreshold(_ fraction: Fraction) {
+        #expect(throws: CardanoChainError.self) { try NodeSocketChainContext.committeeThreshold(fraction) }
+    }
+
     // MARK: - kesPeriodInfo nil-pool guard
 
     @Test("kesPeriodInfo throws invalidArgument when pool is nil")

@@ -15,9 +15,10 @@ enum GovernanceParsing {
     ///
     /// The value is read exactly and must lie in `[0, 1]`.
     ///
+    /// - Returns: `nil` when the value is absent or `null` (no committee).
     /// - Throws: ``CardanoChainError/valueError(_:)`` when the value is
-    ///   missing or is not a unit interval; a missing threshold is not 0.
-    static func parseThreshold(_ any: Any?) throws -> Double {
+    ///   present but is not a unit interval.
+    static func parseThreshold(_ any: Any?) throws -> UnitInterval? {
         var value = any
         if let arr = any as? [Any] {
             guard arr.count == 2 else {
@@ -25,10 +26,7 @@ enum GovernanceParsing {
             }
             value = ["numerator": arr[0], "denominator": arr[1]] as [String: Any]
         }
-        guard let interval = try LedgerValues.unitInterval(json: value, "threshold") else {
-            throw CardanoChainError.valueError("Threshold is missing")
-        }
-        return Double(interval.numerator) / Double(interval.denominator)
+        return try LedgerValues.unitInterval(json: value, "threshold")
     }
 
     /// Parse a Vote enum from a string ("yes" / "no" / "abstain") or the

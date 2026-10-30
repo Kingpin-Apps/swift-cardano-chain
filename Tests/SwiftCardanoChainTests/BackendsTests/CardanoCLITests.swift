@@ -889,7 +889,7 @@ struct CardanoCLIContextTests {
 
         let state = try await chainContext.committeeState()
 
-        #expect(abs(state.threshold - (2.0 / 3.0)) < 1e-9)
+        #expect(state.threshold == unit(2, 3))
         #expect(state.members.count == 1)
         let member = try #require(state.members.first)
         #expect(member.expiration == EpochNumber(653))

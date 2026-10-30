@@ -697,7 +697,7 @@ struct OfflineTransferChainContextTests {
             expiration: EpochNumber(500),
             status: .active
         )
-        let snapshot = CommitteeStateInfo(members: [member], threshold: 0.67)
+        let snapshot = CommitteeStateInfo(members: [member], threshold: unit(67, 100))
 
         let (context, _) = try makeContext { transfer in
             transfer.committeeStateSnapshot = snapshot
@@ -705,7 +705,7 @@ struct OfflineTransferChainContextTests {
 
         let result = try await context.committeeState()
         #expect(result == snapshot)
-        #expect(result.threshold == 0.67)
+        #expect(result.threshold == unit(67, 100))
         #expect(result.members.count == 1)
     }
 

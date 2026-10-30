@@ -2193,7 +2193,7 @@ public actor YaciDevkitChainContext: ChainContext {
 
     /// The committee's current membership and quorum, from Yaci's indexed view, falling back to
     /// the local-state view served while the DevKit cluster is running.
-    private func currentCommittee() async throws -> ([CommitteeMemberTerm], Double) {
+    private func currentCommittee() async throws -> ([CommitteeMemberTerm], UnitInterval?) {
         if let output = try? await api.client.getCommitteeMembers(),
             case .ok(let ok) = output,
             let committee = try? ok.body.json,
@@ -2213,8 +2213,7 @@ public actor YaciDevkitChainContext: ChainContext {
             let denominator: UInt64 = try LedgerValues.required(
                 committee.thresholdDenominator, "Yaci committee threshold_denominator")
                 .checked("Yaci committee threshold_denominator")
-            let quorum = try LedgerValues.unitInterval(text: "\(numerator)/\(denominator)", "Yaci committee threshold")
-            return (members, Double(quorum.numerator) / Double(quorum.denominator))
+            return (members, try LedgerValues.unitInterval(text: "\(numerator)/\(denominator)", "Yaci committee threshold"))
         }
 
         let live = try await perform("get the current committee") {
@@ -2229,11 +2228,9 @@ public actor YaciDevkitChainContext: ChainContext {
                 expiration: member.expiredEpoch
             )
         }
-        let threshold = try LedgerValues.required(live.threshold, "Yaci committee threshold")
-        guard (0...1).contains(threshold) else {
-            throw CardanoChainError.yaciDevkitError("Committee threshold \(threshold) is not between 0 and 1")
-        }
-        return (members, threshold)
+        // Yaci's client reads the threshold as a Double; its shortest
+        // description is the decimal Yaci sent. None means no committee: nil.
+        return (members, try live.threshold.map { try LedgerValues.unitInterval($0, "Yaci committee threshold") })
     }
 
     /// The latest cold→hot authorisation and the set of resignations, folded from the committee

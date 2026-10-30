@@ -12,34 +12,34 @@ struct GovernanceParsingTests {
 
         @Test("Double passes through")
         func doublePassthrough() throws {
-            #expect(try GovernanceParsing.parseThreshold(0.51) == 0.51)
+            #expect(try GovernanceParsing.parseThreshold(0.51) == unit(51, 100))
         }
 
         @Test("NSNumber passes through")
         func nsNumberPassthrough() throws {
-            #expect(try GovernanceParsing.parseThreshold(NSNumber(value: 0.67)) == 0.67)
+            #expect(try GovernanceParsing.parseThreshold(NSNumber(value: 0.67)) == unit(67, 100))
         }
 
         @Test("numeric string parses")
         func stringParses() throws {
-            #expect(try GovernanceParsing.parseThreshold("0.75") == 0.75)
+            #expect(try GovernanceParsing.parseThreshold("0.75") == unit(3, 4))
         }
 
         @Test("two-element rational array")
         func rationalArray() throws {
-            #expect(try GovernanceParsing.parseThreshold([51, 100]) == 0.51)
+            #expect(try GovernanceParsing.parseThreshold([51, 100]) == unit(51, 100))
         }
 
         @Test("rational dict with numerator/denominator")
         func rationalDict() throws {
             let raw: [String: Any] = ["numerator": 2, "denominator": 3]
-            let parsed = try GovernanceParsing.parseThreshold(raw)
-            #expect(abs(parsed - (2.0 / 3.0)) < 1e-9)
+            #expect(try GovernanceParsing.parseThreshold(raw) == unit(2, 3))
         }
 
-        @Test("nil throws: a missing threshold is not 0")
-        func nilThrows() {
-            #expect(throws: CardanoChainError.self) { try GovernanceParsing.parseThreshold(nil) }
+        @Test("absent or null is nil: no committee, not a quorum of 0")
+        func absentIsNil() throws {
+            #expect(try GovernanceParsing.parseThreshold(nil) == nil)
+            #expect(try GovernanceParsing.parseThreshold(NSNull()) == nil)
         }
 
         @Test("unparsable value throws")

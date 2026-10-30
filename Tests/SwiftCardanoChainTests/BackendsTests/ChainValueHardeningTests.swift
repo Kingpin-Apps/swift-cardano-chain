@@ -3,6 +3,7 @@ import HTTPTypes
 import OpenAPIRuntime
 import SwiftBlockfrostAPI
 import SwiftCardanoCore
+import SwiftKoios
 import SwiftYaciAPI
 import Testing
 
@@ -154,11 +155,62 @@ struct ChainValueHardeningTests {
         await #expect(throws: CardanoChainError.self) { _ = try await context.genesisParameters() }
     }
 
-    @Test("A missing Ogmios committee quorum throws instead of reading as 0")
-    func ogmiosMissingQuorum() {
-        #expect(throws: CardanoChainError.self) { try OgmiosChainContext.quorumThreshold(nil) }
-        #expect(throws: CardanoChainError.self) { try OgmiosChainContext.quorumThreshold("3/2") }
-        #expect((try? OgmiosChainContext.quorumThreshold("2/3")) == 2.0 / 3.0)
+    static let badQuorums: [String] = ["3/2", "1/0", "-1/2", "two thirds"]
+
+    @Test("A malformed Ogmios committee quorum throws", arguments: badQuorums)
+    func ogmiosBadQuorum(_ raw: String) {
+        #expect(throws: CardanoChainError.self) { try OgmiosChainContext.quorumThreshold(raw) }
+    }
+
+    @Test("An Ogmios committee quorum is read exactly, and none is nil")
+    func ogmiosQuorum() throws {
+        #expect(try OgmiosChainContext.quorumThreshold("2/3") == unit(2, 3))
+        #expect(try OgmiosChainContext.quorumThreshold("6/10") == unit(3, 5))
+        #expect(try OgmiosChainContext.quorumThreshold(nil) == nil)
+    }
+
+    @Test("committeeState with no Ogmios committee has no threshold, and does not throw")
+    func ogmiosNoCommittee() async throws {
+        let context = try await createMockOgmiosChainContext(overrides: [
+            "queryLedgerState/constitutionalCommittee": ogmiosResult(
+                "queryLedgerState/constitutionalCommittee", #"{"members": []}"#)
+        ])
+        let state = try await context.committeeState()
+        #expect(state.threshold == nil)
+        #expect(state.members.isEmpty)
+    }
+
+    // MARK: Koios
+
+    private func koiosCommittee(_ quorum: String) async throws -> CommitteeStateInfo {
+        let context = try await KoiosChainContext(
+            network: .preview,
+            client: SwiftKoios.Client(
+                serverURL: try SwiftKoios.Network.preview.url(),
+                transport: KoiosMockTransport(overrides: [
+                    "committee_info": #"{"proposal_id": null, \#(quorum) "members": []}"#
+                ])
+            )
+        )
+        return try await context.committeeState()
+    }
+
+    @Test("No Koios committee quorum is a nil threshold, not an error")
+    func koiosNoQuorum() async throws {
+        let state = try await koiosCommittee("")
+        #expect(state.threshold == nil)
+    }
+
+    static let badKoiosQuorums: [String] = [
+        #""quorum_numerator": 2,"#,
+        #""quorum_numerator": 3, "quorum_denominator": 2,"#,
+        #""quorum_numerator": -1, "quorum_denominator": 2,"#,
+        #""quorum_numerator": 1.5, "quorum_denominator": 2,"#,
+    ]
+
+    @Test("A malformed Koios committee quorum throws", arguments: badKoiosQuorums)
+    func koiosBadQuorum(_ quorum: String) async throws {
+        await #expect(throws: CardanoChainError.self) { _ = try await self.koiosCommittee(quorum) }
     }
 
     // MARK: Blockfrost

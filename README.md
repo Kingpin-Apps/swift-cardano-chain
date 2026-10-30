@@ -396,7 +396,9 @@ let spoStake  = try await context.spoStakeDistribution()
 
 ```swift
 let state = try await context.committeeState()
-print("Quorum threshold: \(state.threshold)")
+if let quorum = state.threshold {  // nil when there is no committee
+    print("Quorum threshold: \(quorum.numerator)/\(quorum.denominator)")
+}
 for member in state.members {
     print("\(member.coldCredential) → \(member.hotCredential.map(String.init(describing:)) ?? "unauthorized")")
 }

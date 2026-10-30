@@ -1694,9 +1694,8 @@ public actor BlockFrostChainContext: ChainContext {
             )
         }
 
-        let quorum = try LedgerValues.unitInterval(
+        let threshold = try LedgerValues.unitInterval(
             text: "\(committee.quorum.numerator)/\(committee.quorum.denominator)", "Blockfrost committee quorum")
-        let threshold = Double(quorum.numerator) / Double(quorum.denominator)
 
         return CommitteeStateInfo(members: members, threshold: threshold)
     }

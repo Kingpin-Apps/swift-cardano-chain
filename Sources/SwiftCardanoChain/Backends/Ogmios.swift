@@ -1410,22 +1410,19 @@ public actor OgmiosChainContext: ChainContext {
             )
         }
 
-        // Committee's own quorum is carried directly on the constitutionalCommittee result
-        // as a `Ratio` ("num/den" string). Conway-genesis committees may report it as nil
-        // — fall back to 0 in that case rather than reaching for a synthetic value.
+        // The committee's quorum is an Ogmios `Ratio` ("num/den"); with no
+        // committee (a state of no confidence) there is none, and it is nil.
         let threshold = try Self.quorumThreshold(constitutionalCommittee.quorum?.value)
 
         return CommitteeStateInfo(members: members, threshold: threshold)
     }
 
-    /// The committee quorum, an Ogmios `"n/d"` ratio, as a Double.
+    /// The committee quorum, an Ogmios `"n/d"` ratio, exactly; `nil` when
+    /// there is none, as with no committee.
     ///
-    /// - Throws: When it is missing (Ogmios's schema requires it) or is not a
-    ///   unit interval; a missing quorum is not 0.
-    static func quorumThreshold(_ raw: String?) throws -> Double {
-        let interval = try LedgerValues.unitInterval(
-            text: LedgerValues.required(raw, "Ogmios committee quorum"), "Ogmios committee quorum")
-        return Double(interval.numerator) / Double(interval.denominator)
+    /// - Throws: When it is present but not a unit interval.
+    static func quorumThreshold(_ raw: String?) throws -> UnitInterval? {
+        try raw.map { try LedgerValues.unitInterval(text: $0, "Ogmios committee quorum") }
     }
 
     // MARK: - Helpers
