@@ -1165,13 +1165,26 @@ public actor YaciDevkitChainContext: ChainContext {
     /// certificate log and the certificate reconstruction alone cannot see it. Its parameters
     /// come from the genesis document instead.
     ///
-    /// Relays are parsed best-effort. The genesis encoding for them differs from the one Yaci
-    /// reports for certificates, and a devnet's genesis pool usually declares none, so an
-    /// unrecognised entry is dropped rather than guessed at.
+    /// Every pool is read strictly, relays included: genesis encodes relays as
+    /// `{"single host address" | "single host name" | "multi host name": {…}}`, and an entry in
+    /// any other shape, or one the ledger would refuse, throws rather than being dropped.
     private func genesisPools() async throws -> [String: PoolParams] {
-        guard let genesis = Self.jsonObject(try await genesisFile("shelley")),
-            let pools = (genesis["staking"] as? [String: Any])?["pools"] as? [String: Any]
-        else { return [:] }
+        try Self.genesisPools(from: try await genesisFile("shelley"))
+    }
+
+    /// The pools in a Shelley genesis document; none when it declares no `staking.pools`.
+    static func genesisPools(from data: Data) throws -> [String: PoolParams] {
+        guard let genesis = jsonObject(data) else {
+            throw CardanoChainError.valueError("Yaci Shelley genesis is not a JSON object")
+        }
+        guard let staking = genesis["staking"], !(staking is NSNull) else { return [:] }
+        guard let pools = (staking as? [String: Any]).map({ $0["pools"] }) else {
+            throw CardanoChainError.valueError("Yaci Shelley genesis staking is not an object")
+        }
+        guard let pools, !(pools is NSNull) else { return [:] }
+        guard let pools = pools as? [String: Any] else {
+            throw CardanoChainError.valueError("Yaci Shelley genesis staking.pools is not an object")
+        }
 
         var result: [String: PoolParams] = [:]
         for (poolId, value) in pools {
@@ -1220,7 +1233,8 @@ public actor YaciDevkitChainContext: ChainContext {
                     "Yaci genesis pool margin"),
                 rewardAccount: try Self.genesisRewardAccount(pool["rewardAccount"]),
                 poolOwners: .list(owners),
-                relays: ((pool["relays"] as? [Any]) ?? []).compactMap { Self.genesisRelay($0) },
+                relays: try LedgerValues.required(pool["relays"] as? [Any], "Yaci genesis pool \(id) relays")
+                    .map { try Self.genesisRelay($0) },
                 poolMetadata: metadata
             )
         }
@@ -1234,27 +1248,44 @@ public actor YaciDevkitChainContext: ChainContext {
     }
 
     /// One relay from a genesis pool, whose JSON tags the shape by key.
-    static func genesisRelay(_ any: Any) -> SwiftCardanoCore.Relay? {
-        guard let entry = any as? [String: Any], let (kind, raw) = entry.first,
+    ///
+    /// An entry that is not one of the three shapes, an address that does not parse, a name
+    /// missing from a named relay or longer than the ledger allows, all throw: a relay the ledger
+    /// accepted always reads, so it means the genesis document is corrupt.
+    static func genesisRelay(_ any: Any) throws -> SwiftCardanoCore.Relay {
+        let what = "Yaci genesis pool relay"
+        guard let entry = any as? [String: Any], entry.count == 1, let (kind, raw) = entry.first,
             let fields = raw as? [String: Any]
-        else { return nil }
+        else {
+            throw CardanoChainError.valueError("\(what) \(any) is not a single tagged relay")
+        }
+        func text(_ keys: String...) throws -> String? {
+            for key in keys {
+                guard let value = fields[key], !(value is NSNull) else { continue }
+                guard let text = value as? String else {
+                    throw CardanoChainError.valueError("\(what) \(key) \(value) is not a string")
+                }
+                return text
+            }
+            return nil
+        }
 
-        let port = (fields["port"] as? NSNumber)?.intValue
+        let port: Int? = try LedgerValues.integer(json: fields["port"], "\(what) port")
         switch kind.lowercased().replacingOccurrences(of: " ", with: "") {
         case "singlehostaddr", "singlehostaddress":
-            let ipv4 = (fields["IPv4"] ?? fields["ipv4"]).flatMap { ($0 as? String).flatMap(IPv4Address.init) }
-            let ipv6 = (fields["IPv6"] ?? fields["ipv6"]).flatMap { ($0 as? String).flatMap(IPv6Address.init) }
-            guard ipv4 != nil || ipv6 != nil else { return nil }
-            return .singleHostAddr(SingleHostAddr(port: port, ipv4: ipv4, ipv6: ipv6))
+            // Neither address is a relay the ledger allows, not one to drop.
+            return .singleHostAddr(SingleHostAddr(
+                port: port,
+                ipv4: try text("IPv4", "ipv4").map { try LedgerValues.ipv4($0, "\(what) IPv4") },
+                ipv6: try text("IPv6", "ipv6").map { try LedgerValues.ipv6($0, "\(what) IPv6") }))
         case "singlehostname":
-            guard let dns = (fields["dnsName"] ?? fields["hostname"]) as? String else { return nil }
-            // A name the ledger would refuse is dropped, like any other unrecognised entry.
-            return (try? SingleHostName(port: port, dnsName: dns)).map { .singleHostName($0) }
+            let dns = try LedgerValues.required(text("dnsName", "hostname"), "\(what) DNS name")
+            return try LedgerValues.singleHostName(port: port, dnsName: dns, "\(what) DNS name")
         case "multihostname":
-            guard let dns = (fields["dnsName"] ?? fields["hostname"]) as? String else { return nil }
-            return (try? MultiHostName(dnsName: dns)).map { .multiHostName($0) }
+            let dns = try LedgerValues.required(text("dnsName", "hostname"), "\(what) DNS name")
+            return try LedgerValues.multiHostName(dnsName: dns, "\(what) DNS name")
         default:
-            return nil
+            throw CardanoChainError.valueError("\(what) has an unknown kind \(kind)")
         }
     }
 
@@ -1278,7 +1309,10 @@ public actor YaciDevkitChainContext: ChainContext {
     public func stakePools() async throws -> [PoolOperator] {
         let epoch = try await epoch()
         let certificates = try await poolCertificates()
-        let genesis = (try? await genesisPools()) ?? [:]
+        // A DevKit whose admin API does not serve the genesis has no genesis pools to add; a
+        // genesis it does serve must read.
+        let genesisData = try? await genesisFile("shelley")
+        let genesis = try genesisData.map { try Self.genesisPools(from: $0) } ?? [:]
         let retirements = (try? await poolRetirements()) ?? [:]
 
         var ids = Set(certificates.keys)

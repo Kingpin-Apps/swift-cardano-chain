@@ -145,9 +145,10 @@ Some consequences are worth planning around:
   the pool's status; `liveStake`, `activeStake` and `opcertCounter` are left `nil` rather than
   guessed at. The `pledge` inside `poolParams` is the declared pledge from the certificate.
 - **A devnet's own block producer is set up in genesis**, not by a registration certificate, so
-  it is read from the Shelley genesis instead of the certificate log. Its relays are parsed
-  best-effort, because genesis encodes them differently from the certificate log and a devnet
-  usually declares none.
+  it is read from the Shelley genesis instead of the certificate log. Genesis encodes its relays
+  differently from the certificate log; they are read as strictly as any other relay, so an
+  entry in an unknown shape, an address that does not parse or a name the ledger would refuse
+  throws rather than being dropped.
 - **Registration is read from certificates, not from the account.** Yaci answers
   `/accounts/{stakeAddress}` with 200 and zeroed amounts for any well-formed stake address,
   including one it has never seen, so a successful response says nothing about registration.

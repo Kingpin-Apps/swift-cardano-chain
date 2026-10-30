@@ -706,25 +706,70 @@ struct YaciDevkitChainContextTests {
     }
 
     @Test("Test genesis relay shapes are keyed by name")
-    func testGenesisRelayMapping() {
-        let addr = YaciDevkitChainContext.genesisRelay(
+    func testGenesisRelayMapping() throws {
+        let addr = try YaciDevkitChainContext.genesisRelay(
             ["single host address": ["IPv4": "198.51.100.4", "IPv6": NSNull(), "port": 3001]])
-        guard case .singleHostAddr(let a)? = addr else {
-            Issue.record("Expected a single host address, got \(String(describing: addr))")
+        guard case .singleHostAddr(let a) = addr else {
+            Issue.record("Expected a single host address, got \(addr)")
             return
         }
         #expect(a.ipv4?.description == "198.51.100.4")
         #expect(a.port == 3001)
 
-        let srv = YaciDevkitChainContext.genesisRelay(
+        let named = try YaciDevkitChainContext.genesisRelay(
+            ["single host name": ["dnsName": "relay.genesis.example", "port": 3001]])
+        guard case .singleHostName(let host) = named else {
+            Issue.record("Expected a single host name, got \(named)")
+            return
+        }
+        #expect(host.dnsName == "relay.genesis.example")
+
+        let srv = try YaciDevkitChainContext.genesisRelay(
             ["multi host name": ["dnsName": "_cardano._tcp.genesis.example"]])
-        guard case .multiHostName? = srv else {
+        guard case .multiHostName = srv else {
             Issue.record("Expected a multi host name")
             return
         }
 
-        // An entry in a shape this mapping does not recognise is dropped, not guessed at.
-        #expect(YaciDevkitChainContext.genesisRelay(["something else": ["port": 1]]) == nil)
+        // An address relay with neither address is one the ledger allows, not one to drop.
+        guard case .singleHostAddr(let bare) = try YaciDevkitChainContext.genesisRelay(
+            ["single host address": ["IPv4": NSNull(), "IPv6": NSNull(), "port": NSNull()]])
+        else {
+            Issue.record("Expected a single host address")
+            return
+        }
+        #expect(bare.ipv4 == nil && bare.ipv6 == nil && bare.port == nil)
+    }
+
+    static let badGenesisRelays: [String] = [
+        // A shape this mapping does not know.
+        #"{"something else": {"port": 1}}"#,
+        // Two shapes in one entry.
+        #"{"single host name": {"dnsName": "a.example"}, "multi host name": {"dnsName": "b.example"}}"#,
+        // An address that does not parse.
+        #"{"single host address": {"IPv4": "300.0.0.1", "port": 3001}}"#,
+        // A named relay with no name.
+        #"{"single host name": {"port": 3001}}"#,
+        // A DNS name over the ledger's 128-byte limit.
+        #"{"multi host name": {"dnsName": "\#(String(repeating: "a", count: 129))"}}"#,
+        #"{"single host name": {"dnsName": "\#(String(repeating: "a", count: 129))", "port": 3001}}"#,
+    ]
+
+    @Test("A genesis relay that does not read throws instead of being dropped", arguments: badGenesisRelays)
+    func testGenesisRelayRejects(_ json: String) throws {
+        let entry = try JSONSerialization.jsonObject(with: Data(json.utf8))
+        #expect(throws: CardanoChainError.self) { try YaciDevkitChainContext.genesisRelay(entry) }
+    }
+
+    @Test("A genesis pool with a relay that does not read fails stakePoolInfo")
+    func testGenesisPoolBadRelay() async throws {
+        let genesis = YaciMockData.shelleyGenesisWithPool()
+            .replacingOccurrences(of: "_cardano._tcp.genesis.example", with: String(repeating: "a", count: 129))
+        let context = try makeContext(admin: MockYaciDevkitAdmin(overrides: ["shelley": genesis]))
+        await #expect(throws: CardanoChainError.self) {
+            _ = try await context.stakePoolInfo(poolId: YaciMockData.genesisPoolHex)
+        }
+        await #expect(throws: CardanoChainError.self) { _ = try await context.stakePools() }
     }
 
     @Test("Test the genesis reward account gets its stake-address header")
