@@ -896,18 +896,11 @@ public actor KoiosChainContext: ChainContext {
 
         // Map relays
         let relays: [SwiftCardanoCore.Relay] =
-            try pool.relays?.compactMap { relay in
+            try pool.relays?.map { relay in
                 let port: Int? = try relay.port.map { try $0.checked("Koios relay port") }
-                if let ipv4String = relay.ipv4, let ipv4 = IPv4Address(ipv4String) {
-                    return .singleHostAddr(SingleHostAddr(port: port, ipv4: ipv4, ipv6: nil))
-                } else if let ipv6String = relay.ipv6, let ipv6 = IPv6Address(ipv6String) {
-                    return .singleHostAddr(SingleHostAddr(port: port, ipv4: nil, ipv6: ipv6))
-                } else if let dns = relay.dns {
-                    return .singleHostName(try SingleHostName(port: port, dnsName: dns))
-                } else if let srv = relay.srv {
-                    return .multiHostName(try MultiHostName(dnsName: srv))
-                }
-                return nil
+                return try LedgerValues.relay(
+                    port: port, ipv4: relay.ipv4, ipv6: relay.ipv6,
+                    dnsName: relay.dns, srvName: relay.srv, "Koios pool relay")
             } ?? []
 
         // Koios's client reads the margin as a Double; its shortest
@@ -941,11 +934,11 @@ public actor KoiosChainContext: ChainContext {
         // Pool metadata. The on-chain url + hash are always kept; `strict` only
         // governs verification of the off-chain document.
         var poolMetadata: PoolMetadata? = nil
-        if let urlString = pool.metaUrl, let hashString = pool.metaHash,
-            let hashData = Data(hexString: hashString)
-        {
-            let url = try Url(urlString)
-            let hash = PoolMetadataHash(payload: hashData)
+        if pool.metaUrl != nil || pool.metaHash != nil {
+            let url = try LedgerValues.url(
+                LedgerValues.required(pool.metaUrl, "Koios pool meta_url"), "Koios pool meta_url")
+            let hash = PoolMetadataHash(payload: try LedgerValues.hash32(
+                hex: LedgerValues.required(pool.metaHash, "Koios pool meta_hash"), "Koios pool meta_hash"))
             if strict {
                 poolMetadata = try await PoolMetadata.fetch(url: url, poolMetadataHash: hash)
             } else {
@@ -1074,16 +1067,8 @@ public actor KoiosChainContext: ChainContext {
         let deposit: Coin? = try info.deposit.map { try LedgerValues.integer(text: $0, "Koios DRep deposit") }
         let expiry: UInt64? = try info.expiresEpochNo.map { try $0.checked("Koios DRep expires_epoch_no") }
 
-        var anchor: Anchor? = nil
-        if let urlStr = info.metaUrl, let hashStr = info.metaHash,
-            !urlStr.isEmpty, !hashStr.isEmpty,
-            let hashData = Data(hexString: hashStr)
-        {
-            anchor = try? Anchor(
-                anchorUrl: Url(urlStr),
-                anchorDataHash: AnchorDataHash(payload: hashData)
-            )
-        }
+        let anchor = try LedgerValues.optionalAnchor(
+            url: info.metaUrl, hash: info.metaHash, "Koios DRep anchor")
 
         return DRepInfo(
             active: active,
@@ -1378,13 +1363,8 @@ public actor KoiosChainContext: ChainContext {
                 case .newConstitution?: .newConstitution
                 default: .infoAction
                 }
-                let anchor: SwiftCardanoCore.Anchor? = {
-                    guard let urlStr = proposal.metaUrl?.value as? String,
-                          let hashStr = proposal.metaHash?.value as? String,
-                          let url = try? Url(urlStr)
-                    else { return nil }
-                    return SwiftCardanoCore.Anchor(anchorUrl: url, anchorDataHash: AnchorDataHash(payload: Data(hex: hashStr)))
-                }()
+                let anchor = try LedgerValues.optionalAnchor(
+                    url: proposal.metaUrl?.value, hash: proposal.metaHash?.value, "Koios proposal anchor")
                 return OpenGovAction(
                     govActionId: GovActionID(
                         transactionID: TransactionId(payload: Data(hex: txHash)),
@@ -1418,16 +1398,8 @@ public actor KoiosChainContext: ChainContext {
             GovernanceParsing.parseLovelace(proposal.deposit?.value), "Koios proposal deposit")
         let returnAddrData = try Address.fromBech32(
             LedgerValues.required(proposal.returnAddress, "Koios proposal return_address")).toBytes()
-        let anchor: SwiftCardanoCore.Anchor? = {
-            guard let urlStr = proposal.metaUrl?.value as? String,
-                  let hashStr = proposal.metaHash?.value as? String,
-                  let url = try? Url(urlStr)
-            else { return nil }
-            return SwiftCardanoCore.Anchor(
-                anchorUrl: url,
-                anchorDataHash: AnchorDataHash(payload: Data(hex: hashStr))
-            )
-        }()
+        let anchor = try LedgerValues.optionalAnchor(
+            url: proposal.metaUrl?.value, hash: proposal.metaHash?.value, "Koios proposal anchor")
 
         // Vote list for this proposal.
         let votesResponse = try await api.client.proposalVotes(
@@ -1660,18 +1632,11 @@ public actor KoiosChainContext: ChainContext {
 
         case "NewConstitution":
             guard contents.count >= 2,
-                  let constitution = contents[1] as? [String: Any],
-                  let anchorDict = constitution["anchor"] as? [String: Any],
-                  let urlString = anchorDict["url"] as? String,
-                  let url = try? Url(urlString)
+                  let constitution = contents[1] as? [String: Any]
             else { return .infoAction(InfoAction()) }
-            let dataHashHex = (anchorDict["dataHash"] as? String)
-                ?? (anchorDict["anchorDataHash"] as? String)
-                ?? ""
-            let anchor = Anchor(
-                anchorUrl: url,
-                anchorDataHash: AnchorDataHash(payload: dataHashHex.hexStringToData)
-            )
+            let anchor = try LedgerValues.required(
+                LedgerValues.anchor(json: constitution["anchor"], "Koios constitution anchor"),
+                "Koios constitution anchor")
             let scriptHash: ScriptHash? = {
                 guard let hex = constitution["script"] as? String, !hex.isEmpty
                 else { return nil }

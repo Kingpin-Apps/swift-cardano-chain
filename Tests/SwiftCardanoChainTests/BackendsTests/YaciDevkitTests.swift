@@ -735,44 +735,50 @@ struct YaciDevkitChainContextTests {
     }
 
     @Test("Test relay mapping infers the shape from the populated fields")
-    func testRelayMapping() {
-        let ipv4 = YaciDevkitChainContext.relay(from: .init(port: 3001, ipv4: "203.0.113.7"))
-        guard case .singleHostAddr(let addr)? = ipv4 else {
+    func testRelayMapping() throws {
+        let ipv4 = try YaciDevkitChainContext.relay(from: .init(port: 3001, ipv4: "203.0.113.7"))
+        guard case .singleHostAddr(let addr) = ipv4 else {
             Issue.record("Expected a single host address")
             return
         }
         #expect(addr.port == 3001)
         #expect(addr.ipv4?.description == "203.0.113.7")
 
-        let named = YaciDevkitChainContext.relay(from: .init(port: 6000, dnsName: "relay.example.com"))
-        guard case .singleHostName(let host)? = named else {
+        let named = try YaciDevkitChainContext.relay(from: .init(port: 6000, dnsName: "relay.example.com"))
+        guard case .singleHostName(let host) = named else {
             Issue.record("Expected a single host name")
             return
         }
         #expect(host.dnsName == "relay.example.com")
 
-        let srv = YaciDevkitChainContext.relay(from: .init(dnsName: "_cardano._tcp.example.com"))
-        guard case .multiHostName? = srv else {
+        let srv = try YaciDevkitChainContext.relay(from: .init(dnsName: "_cardano._tcp.example.com"))
+        guard case .multiHostName = srv else {
             Issue.record("Expected a multi host name")
             return
         }
 
         // Yaci writes an absent port as 0, not null, so a zero port still means SRV.
-        let srvZeroPort = YaciDevkitChainContext.relay(
+        let srvZeroPort = try YaciDevkitChainContext.relay(
             from: .init(port: 0, dnsName: "_cardano._tcp.example.com"))
-        guard case .multiHostName? = srvZeroPort else {
+        guard case .multiHostName = srvZeroPort else {
             Issue.record("Expected a zero port to mean no port, got \(String(describing: srvZeroPort))")
             return
         }
         // A zero port on an IP relay means the same thing.
-        let addrZeroPort = YaciDevkitChainContext.relay(from: .init(port: 0, ipv4: "203.0.113.7"))
-        guard case .singleHostAddr(let zero)? = addrZeroPort else {
+        let addrZeroPort = try YaciDevkitChainContext.relay(from: .init(port: 0, ipv4: "203.0.113.7"))
+        guard case .singleHostAddr(let zero) = addrZeroPort else {
             Issue.record("Expected a single host address")
             return
         }
         #expect(zero.port == nil)
 
-        #expect(YaciDevkitChainContext.relay(from: .init()) == nil)
+        // A relay with no field set is a single host address with neither address, which the
+        // ledger allows, not a relay to drop.
+        guard case .singleHostAddr(let bare) = try YaciDevkitChainContext.relay(from: .init()) else {
+            Issue.record("Expected a single host address")
+            return
+        }
+        #expect(bare.port == nil && bare.ipv4 == nil && bare.ipv6 == nil)
     }
 
     @Test("Test pool owners accept both key hashes and stake addresses")
@@ -1098,13 +1104,23 @@ struct YaciDevkitChainContextTests {
         #expect(YaciDevkitChainContext.unitInterval(nil) == nil)
     }
 
-    @Test("Test anchor construction rejects incomplete input")
-    func testAnchorConstruction() {
+    @Test("Test anchor construction: absent is nil, half or invalid throws")
+    func testAnchorConstruction() throws {
         #expect(
-            YaciDevkitChainContext.anchor(url: "https://a.test", hash: YaciMockData.anchorHash) != nil)
-        #expect(YaciDevkitChainContext.anchor(url: nil, hash: YaciMockData.anchorHash) == nil)
-        #expect(YaciDevkitChainContext.anchor(url: "https://a.test", hash: nil) == nil)
-        #expect(YaciDevkitChainContext.anchor(url: "", hash: YaciMockData.anchorHash) == nil)
+            try YaciDevkitChainContext.anchor(url: "https://a.test", hash: YaciMockData.anchorHash) != nil)
+        #expect(try YaciDevkitChainContext.anchor(url: nil, hash: nil) == nil)
+        #expect(try YaciDevkitChainContext.anchor(url: "", hash: "") == nil)
+        // The ledger allows an empty URL, so with a hash beside it it is an anchor.
+        #expect(try YaciDevkitChainContext.anchor(url: "", hash: YaciMockData.anchorHash)?.anchorUrl.text == "")
+        #expect(throws: CardanoChainError.self) {
+            try YaciDevkitChainContext.anchor(url: nil, hash: YaciMockData.anchorHash)
+        }
+        #expect(throws: CardanoChainError.self) {
+            try YaciDevkitChainContext.anchor(url: "https://a.test", hash: nil)
+        }
+        #expect(throws: CardanoChainError.self) {
+            try YaciDevkitChainContext.anchor(url: "https://a.test", hash: "not hex")
+        }
     }
 
     // MARK: - Constitutional committee

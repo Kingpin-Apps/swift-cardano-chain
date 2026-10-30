@@ -797,17 +797,7 @@ public actor CardanoCliChainContext: ChainContext {
             let stake: Coin = try LedgerValues.required(
                 LedgerValues.integer(json: stateDict["stake"], "cardano-cli DRep stake"), "cardano-cli DRep stake")
 
-            var anchor: Anchor? = nil
-            if let anchorDict = stateDict["anchor"] as? [String: Any],
-                let urlStr = anchorDict["url"] as? String,
-                let hashStr = anchorDict["dataHash"] as? String,
-                let hashData = Data(hexString: hashStr)
-            {
-                anchor = try? Anchor(
-                    anchorUrl: Url(urlStr),
-                    anchorDataHash: AnchorDataHash(payload: hashData)
-                )
-            }
+            let anchor = try LedgerValues.anchor(json: stateDict["anchor"], "cardano-cli DRep anchor")
 
             return DRepInfo(
                 active: true,
@@ -1377,7 +1367,7 @@ public actor CardanoCliChainContext: ChainContext {
             ?? RewardAccount(Data())
 
         // Parse anchor (optional).
-        let anchor = parseAnchor(proposalProcedure["anchor"])
+        let anchor = try parseAnchor(proposalProcedure["anchor"])
 
         // Parse vote arrays.
         let committeeVotes = parseCommitteeVotes(proposal["committeeVotes"])
@@ -1543,18 +1533,11 @@ public actor CardanoCliChainContext: ChainContext {
         case "NewConstitution":
             // contents = [prevGovActionId, {anchor: {url, dataHash}, script: hash | null}]
             guard contents.count >= 2,
-                  let constitution = contents[1] as? [String: Any],
-                  let anchorDict = constitution["anchor"] as? [String: Any],
-                  let urlString = anchorDict["url"] as? String,
-                  let url = try? Url(urlString)
+                  let constitution = contents[1] as? [String: Any]
             else { return .infoAction(InfoAction()) }
-            let dataHashHex = (anchorDict["dataHash"] as? String)
-                ?? (anchorDict["anchorDataHash"] as? String)
-                ?? ""
-            let anchor = Anchor(
-                anchorUrl: url,
-                anchorDataHash: AnchorDataHash(payload: dataHashHex.hexStringToData)
-            )
+            let anchor = try LedgerValues.required(
+                LedgerValues.anchor(json: constitution["anchor"], "cardano-cli constitution anchor"),
+                "cardano-cli constitution anchor")
             let scriptHash: ScriptHash? = {
                 guard let hex = constitution["script"] as? String, !hex.isEmpty
                 else { return nil }
@@ -1801,16 +1784,8 @@ public actor CardanoCliChainContext: ChainContext {
         return nil
     }
 
-    private func parseAnchor(_ any: Any?) -> Anchor? {
-        guard let dict = any as? [String: Any] else { return nil }
-        guard let url = dict["url"] as? String,
-              let hash = dict["dataHash"] as? String ?? dict["anchorDataHash"] as? String
-        else { return nil }
-        guard let parsedURL = try? Url(url) else { return nil }
-        return Anchor(
-            anchorUrl: parsedURL,
-            anchorDataHash: AnchorDataHash(payload: hash.hexStringToData)
-        )
+    private func parseAnchor(_ any: Any?) throws -> Anchor? {
+        try LedgerValues.anchor(json: any, "cardano-cli proposal anchor")
     }
 
     private func parseDRepKey(_ any: Any) -> DRep? {

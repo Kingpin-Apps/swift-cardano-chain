@@ -1185,11 +1185,16 @@ public actor YaciDevkitChainContext: ChainContext {
                 .compactMap { try? Self.poolOwner($0) }
 
             var metadata: PoolMetadata? = nil
-            if let meta = pool["metadata"] as? [String: Any],
-                let url = (meta["url"] as? String).flatMap({ try? Url($0) }),
-                let hashHex = meta["hash"] as? String, let hash = Data(hexString: hashHex)
-            {
-                metadata = try? PoolMetadata(url: url, poolMetadataHash: PoolMetadataHash(payload: hash))
+            if let meta = pool["metadata"], !(meta is NSNull) {
+                guard let meta = meta as? [String: Any],
+                    let urlText = meta["url"] as? String, let hashHex = meta["hash"] as? String
+                else {
+                    throw CardanoChainError.valueError("Yaci genesis pool metadata is not a url and hash: \(meta)")
+                }
+                metadata = try PoolMetadata(
+                    url: LedgerValues.url(urlText, "Yaci genesis pool metadata URL"),
+                    poolMetadataHash: PoolMetadataHash(
+                        payload: LedgerValues.hash32(hex: hashHex, "Yaci genesis pool metadata hash")))
             }
 
             result[id] = PoolParams(
@@ -1398,22 +1403,21 @@ public actor YaciDevkitChainContext: ChainContext {
     ///
     /// Yaci reports every relay with the same four fields and leaves the ones that do not apply
     /// unset, so the shape is inferred from which are populated.
-    static func relay(from relay: Components.Schemas.Relay) -> SwiftCardanoCore.Relay? {
+    ///
+    /// An address that does not parse, or a DNS name longer than the ledger allows, throws:
+    /// a relay that is on chain always passes, so it means Yaci sent something corrupt. A relay
+    /// with no field set is a single-host-address relay with neither address, which the ledger
+    /// allows.
+    static func relay(from relay: Components.Schemas.Relay) throws -> SwiftCardanoCore.Relay {
         // Yaci reports a relay's absent port as 0 rather than null. Zero is not a usable TCP
         // port, so it is read as "no port" — and that distinction is what separates a
         // single-host DNS relay from a multi-host SRV record.
         let port = relay.port.flatMap { $0 > 0 ? Int($0) : nil }
-        let ipv4 = relay.ipv4.flatMap { $0.isEmpty ? nil : IPv4Address($0) }
-        let ipv6 = relay.ipv6.flatMap { $0.isEmpty ? nil : IPv6Address($0) }
-        if ipv4 != nil || ipv6 != nil {
-            return .singleHostAddr(SingleHostAddr(port: port, ipv4: ipv4, ipv6: ipv6))
-        }
-        guard let dns = relay.dnsName, !dns.isEmpty else { return nil }
-        // A name the ledger would refuse (too long) is dropped, like a relay with no fields.
-        if let port {
-            return (try? SingleHostName(port: port, dnsName: dns)).map { .singleHostName($0) }
-        }
-        return (try? MultiHostName(dnsName: dns)).map { .multiHostName($0) }
+        func present(_ text: String?) -> String? { text.flatMap { $0.isEmpty ? nil : $0 } }
+        let dns = present(relay.dnsName)
+        return try LedgerValues.relay(
+            port: port, ipv4: present(relay.ipv4), ipv6: present(relay.ipv6),
+            dnsName: port == nil ? nil : dns, srvName: port == nil ? dns : nil, "Yaci pool relay")
     }
 
     /// Map one registered pool owner onto its staking key hash.
@@ -1456,12 +1460,13 @@ public actor YaciDevkitChainContext: ChainContext {
     private static func poolMetadata(url urlString: String?, hash hashString: String?, strict: Bool)
         async throws -> PoolMetadata?
     {
-        guard let urlString, !urlString.isEmpty,
-            let hashString, let hashData = Data(hexString: hashString), !hashData.isEmpty
-        else { return nil }
+        func present(_ text: String?) -> String? { text.flatMap { $0.isEmpty ? nil : $0 } }
+        if present(urlString) == nil, present(hashString) == nil { return nil }
 
-        let url = try Url(urlString)
-        let hash = PoolMetadataHash(payload: hashData)
+        let url = try LedgerValues.url(
+            LedgerValues.required(urlString, "Yaci pool metadata URL"), "Yaci pool metadata URL")
+        let hash = PoolMetadataHash(payload: try LedgerValues.hash32(
+            hex: LedgerValues.required(hashString, "Yaci pool metadata hash"), "Yaci pool metadata hash"))
         if strict {
             return try await PoolMetadata.fetch(url: url, poolMetadataHash: hash)
         }
@@ -1494,7 +1499,7 @@ public actor YaciDevkitChainContext: ChainContext {
                 bech32: registration.rewardAccount, hex: registration.rewardAccount
             ),
             poolOwners: .list(try (registration.poolOwners ?? []).map { try poolOwner($0) }),
-            relays: (registration.relays ?? []).compactMap { relay(from: $0) },
+            relays: try (registration.relays ?? []).map { try relay(from: $0) },
             poolMetadata: try await poolMetadata(
                 url: registration.metadataUrl, hash: registration.metadataHash, strict: strict
             )
@@ -1514,7 +1519,7 @@ public actor YaciDevkitChainContext: ChainContext {
                 text: LedgerValues.required(details.margin, "Yaci pool margin"), "Yaci pool margin"),
             rewardAccount: try rewardAccount(bech32: details.rewardAccount, hex: details.rewardAccount),
             poolOwners: .list(try (details.poolOwners ?? []).map { try poolOwner($0) }),
-            relays: (details.relays ?? []).compactMap { relay(from: $0) },
+            relays: try (details.relays ?? []).map { try relay(from: $0) },
             poolMetadata: try await poolMetadata(
                 url: details.metadataUrl, hash: details.metadataHash, strict: strict
             )
@@ -1641,7 +1646,7 @@ public actor YaciDevkitChainContext: ChainContext {
         return DRepInfo(
             active: !retired,
             drep: drep,
-            anchor: Self.anchor(url: latest.anchorUrl, hash: latest.anchorHash),
+            anchor: try Self.anchor(url: latest.anchorUrl, hash: latest.anchorHash),
             deposit: deposit,
             // A retired DRep holds no voting power; for a registered one, no
             // stake reading is not a stake of 0.
@@ -1691,14 +1696,10 @@ public actor YaciDevkitChainContext: ChainContext {
         return entries
     }
 
-    /// Build an anchor from the URL and hash Yaci reports beside a certificate, or `nil` when
-    /// either half is missing or the hash is not valid hex.
-    static func anchor(url: String?, hash: String?) -> Anchor? {
-        guard let url, !url.isEmpty,
-            let hash, let hashData = Data(hexString: hash), !hashData.isEmpty,
-            let anchorUrl = try? Url(url)
-        else { return nil }
-        return Anchor(anchorUrl: anchorUrl, anchorDataHash: AnchorDataHash(payload: hashData))
+    /// Build an anchor from the URL and hash Yaci reports beside a certificate: `nil` when
+    /// both are missing or empty, an error when only one is there or either is invalid.
+    static func anchor(url: String?, hash: String?) throws -> Anchor? {
+        try LedgerValues.optionalAnchor(url: url, hash: hash, "Yaci anchor")
     }
 
     // MARK: - Governance actions
@@ -1819,7 +1820,7 @@ public actor YaciDevkitChainContext: ChainContext {
                 govActionId: id,
                 type: OpenGovAction.code(of: try Self.govAction(from: proposal, id: id)),
                 deposit: try LedgerValues.required(proposal.deposit, "Yaci proposal deposit").checked("Yaci proposal deposit"),
-                anchor: Self.anchor(url: proposal.anchorUrl, hash: proposal.anchorHash),
+                anchor: try Self.anchor(url: proposal.anchorUrl, hash: proposal.anchorHash),
                 proposedIn: proposedIn,
                 expiresAfter: expiresAfter
             )
@@ -1855,7 +1856,7 @@ public actor YaciDevkitChainContext: ChainContext {
             stakePoolVotes: pools,
             deposit: try LedgerValues.required(proposal.deposit, "Yaci proposal deposit").checked("Yaci proposal deposit"),
             depositReturnAddr: returnAddress,
-            anchor: Self.anchor(url: proposal.anchorUrl, hash: proposal.anchorHash),
+            anchor: try Self.anchor(url: proposal.anchorUrl, hash: proposal.anchorHash),
             proposedIn: proposedIn,
             expiresAfter: try Self.expiresAfter(proposedIn: proposedIn, lifetime: lifetime)
         )
@@ -2005,19 +2006,10 @@ public actor YaciDevkitChainContext: ChainContext {
             )
 
         case "NEW_CONSTITUTION":
-            guard let constitution = object("constitution"),
-                let anchorJSON = constitution["anchor"] as? [String: Any],
-                let urlString = (anchorJSON["anchor_url"] ?? anchorJSON["anchorUrl"] ?? anchorJSON["url"])
-                    as? String,
-                let url = try? Url(urlString)
-            else { return .infoAction(InfoAction()) }
-
-            let hashHex =
-                (anchorJSON["anchor_data_hash"] ?? anchorJSON["anchorDataHash"] ?? anchorJSON["dataHash"]
-                    ?? anchorJSON["hash"]) as? String ?? ""
-            let anchor = Anchor(
-                anchorUrl: url, anchorDataHash: AnchorDataHash(payload: Data(hex: hashHex))
-            )
+            guard let constitution = object("constitution") else { return .infoAction(InfoAction()) }
+            let anchor = try LedgerValues.required(
+                LedgerValues.anchor(json: constitution["anchor"], "Yaci constitution anchor"),
+                "Yaci constitution anchor")
             let scriptHash = ((constitution["scripthash"] ?? constitution["scriptHash"]
                 ?? constitution["script"]) as? String)
                 .flatMap { $0.isEmpty ? nil : try? ScriptHash(from: .string($0)) }

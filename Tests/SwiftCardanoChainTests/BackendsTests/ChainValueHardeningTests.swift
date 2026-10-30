@@ -343,4 +343,165 @@ struct ChainValueHardeningTests {
             transactionID: TransactionId(payload: Data(hex: YaciMockData.proposalTxHash)), govActionIndex: 0)
         #expect(throws: CardanoChainError.self) { try YaciDevkitChainContext.govAction(from: proposal, id: id) }
     }
+
+    // MARK: Anchors and relays
+
+    /// A URL one byte over the ledger's 128-byte limit.
+    static let longURL = "https://example.com/" + String(repeating: "a", count: 109)
+    /// A DNS name one byte over the ledger's 128-byte limit.
+    static let longDNSName = String(repeating: "a", count: 121) + ".example"
+    static let anchorHash = "35aeb21ba4be07cf9fda041b635f107ef978238b3fccae9be1b571518ce9d1b7"
+
+    @Test("The over-long fixtures are just over the ledger's limits")
+    func overLongFixtures() {
+        #expect(Self.longURL.utf8.count == 129)
+        #expect(Self.longDNSName.utf8.count == 129)
+    }
+
+    static let longNameRelays: [SwiftYaciAPI.Components.Schemas.Relay] = [
+        // A single-host name (it has a port).
+        .init(port: 6000, dnsName: longDNSName),
+        // A multi-host SRV name (no port).
+        .init(dnsName: longDNSName),
+    ]
+
+    @Test("A Yaci relay whose DNS name is over the ledger's limit throws instead of being dropped",
+          arguments: longNameRelays)
+    func yaciLongRelayName(_ relay: SwiftYaciAPI.Components.Schemas.Relay) {
+        #expect(throws: CardanoChainError.self) { try YaciDevkitChainContext.relay(from: relay) }
+    }
+
+    static let badAddressRelays: [SwiftYaciAPI.Components.Schemas.Relay] = [
+        .init(port: 3001, ipv4: "300.1.2.3"),
+        .init(port: 3001, ipv6: "not an address"),
+    ]
+
+    @Test("A Yaci relay whose address does not parse throws instead of being dropped",
+          arguments: badAddressRelays)
+    func yaciBadRelayAddress(_ relay: SwiftYaciAPI.Components.Schemas.Relay) {
+        #expect(throws: CardanoChainError.self) { try YaciDevkitChainContext.relay(from: relay) }
+    }
+
+    static let anchorURLs: [String] = [longURL]
+
+    @Test("An anchor URL over 128 bytes throws", arguments: anchorURLs)
+    func anchorURLOverLimit(_ url: String) {
+        #expect(throws: CardanoChainError.self) {
+            try LedgerValues.anchor(url: url, hash: Self.anchorHash, "anchor")
+        }
+        #expect(throws: CardanoChainError.self) {
+            try LedgerValues.anchor(json: ["url": url, "dataHash": Self.anchorHash], "anchor")
+        }
+        #expect(throws: CardanoChainError.self) {
+            try YaciDevkitChainContext.anchor(url: url, hash: Self.anchorHash)
+        }
+    }
+
+    @Test("A URL of exactly 128 bytes is kept as written")
+    func anchorURLAtLimit() throws {
+        let url = "https://example.com/" + String(repeating: "a", count: 108)
+        #expect(try LedgerValues.anchor(url: url, hash: Self.anchorHash, "anchor").anchorUrl.text == url)
+    }
+
+    private func drepMetadata(url: String) throws -> Data {
+        try JSONEncoder().encode(
+            SwiftBlockfrostAPI.Components.Schemas.DrepMetadata(
+                drepId: "drep1kqhhkv66a0egfw7uyz7u8dv7fcvr4ck0c3ad9k9urx3yzhefup0",
+                hex: "b02f7b335aebf284bbdc20bdc3b59e4e183ae2cfc47ad2d8bc19a241",
+                url: url,
+                hash: Self.anchorHash,
+                jsonMetadata: SwiftBlockfrostAPI.Components.Schemas.DrepMetadata.JsonMetadataPayload(),
+                bytes: ""
+            )
+        )
+    }
+
+    @Test("A Blockfrost DRep anchor URL over 128 bytes throws instead of reading as no anchor")
+    func blockfrostDRepLongAnchorURL() async throws {
+        let context = try await blockfrost([
+            "get/governance/dreps/{drep_id}/metadata": try drepMetadata(url: Self.longURL)
+        ])
+        await #expect(throws: CardanoChainError.self) {
+            _ = try await context.drepInfo(
+                drep: DRep.fromBech32("drep1kqhhkv66a0egfw7uyz7u8dv7fcvr4ck0c3ad9k9urx3yzhefup0"))
+        }
+    }
+
+    @Test("A Blockfrost proposal anchor URL over 128 bytes throws instead of being dropped")
+    func blockfrostProposalLongAnchorURL() async throws {
+        let metadata = try JSONEncoder().encode(
+            SwiftBlockfrostAPI.Components.Schemas.ProposalMetadata(
+                id: "gov_action1qkm52uwlnw0gtcyh9259sjuwsyrnjdfd3hg7tjzrl463xtv4wfxysqqqqqfd6vw0",
+                txHash: proposalTxHash,
+                certIndex: 1,
+                url: Self.longURL,
+                hash: Self.anchorHash,
+                bytes: ""
+            )
+        )
+        let context = try await blockfrost([
+            "get/governance/proposals/{tx_hash}/{cert_index}": try proposal(),
+            "get/governance/proposals/{tx_hash}/{cert_index}/metadata": metadata,
+        ])
+        await #expect(throws: CardanoChainError.self) {
+            _ = try await context.govActionVotes(govActionID: govActionID)
+        }
+    }
+
+    private func constitutionProposal(_ description: String) -> Data {
+        Data("""
+            {"id": "gov_action1qkm52uwlnw0gtcyh9259sjuwsyrnjdfd3hg7tjzrl463xtv4wfxysqqqqqfd6vw0",
+             "tx_hash": "\(proposalTxHash)", "cert_index": 1,
+             "governance_type": "new_constitution",
+             "governance_description": \(description),
+             "deposit": "12000",
+             "return_address": "stake_test1urd3hs7rlxwwdzthe6hj026dmyt3y0heuulctscyydh2kgck6nkmz",
+             "ratified_epoch": null, "enacted_epoch": null, "dropped_epoch": null,
+             "expired_epoch": null, "expiration": 120}
+            """.utf8)
+    }
+
+    @Test("A Blockfrost new constitution carries its own anchor, not a placeholder or the proposal's")
+    func blockfrostConstitutionAnchor() async throws {
+        let constitutionURL = "ipfs://bafkreiconstitution"
+        let scriptHash = "fa24fb305126805cf2164c161d852a0e7330cf988f1fe558cf7d4a64"
+        let context = try await blockfrost([
+            "get/governance/proposals/{tx_hash}/{cert_index}": constitutionProposal("""
+                {"tag": "NewConstitution", "contents": [null,
+                  {"anchor": {"url": "\(constitutionURL)", "dataHash": "\(Self.anchorHash)"},
+                   "script": "\(scriptHash)"}]}
+                """)
+        ])
+        let info = try await context.govActionInfo(govActionID: govActionID)
+        guard case .newConstitution(let action) = info.govAction else {
+            Issue.record("Expected a new constitution, got \(info.govAction)")
+            return
+        }
+        #expect(action.constitution.anchor.anchorUrl.text == constitutionURL)
+        #expect(action.constitution.anchor.anchorDataHash.payload.toHex == Self.anchorHash)
+        #expect(action.constitution.scriptHash?.payload.toHex == scriptHash)
+    }
+
+    static let brokenConstitutionDescriptions: [String] = [
+        // No description at all.
+        "null",
+        // A constitution with no anchor.
+        #"{"tag": "NewConstitution", "contents": [null, {"script": null}]}"#,
+        // An anchor whose URL is over the ledger's limit.
+        #"{"tag": "NewConstitution", "contents": [null, {"anchor": {"url": ""# + longURL
+            + #"", "dataHash": ""# + anchorHash + #""}}]}"#,
+        // An anchor whose hash is not a 32-byte hash.
+        #"{"tag": "NewConstitution", "contents": [null, {"anchor": {"url": "ipfs://x", "dataHash": "abcd"}}]}"#,
+    ]
+
+    @Test("A Blockfrost new constitution with no valid anchor throws instead of using a placeholder",
+          arguments: brokenConstitutionDescriptions)
+    func blockfrostConstitutionNoAnchor(_ description: String) async throws {
+        let context = try await blockfrost([
+            "get/governance/proposals/{tx_hash}/{cert_index}": constitutionProposal(description)
+        ])
+        await #expect(throws: CardanoChainError.self) {
+            _ = try await context.govActionInfo(govActionID: govActionID)
+        }
+    }
 }

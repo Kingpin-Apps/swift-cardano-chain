@@ -947,18 +947,22 @@ public actor BlockFrostChainContext: ChainContext {
         // 3. Get pool metadata
         var poolMetadata: PoolMetadata? = nil
 
-        do {
-            let metadataResponse = try await api.client.getPoolsPoolIdMetadata(
-                Operations.GetPoolsPoolIdMetadata.Input(
-                    path: Operations.GetPoolsPoolIdMetadata.Input.Path(poolId: poolId)
-                )
+        // A separate call: when it fails (a pool with no metadata is a 404),
+        // the pool simply has none. A URL or hash it does return must be valid.
+        if case .ok(let metadataOK)? = try? await api.client.getPoolsPoolIdMetadata(
+            Operations.GetPoolsPoolIdMetadata.Input(
+                path: Operations.GetPoolsPoolIdMetadata.Input.Path(poolId: poolId)
             )
-            let metadata = try metadataResponse.ok.body.json
-            if let urlString = metadata.value1?.url, let hashString = metadata.value1?.hash,
-               let hashData = Data(hexString: hashString)
-            {
-                let url = try Url(urlString)
-                let hash = PoolMetadataHash(payload: hashData)
+        ) {
+            let metadata = try metadataOK.body.json
+            let urlString = metadata.value1?.url
+            let hashString = metadata.value1?.hash
+            if urlString != nil || hashString != nil {
+                let url = try LedgerValues.url(
+                    LedgerValues.required(urlString, "Blockfrost pool metadata URL"), "Blockfrost pool metadata URL")
+                let hash = PoolMetadataHash(payload: try LedgerValues.hash32(
+                    hex: LedgerValues.required(hashString, "Blockfrost pool metadata hash"),
+                    "Blockfrost pool metadata hash"))
                 do {
                     poolMetadata = try await PoolMetadata.fetch(
                         url: url,
@@ -971,8 +975,6 @@ public actor BlockFrostChainContext: ChainContext {
                     )
                 }
             }
-        } catch {
-            // Metadata might not exist, ignore error
         }
 
         // 4. Get latest block minted by pool for opcert counter
@@ -1009,17 +1011,10 @@ public actor BlockFrostChainContext: ChainContext {
         }
 
         // Map relays
-        let relays: [SwiftCardanoCore.Relay] = try relaysData.compactMap { relay in
-            if let ipv4String = relay.ipv4, let ipv4 = IPv4Address(ipv4String) {
-                return .singleHostAddr(SingleHostAddr(port: relay.port, ipv4: ipv4, ipv6: nil))
-            } else if let ipv6String = relay.ipv6, let ipv6 = IPv6Address(ipv6String) {
-                return .singleHostAddr(SingleHostAddr(port: relay.port, ipv4: nil, ipv6: ipv6))
-            } else if let dns = relay.dns {
-                return .singleHostName(try SingleHostName(port: relay.port, dnsName: dns))
-            } else if let dnsSrv = relay.dnsSrv {
-                return .multiHostName(try MultiHostName(dnsName: dnsSrv))
-            }
-            return nil
+        let relays: [SwiftCardanoCore.Relay] = try relaysData.map { relay in
+            try LedgerValues.relay(
+                port: relay.port, ipv4: relay.ipv4, ipv6: relay.ipv6,
+                dnsName: relay.dns, srvName: relay.dnsSrv, "Blockfrost pool relay")
         }
 
         // Blockfrost's client reads the margin as a Double; its shortest
@@ -1133,16 +1128,15 @@ public actor BlockFrostChainContext: ChainContext {
             throw CardanoChainError.valueError("Failed to parse DRep stake amount")
         }
         
+        // A separate call: when it fails (a DRep with no anchor is a 404), the
+        // DRep has no anchor. An anchor it does return must be valid.
         var anchor: Anchor? = nil
-        if let metadataResponse = try? await api.client.getGovernanceDrepsDrepIdMetadata(
+        if case .ok(let metadataOK)? = try? await api.client.getGovernanceDrepsDrepIdMetadata(
             .init(path: .init(drepId: drepId))
-        ), let metaData = try? metadataResponse.ok.body.json,
-           !metaData.url.isEmpty, !metaData.hash.isEmpty,
-           let hashData = Data(hexString: metaData.hash) {
-            anchor = try? Anchor(
-                anchorUrl: Url(metaData.url),
-                anchorDataHash: AnchorDataHash(payload: hashData)
-            )
+        ) {
+            let metaData = try metadataOK.body.json
+            anchor = try LedgerValues.optionalAnchor(
+                url: metaData.url, hash: metaData.hash, "Blockfrost DRep anchor")
         }
         
         let status: DRepStatus = drepData.retired ? .retired : .registered
@@ -1281,30 +1275,26 @@ public actor BlockFrostChainContext: ChainContext {
                 interval: UnitInterval(numerator: 0, denominator: 1)
             ))
         case .newConstitution:
-            // The proposal endpoint doesn't carry the constitution's anchor;
-            // fetch it from the metadata endpoint. Fall back to a placeholder
-            // URL if Blockfrost hasn't indexed the metadata yet so the call
-            // still returns a valid `GovAction` instead of trapping.
-            let realAnchor: Anchor? = try? await {
-                let metadataResponse = try await api.client.getGovernanceProposalsTxHashCertIndexMetadata(
-                    .init(path: .init(
-                        txHash: govActionID.transactionID.payload.toHex,
-                        certIndex: Int(govActionID.govActionIndex)
-                    ))
-                )
-                let meta = try metadataResponse.ok.body.json
-                guard let url = try? Url(meta.url) else { return nil as Anchor? }
-                return Anchor(
-                    anchorUrl: url,
-                    anchorDataHash: AnchorDataHash(payload: Data(hex: meta.hash))
-                )
+            // The constitution's anchor is in `governance_description`, the
+            // action as db-sync records it:
+            // `{"tag": "NewConstitution", "contents": [prevId, {"anchor": {url, dataHash}, "script": …}]}`.
+            // (The proposal's metadata endpoint is the proposal's own anchor,
+            // not the constitution's.)
+            let description = govActionData.governanceDescription?.additionalProperties.value
+            let contents = description?["contents"] as? [Any] ?? []
+            let constitution = contents.last as? [String: Any]
+            let anchor = try LedgerValues.required(
+                LedgerValues.anchor(json: constitution?["anchor"], "Blockfrost constitution anchor"),
+                "Blockfrost constitution anchor")
+            let scriptHash: ScriptHash? = try {
+                guard let script = constitution?["script"], !(script is NSNull) else { return nil }
+                guard let hex = script as? String else {
+                    throw CardanoChainError.valueError("Blockfrost constitution script \(script) is not a hash")
+                }
+                return try ScriptHash(from: .string(hex))
             }()
-            let anchor = realAnchor
-                ?? Anchor(
-                    anchorUrl: (try? Url("https://example.invalid"))!,
-                    anchorDataHash: AnchorDataHash(payload: Data())
-                )
-            govAction = .newConstitution(.init(id: govActionID, constitution: .init(anchor: anchor, scriptHash: nil)))
+            govAction = .newConstitution(.init(
+                id: govActionID, constitution: .init(anchor: anchor, scriptHash: scriptHash)))
         case .treasuryWithdrawals:
             let withdrawalsResponse = try await api.client.getGovernanceProposalsTxHashCertIndexWithdrawals(
                 .init(path: .init(
@@ -1489,23 +1479,19 @@ public actor BlockFrostChainContext: ChainContext {
         let deposit: Coin = try LedgerValues.integer(text: proposal.deposit, "Blockfrost proposal deposit")
         let returnAddrData = try Address.fromBech32(proposal.returnAddress).toBytes()
 
-        // Anchor metadata via a separate endpoint. Best-effort — the proposal may have
-        // no anchor (rare in practice), or Blockfrost may return 404 if the metadata
-        // hasn't been indexed yet. Either way we just drop the anchor and continue.
-        let anchor: SwiftCardanoCore.Anchor? = try? await {
-            let metadataResponse = try await api.client.getGovernanceProposalsTxHashCertIndexMetadata(
-                .init(path: .init(
-                    txHash: govActionID.transactionID.payload.toHex,
-                    certIndex: Int(govActionID.govActionIndex)
-                ))
-            )
-            let meta = try metadataResponse.ok.body.json
-            guard let url = try? Url(meta.url) else { return nil as SwiftCardanoCore.Anchor? }
-            return SwiftCardanoCore.Anchor(
-                anchorUrl: url,
-                anchorDataHash: AnchorDataHash(payload: Data(hex: meta.hash))
-            )
-        }()
+        // Anchor metadata via a separate endpoint, which answers 404 until
+        // Blockfrost has indexed the off-chain document; when the call fails the
+        // anchor is left out. An anchor it does return must be valid.
+        var anchor: SwiftCardanoCore.Anchor? = nil
+        if case .ok(let metadataOK)? = try? await api.client.getGovernanceProposalsTxHashCertIndexMetadata(
+            .init(path: .init(
+                txHash: govActionID.transactionID.payload.toHex,
+                certIndex: Int(govActionID.govActionIndex)
+            ))
+        ) {
+            let meta = try metadataOK.body.json
+            anchor = try LedgerValues.optionalAnchor(url: meta.url, hash: meta.hash, "Blockfrost proposal anchor")
+        }
 
         let votesResponse = try await api.client.getGovernanceProposalsTxHashCertIndexVotes(
             .init(path: .init(

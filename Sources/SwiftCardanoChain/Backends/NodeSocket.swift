@@ -561,11 +561,10 @@ public actor NodeSocketChainContext: ChainContext {
             )
         }
 
-        var anchor: Anchor? = nil
-        if let la = entry.anchor, let url = try? Url(la.url) {
-            anchor = Anchor(
-                anchorUrl: url,
-                anchorDataHash: AnchorDataHash(payload: la.dataHash)
+        let anchor: Anchor? = try entry.anchor.map { la in
+            Anchor(
+                anchorUrl: try LedgerValues.url(la.url, "node DRep anchor URL"),
+                anchorDataHash: try LedgerValues.anchorDataHash(la.dataHash, "node DRep anchor data hash")
             )
         }
 

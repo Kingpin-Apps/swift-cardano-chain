@@ -925,17 +925,16 @@ public actor OgmiosChainContext: ChainContext {
         let relays: [SwiftCardanoCore.Relay] = try ogmiosParams.relays.map { relay in
             switch relay {
             case .singleHostAddr(let ip):
-                let ipv4 = ip.ipv4.flatMap { IPv4Address($0) }
-                let ipv6 = ip.ipv6.flatMap { IPv6Address($0) }
+                let ipv4 = try ip.ipv4.map { try LedgerValues.ipv4($0, "Ogmios relay IPv4") }
+                let ipv6 = try ip.ipv6.map { try LedgerValues.ipv6($0, "Ogmios relay IPv6") }
                 return .singleHostAddr(
                     SingleHostAddr(port: ip.port.map { Int($0) }, ipv4: ipv4, ipv6: ipv6)
                 )
             case .singleHostName(let name):
-                return .singleHostName(
-                    try SingleHostName(port: name.port.map { Int($0) }, dnsName: name.hostname)
-                )
+                return try LedgerValues.singleHostName(
+                    port: name.port.map { Int($0) }, dnsName: name.hostname, "Ogmios relay DNS name")
             case .multiHostName(let name):
-                return .multiHostName(try MultiHostName(dnsName: name.hostname))
+                return try LedgerValues.multiHostName(dnsName: name.hostname, "Ogmios relay SRV name")
             }
         }
 
@@ -956,8 +955,8 @@ public actor OgmiosChainContext: ChainContext {
         if let metadataUrl = ogmiosParams.metadata?.url,
             let metadataHash = ogmiosParams.metadata?.hash
         {
-            let hashData = Data(hex: metadataHash.description)
-            let url = try Url(metadataUrl.absoluteString)
+            let hashData = try LedgerValues.hash32(hex: metadataHash.description, "Ogmios pool metadata hash")
+            let url = try LedgerValues.url(metadataUrl.absoluteString, "Ogmios pool metadata URL")
             let hash = PoolMetadataHash(payload: hashData)
             do {
                 poolMetadata = try await PoolMetadata.fetch(
@@ -1049,15 +1048,9 @@ public actor OgmiosChainContext: ChainContext {
             let deposit: Coin? = try reg.deposit.map { try $0.ada.lovelace.checked("Ogmios DRep deposit") }
             let expiry = reg.mandate.map { $0.epoch }
 
-            var anchor: SwiftCardanoCore.Anchor? = nil
-            if let ogmiosAnchor = reg.metadata,
-                let hashData = Data(hexString: ogmiosAnchor.hash),
-                let anchorUrl = try? Url(ogmiosAnchor.url.absoluteString)
-            {
-                anchor = SwiftCardanoCore.Anchor(
-                    anchorUrl: anchorUrl,
-                    anchorDataHash: AnchorDataHash(payload: hashData)
-                )
+            let anchor = try reg.metadata.map { ogmiosAnchor in
+                try LedgerValues.anchor(
+                    url: ogmiosAnchor.url.absoluteString, hash: ogmiosAnchor.hash, "Ogmios DRep anchor")
             }
 
             return DRepInfo(
@@ -1503,11 +1496,8 @@ public actor OgmiosChainContext: ChainContext {
             ))
 
         case .constitution(let c):
-            let url = try Url(c.metadata.url.absoluteString)
-            let anchor = Anchor(
-                anchorUrl: url,
-                anchorDataHash: AnchorDataHash(payload: Data(hex: c.metadata.hash))
-            )
+            let anchor = try LedgerValues.anchor(
+                url: c.metadata.url.absoluteString, hash: c.metadata.hash, "Ogmios constitution anchor")
             return .newConstitution(NewConstitution(
                 id: fallbackID,
                 constitution: Constitution(anchor: anchor, scriptHash: nil)
@@ -1598,16 +1588,9 @@ public actor OgmiosChainContext: ChainContext {
         // Convert deposit / returnAccount / metadata into core types.
         let deposit: Coin = try state.deposit.ada.lovelace.checked("Ogmios proposal deposit")
         let returnAddrData = try Address.fromBech32(state.returnAccount.value).toBytes()
-        let anchor: SwiftCardanoCore.Anchor? = {
-            guard let url = try? Url(state.metadata.url.absoluteString) else {
-                return nil as SwiftCardanoCore.Anchor?
-            }
-            let hashHex = state.metadata.hash.description
-            return SwiftCardanoCore.Anchor(
-                anchorUrl: url,
-                anchorDataHash: AnchorDataHash(payload: Data(hex: hashHex))
-            )
-        }()
+        let anchor: SwiftCardanoCore.Anchor? = try LedgerValues.anchor(
+            url: state.metadata.url.absoluteString, hash: state.metadata.hash.description,
+            "Ogmios proposal anchor")
 
         let govAction = try mapOgmiosGovernanceAction(state.action, fallbackID: fallbackID)
 
