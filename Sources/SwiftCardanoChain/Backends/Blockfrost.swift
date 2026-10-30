@@ -66,7 +66,7 @@ public actor BlockFrostChainContext: ChainContext {
     }
 
     public func era() async throws -> Era? {
-        Era.fromEpoch(epoch: EpochNumber(try await epoch()))
+        Era.fromEpoch(epoch: try await epoch().checked("Blockfrost epoch"))
     }
 
     public func epoch() async throws -> Int {
@@ -114,7 +114,7 @@ public actor BlockFrostChainContext: ChainContext {
     public func lastBlockSlot() async throws -> Int {
         let response = try await api.client.getBlocksLatest()
         do {
-            return try response.ok.body.json.slot!
+            return try LedgerValues.required(response.ok.body.json.slot, "Blockfrost latest block slot")
         } catch {
             throw CardanoChainError.blockfrostError("Failed to get blocksLatest: \(response)")
         }
@@ -249,12 +249,12 @@ public actor BlockFrostChainContext: ChainContext {
             let json = try response.ok.body.json
 
             return ChainTip(
-                block: json.height.map { BlockNumber($0) },
-                epoch: json.epoch.map { EpochNumber($0) },
+                block: try json.height.map { try $0.checked("Blockfrost tip height") },
+                epoch: try json.epoch.map { try $0.checked("Blockfrost tip epoch") },
                 era: nil,
                 hash: json.hash,
-                slot: json.slot.map { SlotNumber($0) },
-                slotInEpoch: json.epochSlot.map { SlotNumber($0) },
+                slot: try json.slot.map { try $0.checked("Blockfrost tip slot") },
+                slotInEpoch: try json.epochSlot.map { try $0.checked("Blockfrost tip epoch_slot") },
                 slotsToEpochEnd: nil,
                 syncProgress: nil
             )
@@ -278,11 +278,18 @@ public actor BlockFrostChainContext: ChainContext {
             // alphabetical, so costs taken from the name-keyed map and sorted would have the
             // transaction refused with PPViewHashesDontMatch.
             let rawCostModels = protocolParams.costModelsRaw?.additionalProperties.value ?? [:]
-            func costModel(_ language: String) -> [Int64] {
+            // A missing or malformed cost model is an error, not an empty one.
+            func costModel(_ language: String) throws -> [Int64] {
                 guard let value = rawCostModels[language].flatMap({ $0 }),
                     let list = value as? [Any]
-                else { return [] }
-                return list.compactMap { ($0 as? NSNumber)?.int64Value }
+                else {
+                    throw CardanoChainError.blockfrostError("cost_models_raw has no \(language) list")
+                }
+                return try list.map {
+                    try LedgerValues.required(
+                        LedgerValues.integer(json: $0, as: Int64.self, "Blockfrost \(language) cost"),
+                        "Blockfrost \(language) cost")
+                }
             }
 
             let p = protocolParams
@@ -308,9 +315,9 @@ public actor BlockFrostChainContext: ChainContext {
                 committeeMaxTermLength: try int(p.committeeMaxTermLength, "committee_max_term_length"),
                 committeeMinSize: try int(p.committeeMinSize, "committee_min_size"),
                 costModels: ProtocolParametersCostModels(
-                    PlutusV1: costModel("PlutusV1"),
-                    PlutusV2: costModel("PlutusV2"),
-                    PlutusV3: costModel("PlutusV3")
+                    PlutusV1: try costModel("PlutusV1"),
+                    PlutusV2: try costModel("PlutusV2"),
+                    PlutusV3: try costModel("PlutusV3")
                 ),
                 dRepActivity: try int(p.drepActivity, "drep_activity"),
                 dRepDeposit: try int(p.drepDeposit, "drep_deposit"),
@@ -447,7 +454,7 @@ public actor BlockFrostChainContext: ChainContext {
                         )
                 )
                 do {
-                    let cbor = try scriptCBOR.ok.body.json.cbor!
+                    let cbor = try LedgerValues.required(scriptCBOR.ok.body.json.cbor, "Blockfrost script cbor")
                     let v1script = PlutusV1Script(data: Data(hex: cbor))
                     return try tryFixScript(
                         hash: scriptHash,
@@ -466,7 +473,7 @@ public actor BlockFrostChainContext: ChainContext {
                         )
                 )
                 do {
-                    let cbor = try scriptCBOR.ok.body.json.cbor!
+                    let cbor = try LedgerValues.required(scriptCBOR.ok.body.json.cbor, "Blockfrost script cbor")
                     let v1script = PlutusV2Script(data: Data(hex: cbor))
                     return try tryFixScript(
                         hash: scriptHash,
@@ -485,7 +492,7 @@ public actor BlockFrostChainContext: ChainContext {
                         )
                 )
                 do {
-                    let cbor = try scriptCBOR.ok.body.json.cbor!
+                    let cbor = try LedgerValues.required(scriptCBOR.ok.body.json.cbor, "Blockfrost script cbor")
                     let v1script = PlutusV3Script(data: Data(hex: cbor))
                     return try tryFixScript(
                         hash: scriptHash,
@@ -548,7 +555,7 @@ public actor BlockFrostChainContext: ChainContext {
                     index: try LedgerValues.integer(result.outputIndex, "Blockfrost output index")
                 )
 
-                var lovelaceAmount: UInt64 = 0
+                var lovelaceAmount: UInt64? = nil
                 var multiAssets = MultiAsset([:])
 
                 for item in result.amount {
@@ -572,7 +579,7 @@ public actor BlockFrostChainContext: ChainContext {
                 }
 
                 let amount = Value(
-                    coin: BigInt(lovelaceAmount),
+                    coin: BigInt(try LedgerValues.required(lovelaceAmount, "Blockfrost UTxO lovelace")),
                     multiAsset: multiAssets
                 )
 
@@ -651,7 +658,7 @@ public actor BlockFrostChainContext: ChainContext {
                 index: try LedgerValues.integer(outputIndex, "Blockfrost output index")
             )
 
-            var lovelaceAmount: UInt64 = 0
+            var lovelaceAmount: UInt64? = nil
             var multiAssets = MultiAsset([:])
 
             for item in result.amount {
@@ -669,7 +676,7 @@ public actor BlockFrostChainContext: ChainContext {
             }
 
             let amount = Value(
-                coin: BigInt(lovelaceAmount),
+                coin: BigInt(try LedgerValues.required(lovelaceAmount, "Blockfrost UTxO lovelace")),
                 multiAsset: multiAssets
             )
 
@@ -689,7 +696,7 @@ public actor BlockFrostChainContext: ChainContext {
             }
 
             if let referenceScriptHash = result.referenceScriptHash {
-                script = try? await self.getScript(scriptHash: referenceScriptHash)
+                script = try await self.getScript(scriptHash: referenceScriptHash)
             }
 
             let address = try Address(from: .string(result.address))
@@ -752,11 +759,15 @@ public actor BlockFrostChainContext: ChainContext {
             {
                 for (key, value) in evaluationResult {
                     returnVal[key] = ExecutionUnits(
-                        mem: Int64(value["memory"] ?? 0),
-                        steps: Int64(value["steps"] ?? 0)
+                        mem: try LedgerValues.required(value["memory"], "Blockfrost evaluation \(key) memory")
+                            .checked("Blockfrost evaluation \(key) memory"),
+                        steps: try LedgerValues.required(value["steps"], "Blockfrost evaluation \(key) steps")
+                            .checked("Blockfrost evaluation \(key) steps")
                     )
                 }
             }
+        } catch let error as CardanoChainError {
+            throw error
         } catch {
             throw CardanoChainError.blockfrostError("Failed to evaluate TxCBOR: \(result)")
         }
@@ -780,11 +791,10 @@ public actor BlockFrostChainContext: ChainContext {
             return [
                 StakeAddressInfo(
                     active: stakeInfo.active,
-                    activeEpoch: stakeInfo.activeEpoch.map { EpochNumber($0) },
+                    activeEpoch: try stakeInfo.activeEpoch.map { try $0.checked("Blockfrost active_epoch") },
                     address: stakeInfo.stakeAddress,
-                    rewardAccountBalance: Int64(
-                        stakeInfo.withdrawableAmount
-                    )!,
+                    rewardAccountBalance: try LedgerValues.integer(
+                        text: stakeInfo.withdrawableAmount, "Blockfrost withdrawable_amount"),
                     stakeDelegation: stakeInfo.poolId != nil
                         ? try PoolOperator(
                             from: stakeInfo.poolId!
@@ -892,12 +902,12 @@ public actor BlockFrostChainContext: ChainContext {
                 "Failed to get opCertCounter from block info: \(blockInfo)")
         }
 
-        let onChainOpCertCount = Int(opCertCounter)!
+        let onChainOpCertCount: Int = try LedgerValues.integer(text: opCertCounter, "Blockfrost op_cert_counter")
         let nextChainOpCertCount = onChainOpCertCount + 1
 
         if let opCert = opCert {
-            let onDiskOpCertCount = Int(opCert.sequenceNumber)
-            let onDiskKESStart = Int(opCert.kesPeriod)
+            let onDiskOpCertCount: Int = try opCert.sequenceNumber.checked("operational certificate sequence number")
+            let onDiskKESStart: Int = try opCert.kesPeriod.checked("operational certificate KES period")
 
             return KESPeriodInfo(
                 onChainOpCertCount: onChainOpCertCount,
@@ -967,6 +977,7 @@ public actor BlockFrostChainContext: ChainContext {
 
         // 4. Get latest block minted by pool for opcert counter
         var opcertCounter: UInt? = nil
+        var opcertCounterText: String? = nil
         do {
             let latestBlockResponse = try await api.client.getPoolsPoolIdBlocks(
                 Operations.GetPoolsPoolIdBlocks.Input(
@@ -987,12 +998,14 @@ public actor BlockFrostChainContext: ChainContext {
                     )
                 )
                 let blockInfo = try blockInfoResponse.ok.body.json
-                if let counterStr = blockInfo.opCertCounter, let counter = UInt(counterStr) {
-                    opcertCounter = counter
-                }
+                opcertCounterText = blockInfo.opCertCounter
             }
         } catch {
             // Pool may not have minted any blocks yet
+        }
+        // A counter that is there but does not parse is an error, not "no counter".
+        if let opcertCounterText {
+            opcertCounter = try LedgerValues.integer(text: opcertCounterText, "Blockfrost op_cert_counter")
         }
 
         // Map relays
@@ -1047,9 +1060,9 @@ public actor BlockFrostChainContext: ChainContext {
             poolMetadata: poolMetadata
         )
 
-        let livePledge: UInt? = UInt(pool.livePledge)
-        let liveStake: UInt? = UInt(pool.liveStake)
-        let activeStake: UInt? = UInt(pool.activeStake)
+        let livePledge: UInt? = try LedgerValues.integer(text: pool.livePledge, "Blockfrost pool live_pledge")
+        let liveStake: UInt? = try LedgerValues.integer(text: pool.liveStake, "Blockfrost pool live_stake")
+        let activeStake: UInt? = try LedgerValues.integer(text: pool.activeStake, "Blockfrost pool active_stake")
         let activeSize: Decimal? = Decimal(pool.activeSize)
 
         // 5. Determine pool status from retirement field
@@ -1071,12 +1084,15 @@ public actor BlockFrostChainContext: ChainContext {
                     if currentEpoch >= retiringEpoch {
                         status = .retired
                     } else {
-                        status = .retiring(epoch: UInt(retiringEpoch))
+                        status = .retiring(epoch: try retiringEpoch.checked("Blockfrost retiring_epoch"))
                     }
                 }
+            } catch let error as CardanoChainError {
+                throw error
             } catch {
-                // If we can't determine the exact epoch, fall back to retiring
-                status = .retiring(epoch: 0)
+                // The retirement could not be fetched, so the status is not
+                // known: leave it nil rather than invent a retiring epoch of 0.
+                status = nil
             }
         }
 
@@ -1100,11 +1116,7 @@ public actor BlockFrostChainContext: ChainContext {
         )
         let networkData = try networkResponse.ok.body.json
 
-        guard let treasuryInt = UInt64(networkData.supply.treasury) else {
-            throw CardanoChainError.valueError("Failed to parse treasury balance")
-        }
-
-        return Coin(treasuryInt)
+        return try LedgerValues.integer(text: networkData.supply.treasury, "Blockfrost treasury")
     }
 
     /// Get the DRep information.
@@ -1175,8 +1187,8 @@ public actor BlockFrostChainContext: ChainContext {
             govAction = .hardForkInitiationAction(.init(
                 id: nil,
                 protocolVersion: ProtocolVersion(
-                    major: params.protocolMajorVer ?? 0,
-                    minor: params.protocolMinorVer ?? 0
+                    major: try LedgerValues.required(params.protocolMajorVer, "Blockfrost protocol_major_ver"),
+                    minor: try LedgerValues.required(params.protocolMinorVer, "Blockfrost protocol_minor_ver")
                 )
             ))
         case .parameterChange:
@@ -1315,11 +1327,11 @@ public actor BlockFrostChainContext: ChainContext {
             govActionId: govActionID,
             govAction: govAction,
             proposedIn: nil,
-            expiresAfter: UInt64(govActionData.expiration),
-            ratifiedEpoch: govActionData.ratifiedEpoch != nil ? UInt64(govActionData.ratifiedEpoch!) : nil,
-            enactedEpoch: govActionData.enactedEpoch != nil ? UInt64(govActionData.enactedEpoch!) : nil,
-            droppedEpoch: govActionData.droppedEpoch != nil ? UInt64(govActionData.droppedEpoch!) : nil,
-            expiredEpoch: govActionData.expiredEpoch != nil ? UInt64(govActionData.expiredEpoch!) : nil
+            expiresAfter: try govActionData.expiration.checked("Blockfrost proposal expiration"),
+            ratifiedEpoch: try govActionData.ratifiedEpoch.map { try $0.checked("Blockfrost proposal ratified_epoch") },
+            enactedEpoch: try govActionData.enactedEpoch.map { try $0.checked("Blockfrost proposal enacted_epoch") },
+            droppedEpoch: try govActionData.droppedEpoch.map { try $0.checked("Blockfrost proposal dropped_epoch") },
+            expiredEpoch: try govActionData.expiredEpoch.map { try $0.checked("Blockfrost proposal expired_epoch") }
         )
     }
     
@@ -1452,7 +1464,7 @@ public actor BlockFrostChainContext: ChainContext {
         return CommitteeMemberInfo(
             coldCredential: coldCredential,
             hotCredential: hotCredential,
-            expiration: EpochNumber(member.expirationEpoch),
+            expiration: try member.expirationEpoch.checked("Blockfrost committee member expiration_epoch"),
             status: status
         )
     }
@@ -1474,8 +1486,8 @@ public actor BlockFrostChainContext: ChainContext {
         )
         let proposal = try proposalResponse.ok.body.json
 
-        let deposit = Coin(UInt64(proposal.deposit) ?? 0)
-        let returnAddrData: Data = (try? Address.fromBech32(proposal.returnAddress).toBytes()) ?? Data()
+        let deposit: Coin = try LedgerValues.integer(text: proposal.deposit, "Blockfrost proposal deposit")
+        let returnAddrData = try Address.fromBech32(proposal.returnAddress).toBytes()
 
         // Anchor metadata via a separate endpoint. Best-effort — the proposal may have
         // no anchor (rare in practice), or Blockfrost may return 404 if the metadata
@@ -1566,7 +1578,7 @@ public actor BlockFrostChainContext: ChainContext {
         for proposal in proposals {
             let govActionID = GovActionID(
                 transactionID: TransactionId(payload: Data(hex: proposal.txHash)),
-                govActionIndex: UInt16(proposal.certIndex)
+                govActionIndex: try proposal.certIndex.checked("Blockfrost proposal cert_index")
             )
             if let votes = try? await govActionVotes(govActionID: govActionID) {
                 results.append(votes)
@@ -1585,7 +1597,7 @@ public actor BlockFrostChainContext: ChainContext {
     /// request per open action, plus the list and the epoch, instead of
     /// three per proposal ever made.
     public func openGovActions() async throws -> [OpenGovAction] {
-        let epoch = UInt64(max(try await self.epoch(), 0))
+        let epoch = try LedgerValues.integer(try await self.epoch(), as: UInt64.self, "current epoch")
         let pageSize = 100
         var open: [OpenGovAction] = []
         var page = 1
@@ -1611,7 +1623,7 @@ public actor BlockFrostChainContext: ChainContext {
                     return found.sorted { $0.0 < $1.0 }.map(\.1)
                 }
                 for detail in details {
-                    let expiresAfter = UInt64(max(detail.expiration, 0))
+                    let expiresAfter: UInt64 = try detail.expiration.checked("Blockfrost proposal expiration")
                     guard OpenGovAction.isOpen(expiresAfter: expiresAfter, in: epoch) else { break scan }
                     let concluded = detail.ratifiedEpoch != nil || detail.enactedEpoch != nil
                         || detail.droppedEpoch != nil || detail.expiredEpoch != nil
@@ -1619,10 +1631,10 @@ public actor BlockFrostChainContext: ChainContext {
                     open.append(OpenGovAction(
                         govActionId: GovActionID(
                             transactionID: TransactionId(payload: Data(hex: detail.txHash)),
-                            govActionIndex: UInt16(detail.certIndex)
+                            govActionIndex: try detail.certIndex.checked("Blockfrost proposal cert_index")
                         ),
                         type: Self.govActionCode(detail.governanceType),
-                        deposit: Coin(UInt64(detail.deposit) ?? 0),
+                        deposit: try LedgerValues.integer(text: detail.deposit, "Blockfrost proposal deposit"),
                         expiresAfter: expiresAfter
                     ))
                 }
@@ -1652,7 +1664,7 @@ public actor BlockFrostChainContext: ChainContext {
 
         let currentEpoch = try await epoch()
 
-        let members: [CommitteeStateInfo.Member] = committee.members.map { m in
+        let members: [CommitteeStateInfo.Member] = try committee.members.map { m in
             let cold: CommitteeColdCredential = m.ccColdHasScript
                 ? CommitteeColdCredential(credential: .scriptHash(ScriptHash(payload: Data(hex: m.ccColdHex))))
                 : CommitteeColdCredential(credential: .verificationKeyHash(VerificationKeyHash(payload: Data(hex: m.ccColdHex))))
@@ -1677,14 +1689,14 @@ public actor BlockFrostChainContext: ChainContext {
             return CommitteeStateInfo.Member(
                 coldCredential: cold,
                 hotCredential: hot,
-                expiration: EpochNumber(m.expirationEpoch),
+                expiration: try m.expirationEpoch.checked("Blockfrost committee member expiration_epoch"),
                 status: status
             )
         }
 
-        let threshold: Double = committee.quorum.denominator != 0
-            ? Double(committee.quorum.numerator) / Double(committee.quorum.denominator)
-            : 0.0
+        let quorum = try LedgerValues.unitInterval(
+            text: "\(committee.quorum.numerator)/\(committee.quorum.denominator)", "Blockfrost committee quorum")
+        let threshold = Double(quorum.numerator) / Double(quorum.denominator)
 
         return CommitteeStateInfo(members: members, threshold: threshold)
     }

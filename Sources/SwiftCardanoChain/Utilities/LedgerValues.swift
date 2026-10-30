@@ -79,6 +79,9 @@ enum LedgerValues {
         if let value = any as? Int64 { return try integer(value, as: T.self, what()) }
         if let value = any as? UInt64 { return try integer(value, as: T.self, what()) }
         if let text = any as? String { return try integer(text: text, as: T.self, what()) }
+        // A Double (OpenAPIRuntime's containers hold JSON numbers as one) is
+        // accepted only when it is a whole number in range.
+        if let value = any as? Double { return try integer(value, as: T.self, what()) }
         throw CardanoChainError.valueError("\(what()): \(any) is not a whole number")
     }
 
@@ -251,5 +254,24 @@ enum LedgerValues {
             throw CardanoChainError.valueError("\(what): \(n)/\(d) is above one, so not a unit interval")
         }
         return UnitInterval(numerator: n, denominator: d)
+    }
+}
+
+extension BinaryInteger {
+    /// The value as a `T`, or a ``CardanoChainError/valueError(_:)`` naming
+    /// `what` when it is negative or too large for `T`: a value from the
+    /// network or a file never traps and is never clamped.
+    func checked<T: FixedWidthInteger>(_ what: @autoclosure () -> String) throws -> T {
+        try LedgerValues.integer(self, as: T.self, what())
+    }
+}
+
+extension Double {
+    /// The value as a `T` when it is a whole number in range, a
+    /// ``CardanoChainError/valueError(_:)`` naming `what` otherwise. APIs
+    /// whose clients read every number as a `Double` (Koios) go through this
+    /// instead of `T(_:)`, which truncates fractions and traps on overflow.
+    func checked<T: FixedWidthInteger>(_ what: @autoclosure () -> String) throws -> T {
+        try LedgerValues.integer(self, as: T.self, what())
     }
 }

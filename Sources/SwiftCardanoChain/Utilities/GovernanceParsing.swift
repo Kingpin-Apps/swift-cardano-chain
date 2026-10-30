@@ -13,23 +13,22 @@ enum GovernanceParsing {
     /// - an object (`{"numerator": 51, "denominator": 100}`)
     /// - a string ("0.51")
     ///
-    /// Returns `0.0` when the value is missing or unparsable.
-    static func parseThreshold(_ any: Any?) -> Double {
-        guard let any else { return 0.0 }
-        if let d = any as? Double { return d }
-        if let n = any as? NSNumber { return n.doubleValue }
-        if let s = any as? String, let d = Double(s) { return d }
-        if let arr = any as? [Any], arr.count >= 2,
-           let num = (arr[0] as? NSNumber)?.doubleValue,
-           let den = (arr[1] as? NSNumber)?.doubleValue, den != 0 {
-            return num / den
+    /// The value is read exactly and must lie in `[0, 1]`.
+    ///
+    /// - Throws: ``CardanoChainError/valueError(_:)`` when the value is
+    ///   missing or is not a unit interval; a missing threshold is not 0.
+    static func parseThreshold(_ any: Any?) throws -> Double {
+        var value = any
+        if let arr = any as? [Any] {
+            guard arr.count == 2 else {
+                throw CardanoChainError.valueError("Threshold \(arr) is not a [numerator, denominator] pair")
+            }
+            value = ["numerator": arr[0], "denominator": arr[1]] as [String: Any]
         }
-        if let dict = any as? [String: Any],
-           let num = (dict["numerator"] as? NSNumber)?.doubleValue,
-           let den = (dict["denominator"] as? NSNumber)?.doubleValue, den != 0 {
-            return num / den
+        guard let interval = try LedgerValues.unitInterval(json: value, "threshold") else {
+            throw CardanoChainError.valueError("Threshold is missing")
         }
-        return 0.0
+        return Double(interval.numerator) / Double(interval.denominator)
     }
 
     /// Parse a Vote enum from a string ("yes" / "no" / "abstain") or the
@@ -47,14 +46,17 @@ enum GovernanceParsing {
 
     /// Parse a lovelace value that may arrive as a number, a numeric string,
     /// or an object wrapping the `lovelace` key (e.g. `{"lovelace": 123}`).
-    static func parseLovelace(_ any: Any?) -> UInt64? {
-        guard let any else { return nil }
-        if let n = any as? NSNumber { return n.uint64Value }
-        if let i = any as? Int, i >= 0 { return UInt64(i) }
-        if let s = any as? String, let u = UInt64(s) { return u }
-        if let dict = any as? [String: Any], let lovelace = dict["lovelace"] {
-            return parseLovelace(lovelace)
+    ///
+    /// - Returns: `nil` when the value is absent (`nil` or `null`).
+    /// - Throws: ``CardanoChainError/valueError(_:)`` when it is present but
+    ///   negative, fractional, too large or not a number.
+    static func parseLovelace(_ any: Any?) throws -> UInt64? {
+        if let dict = any as? [String: Any] {
+            guard let lovelace = dict["lovelace"] else {
+                throw CardanoChainError.valueError("Lovelace object \(dict) has no lovelace key")
+            }
+            return try parseLovelace(lovelace)
         }
-        return nil
+        return try LedgerValues.integer(json: any, as: UInt64.self, "lovelace")
     }
 }

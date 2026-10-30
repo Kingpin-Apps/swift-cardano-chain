@@ -365,7 +365,7 @@ public extension ChainContext {
     /// governance state in one query (a node, Ogmios, cardano-cli), where
     /// listing every action costs no more than listing the open ones.
     func openGovActions() async throws -> [OpenGovAction] {
-        let epoch = UInt64(max(try await self.epoch(), 0))
+        let epoch = try LedgerValues.integer(try await self.epoch(), as: UInt64.self, "current epoch")
         return try await govActionsAll().compactMap { action in
             guard action.status == nil, OpenGovAction.isOpen(expiresAfter: action.expiresAfter, in: epoch) else { return nil }
             return OpenGovAction(

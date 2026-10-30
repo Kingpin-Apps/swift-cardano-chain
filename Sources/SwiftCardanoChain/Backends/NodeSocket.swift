@@ -65,7 +65,7 @@ public actor NodeSocketChainContext: ChainContext {
     // MARK: - Async Properties
 
     public func era() async throws -> Era? {
-        Era.fromEpoch(epoch: EpochNumber(try await epoch()))
+        Era.fromEpoch(epoch: try await epoch().checked("node epoch"))
     }
 
     public func epoch() async throws -> Int {
@@ -95,12 +95,12 @@ public actor NodeSocketChainContext: ChainContext {
 
     private func fetchEpochFromNode() async throws -> Int {
         let response = try await withClient { try await $0.queryEpochNo() }
-        return Int(response)
+        return try response.checked("node epoch")
     }
 
     public func lastBlockSlot() async throws -> Int {
         let tip = try await withClient { try await $0.queryLedgerTip() }
-        return Self.slot(from: tip)
+        return try Self.slot(from: tip)
     }
 
     public func genesisParameters() async throws -> GenesisParameters {
@@ -278,7 +278,7 @@ public actor NodeSocketChainContext: ChainContext {
             )
         }
 
-        let currentEpoch = Int(epochNo)
+        let currentEpoch: Int = try epochNo.checked("node epoch")
         let era = Era.fromEpoch(epoch: epochNo).rawValue
         let slotInt: Int
         let hashHex: String?
@@ -287,7 +287,7 @@ public actor NodeSocketChainContext: ChainContext {
             slotInt = 0
             hashHex = nil
         case .blockPoint(let slot, let hash):
-            slotInt = Int(slot)
+            slotInt = try slot.checked("node tip slot")
             hashHex = hash.map { String(format: "%02x", $0) }.joined()
         }
 
@@ -306,10 +306,10 @@ public actor NodeSocketChainContext: ChainContext {
 
         return ChainTip(
             block: BlockNumber(exactly: tip.blockNo),
-            epoch: EpochNumber(currentEpoch),
+            epoch: epochNo,
             era: era,
             hash: hashHex,
-            slot: SlotNumber(slotInt),
+            slot: try slotInt.checked("node tip slot"),
             slotInEpoch: slotInEpoch.map { SlotNumber($0) },
             slotsToEpochEnd: slotsToEpochEnd.map { SlotNumber($0) },
             syncProgress: syncProgress
@@ -430,7 +430,7 @@ public actor NodeSocketChainContext: ChainContext {
             StakeAddressInfo(
                 active: true,
                 address: bech32,
-                rewardAccountBalance: Int64(rewards.lovelace),
+                rewardAccountBalance: try rewards.lovelace.checked("node reward balance"),
                 stakeDelegation: delegation?.poolOperator,
                 voteDelegation: nil
             )
@@ -474,7 +474,7 @@ public actor NodeSocketChainContext: ChainContext {
         let onChainOpCertCount: Int
         let nextChainOpCertCount: Int
         if let counter {
-            onChainOpCertCount = Int(counter)
+            onChainOpCertCount = try counter.checked("node operational certificate counter")
             nextChainOpCertCount = onChainOpCertCount + 1
         } else {
             // Pool has never minted a block; no entry in the counters map.
@@ -485,9 +485,9 @@ public actor NodeSocketChainContext: ChainContext {
         if let opCert {
             return KESPeriodInfo(
                 onChainOpCertCount: onChainOpCertCount,
-                onDiskOpCertCount: Int(opCert.sequenceNumber),
+                onDiskOpCertCount: try opCert.sequenceNumber.checked("operational certificate sequence number"),
                 nextChainOpCertCount: nextChainOpCertCount,
-                onDiskKESStart: Int(opCert.kesPeriod)
+                onDiskKESStart: try opCert.kesPeriod.checked("operational certificate KES period")
             )
         }
 
@@ -542,7 +542,10 @@ public actor NodeSocketChainContext: ChainContext {
     }
 
     public func drepInfo(drep: DRep) async throws -> DRepInfo {
-        let state = try await withClient { try await $0.queryDRepState([drep]) }
+        // Sequential LSQ queries on one connection: the state, then the stake.
+        let (state, distribution) = try await withClient { connection in
+            (try await connection.queryDRepState([drep]), try await connection.queryDRepStakeDistr([drep]))
+        }
 
         guard let entry = state.entries.first(where: {
             (try? $0.drep.toPrimitive()) == (try? drep.toPrimitive())
@@ -571,7 +574,11 @@ public actor NodeSocketChainContext: ChainContext {
             drep: drep,
             anchor: anchor,
             deposit: Coin(entry.deposit),
-            stake: Coin(0),
+            // The ledger's distribution lists only DReps with stake, so one
+            // absent from it has none delegated.
+            stake: distribution.entries.first(where: {
+                (try? $0.drep.toPrimitive()) == (try? drep.toPrimitive())
+            })?.stake ?? 0,
             expiry: entry.expiry,
             status: .registered
         )
@@ -724,7 +731,10 @@ public actor NodeSocketChainContext: ChainContext {
             )
         }
 
-        let threshold = state.threshold?.quotient ?? 0.0
+        // A missing threshold is not 0: there is no committee to report one for.
+        guard let threshold = state.threshold?.quotient else {
+            throw CardanoChainError.valueError("The node reports no committee quorum threshold")
+        }
         return CommitteeStateInfo(members: members, threshold: threshold)
     }
 
@@ -804,12 +814,12 @@ public actor NodeSocketChainContext: ChainContext {
     }
 
     /// Extract a slot number from a chain `Point`. Returns `0` for `.origin`.
-    static func slot(from point: Point) -> Int {
+    static func slot(from point: Point) throws -> Int {
         switch point {
         case .origin:
             return 0
         case .blockPoint(let slot, _):
-            return Int(slot)
+            return try slot.checked("node slot")
         }
     }
 

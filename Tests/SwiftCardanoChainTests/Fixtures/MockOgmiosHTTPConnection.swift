@@ -8,6 +8,12 @@ import SwiftOgmios
 
 /// Mock HTTP connection that routes JSON-RPC requests to pre-defined responses.
 final class MockOgmiosHTTPConnection: HTTPConnectable, @unchecked Sendable {
+    /// Responses that replace the default for a JSON-RPC method.
+    let overrides: [String: Data]
+
+    init(overrides: [String: Data] = [:]) {
+        self.overrides = overrides
+    }
 
     func sendRequest(json: String) async throws -> Data {
         guard let requestData = json.data(using: .utf8),
@@ -16,6 +22,7 @@ final class MockOgmiosHTTPConnection: HTTPConnectable, @unchecked Sendable {
         else {
             return Data()
         }
+        if let override = overrides[method] { return override }
 
         switch method {
         case "queryLedgerState/epoch":
@@ -113,6 +120,11 @@ enum OgmiosMockData {
                 "maxExecutionUnitsPerBlock": {"memory": 62000000, "cpu": 20000000000},
                 "maxExecutionUnitsPerTransaction": {"memory": 14000000, "cpu": 10000000000},
                 "scriptExecutionPrices": {"memory": "577/10000", "cpu": "721/10000000"},
+                "plutusCostModels": {
+                    "plutus:v1": [100788, 420, 1, 1],
+                    "plutus:v2": [100788, 420, 1, 1, 1000],
+                    "plutus:v3": [100788, 420, 1, 1, 1000, 173]
+                },
                 "version": {"major": 10, "minor": 0},
                 "governanceActionDeposit": {"ada": {"lovelace": 100000000000}},
                 "governanceActionLifetime": 6,
@@ -529,10 +541,10 @@ enum OgmiosMockData {
 }
 
 /// Helper to create a mock OgmiosChainContext for testing.
-func createMockOgmiosChainContext(network: SwiftCardanoCore.Network = .preview) async throws
-    -> OgmiosChainContext
-{
-    let mockConnection = MockOgmiosHTTPConnection()
+func createMockOgmiosChainContext(
+    network: SwiftCardanoCore.Network = .preview, overrides: [String: Data] = [:]
+) async throws -> OgmiosChainContext {
+    let mockConnection = MockOgmiosHTTPConnection(overrides: overrides)
     let client = try await OgmiosClient(
         host: "localhost",
         port: 1337,

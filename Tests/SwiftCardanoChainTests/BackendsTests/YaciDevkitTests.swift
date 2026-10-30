@@ -1030,7 +1030,7 @@ struct YaciDevkitChainContextTests {
                 """
             let proposal = try JSONDecoder().decode(
                 Components.Schemas.GovActionProposal.self, from: Data(json.utf8))
-            return YaciDevkitChainContext.govAction(from: proposal, id: id)
+            return try YaciDevkitChainContext.govAction(from: proposal, id: id)
         }
 
         guard case .infoAction = try action("INFO_ACTION", details: "{}") else {

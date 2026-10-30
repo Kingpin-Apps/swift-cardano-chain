@@ -223,7 +223,8 @@ public actor YaciDevkitChainContext: ChainContext {
 
     private func fetchEpoch() async throws -> Int {
         try await perform("get the latest epoch") {
-            Int(try await api.client.getLatestEpoch().ok.body.json.epoch ?? 0)
+            Int(try LedgerValues.required(
+                try await api.client.getLatestEpoch().ok.body.json.epoch, "Yaci latest epoch"))
         }
     }
 
@@ -259,12 +260,12 @@ public actor YaciDevkitChainContext: ChainContext {
         let block = try await latestBlock()
         let number = block.number ?? block.height
         return ChainTip(
-            block: number.map { BlockNumber($0) },
-            epoch: block.epoch.map { EpochNumber($0) },
+            block: try number.map { try $0.checked("Yaci block number") },
+            epoch: try block.epoch.map { try $0.checked("Yaci block epoch") },
             era: block.era.flatMap { Self.era(fromIndex: Int($0)) }?.description,
             hash: block.hash,
-            slot: block.slot.map { SlotNumber($0) },
-            slotInEpoch: block.epochSlot.map { SlotNumber($0) },
+            slot: try block.slot.map { try $0.checked("Yaci block slot") },
+            slotInEpoch: try block.epochSlot.map { try $0.checked("Yaci block epoch_slot") },
             slotsToEpochEnd: nil,
             syncProgress: nil
         )
@@ -533,8 +534,9 @@ public actor YaciDevkitChainContext: ChainContext {
         }
         // Yaci's client reads each ratio as a Double; its shortest description
         // is the decimal Yaci sent, read here exactly.
+        // A missing threshold is not 0.
         func unit(_ value: Double?, _ name: String) throws -> UnitInterval {
-            try LedgerValues.unitInterval(value ?? 0, "Yaci protocol parameter \(name)")
+            try LedgerValues.unitInterval(try require(value, name), "Yaci protocol parameter \(name)")
         }
         func nonNegative(_ value: Double?, _ name: String) throws -> NonNegativeInterval {
             try LedgerValues.nonNegativeInterval(try require(value, name), "Yaci protocol parameter \(name)")
@@ -551,28 +553,30 @@ public actor YaciDevkitChainContext: ChainContext {
 
         // Each language's costs arrive keyed by operation name; flattening in key order matches
         // the ledger's order for V1 and V2.
-        func storeModel(_ names: [String]) -> [Int64] {
+        // A missing cost model is an error, not an empty one: the script
+        // data hash covers it.
+        func storeModel(_ names: [String]) throws -> [Int64] {
             for name in names {
                 if let payload = params.costModels?.additionalProperties[name] {
                     let costs = payload.additionalProperties
                     return costs.keys.sorted().compactMap { costs[$0] }
                 }
             }
-            return []
+            throw CardanoChainError.yaciDevkitError("Protocol parameters are missing the \(names[0]) cost model")
         }
         let costModels = ProtocolParametersCostModels(
-            PlutusV1: genesisCostModels.v1 ?? storeModel(["PlutusV1", "plutusV1", "plutus:v1"]),
-            PlutusV2: genesisCostModels.v2 ?? storeModel(["PlutusV2", "plutusV2", "plutus:v2"]),
-            PlutusV3: genesisCostModels.v3 ?? storeModel(["PlutusV3", "plutusV3", "plutus:v3"])
+            PlutusV1: try genesisCostModels.v1 ?? storeModel(["PlutusV1", "plutusV1", "plutus:v1"]),
+            PlutusV2: try genesisCostModels.v2 ?? storeModel(["PlutusV2", "plutusV2", "plutus:v2"]),
+            PlutusV3: try genesisCostModels.v3 ?? storeModel(["PlutusV3", "plutusV3", "plutus:v3"])
         )
 
         return ProtocolParameters(
             collateralPercentage: try int(params.collateralPercent, "collateral_percent"),
-            committeeMaxTermLength: try int(params.committeeMaxTermLength ?? 0, "committee_max_term_length"),
-            committeeMinSize: try int(params.committeeMinSize ?? 0, "committee_min_size"),
+            committeeMaxTermLength: try int(params.committeeMaxTermLength, "committee_max_term_length"),
+            committeeMinSize: try int(params.committeeMinSize, "committee_min_size"),
             costModels: costModels,
-            dRepActivity: try int(params.drepActivity ?? 0, "drep_activity"),
-            dRepDeposit: try int(params.drepDeposit ?? 0, "drep_deposit"),
+            dRepActivity: try int(params.drepActivity, "drep_activity"),
+            dRepDeposit: try int(params.drepDeposit, "drep_deposit"),
             dRepVotingThresholds: DRepVotingThresholds(
                 committeeNoConfidence: try unit(params.dvtCommitteeNoConfidence, "dvt_committee_no_confidence"),
                 committeeNormal: try unit(params.dvtCommitteeNormal, "dvt_committee_normal"),
@@ -589,8 +593,8 @@ public actor YaciDevkitChainContext: ChainContext {
                 priceMemory: try nonNegative(params.priceMem, "price_mem"),
                 priceSteps: try nonNegative(params.priceStep, "price_step")
             ),
-            govActionDeposit: try int(params.govActionDeposit ?? 0, "gov_action_deposit"),
-            govActionLifetime: try int(params.govActionLifetime ?? 0, "gov_action_lifetime"),
+            govActionDeposit: try int(params.govActionDeposit, "gov_action_deposit"),
+            govActionLifetime: try int(params.govActionLifetime, "gov_action_lifetime"),
             maxBlockBodySize: try int(params.maxBlockSize, "max_block_size"),
             maxBlockExecutionUnits: ProtocolParametersExecutionUnits(
                 memory: try int(params.maxBlockExMem, "max_block_ex_mem"),
@@ -608,7 +612,7 @@ public actor YaciDevkitChainContext: ChainContext {
                 try LedgerValues.nonNegativeInterval($0, "Yaci protocol parameter min_fee_ref_script_cost_per_byte")
             },
             minPoolCost: try int(params.minPoolCost, "min_pool_cost"),
-            monetaryExpansion: try unit(try require(params.rho, "rho"), "rho"),
+            monetaryExpansion: try unit(params.rho, "rho"),
             poolPledgeInfluence: try nonNegative(params.a0, "a0"),
             poolRetireMaxEpoch: try int(params.eMax, "e_max"),
             poolVotingThresholds: ProtocolParametersPoolVotingThresholds(
@@ -621,12 +625,12 @@ public actor YaciDevkitChainContext: ChainContext {
             ),
             protocolVersion: ProtocolParametersProtocolVersion(
                 major: try int(params.protocolMajorVer, "protocol_major_ver"),
-                minor: try int(params.protocolMinorVer ?? 0, "protocol_minor_ver")
+                minor: try int(params.protocolMinorVer, "protocol_minor_ver")
             ),
             stakeAddressDeposit: try int(params.keyDeposit, "key_deposit"),
             stakePoolDeposit: try int(params.poolDeposit, "pool_deposit"),
             stakePoolTargetNum: try int(params.nOpt, "n_opt"),
-            treasuryCut: try unit(try require(params.tau, "tau"), "tau"),
+            treasuryCut: try unit(params.tau, "tau"),
             txFeeFixed: try int(params.minFeeB, "min_fee_b"),
             txFeePerByte: try int(params.minFeeA, "min_fee_a"),
             // Babbage and later report the cost per byte; Yaci's Alonzo-era `coins_per_utxo_word`
@@ -736,7 +740,7 @@ public actor YaciDevkitChainContext: ChainContext {
         inlineDatum: String?,
         referenceScriptHash: String?
     ) async throws -> TransactionOutput {
-        var coin: BigInt = lovelace ?? 0
+        var coin: BigInt? = lovelace
         var multiAsset = MultiAsset([:])
         for (unit, quantity) in units {
             if unit == "lovelace" {
@@ -745,7 +749,9 @@ public actor YaciDevkitChainContext: ChainContext {
             }
             // The unit is `<policy id><asset name>`, hex encoded.
             let data = Data(hex: unit)
-            guard data.count >= SCRIPT_HASH_SIZE else { continue }
+            guard data.count >= SCRIPT_HASH_SIZE else {
+                throw CardanoChainError.yaciDevkitError("Asset unit \(unit) is shorter than a policy id")
+            }
             let policyId = ScriptHash(payload: data.prefix(SCRIPT_HASH_SIZE))
             let assetName = try AssetName(payload: data.suffix(from: SCRIPT_HASH_SIZE))
             if multiAsset[policyId] == nil {
@@ -766,12 +772,14 @@ public actor YaciDevkitChainContext: ChainContext {
 
         var script: ScriptType? = nil
         if let referenceScriptHash, !referenceScriptHash.isEmpty {
-            script = try? await getScript(scriptHash: referenceScriptHash)
+            script = try await getScript(scriptHash: referenceScriptHash)
         }
 
         return TransactionOutput(
             address: try Address(from: .string(address)),
-            amount: Value(coin: coin, multiAsset: multiAsset),
+            // Every output holds lovelace; none reported is an error, not 0.
+            amount: Value(
+                coin: try LedgerValues.required(coin, "Yaci output lovelace for \(address)"), multiAsset: multiAsset),
             datumHash: datumHash,
             datumOption: datumOption,
             script: script
@@ -922,8 +930,12 @@ public actor YaciDevkitChainContext: ChainContext {
                 guard parts.count == 2 else { continue }
                 let purpose = Self.ogmiosPurposes[parts[0]] ?? parts[0]
                 units["\(purpose):\(parts[1])"] = ExecutionUnits(
-                    mem: (cost["memory"] as? NSNumber)?.int64Value ?? 0,
-                    steps: (cost["steps"] as? NSNumber)?.int64Value ?? 0
+                    mem: try LedgerValues.required(
+                        LedgerValues.integer(json: cost["memory"], "Yaci evaluation \(key) memory"),
+                        "Yaci evaluation \(key) memory"),
+                    steps: try LedgerValues.required(
+                        LedgerValues.integer(json: cost["steps"], "Yaci evaluation \(key) steps"),
+                        "Yaci evaluation \(key) steps")
                 )
             }
         } else if let list = body["result"] as? [Any] {
@@ -936,9 +948,12 @@ public actor YaciDevkitChainContext: ChainContext {
                 else { continue }
                 let purpose = Self.ogmiosPurposes[purposeRaw] ?? purposeRaw
                 units["\(purpose):\(index)"] = ExecutionUnits(
-                    mem: (budget["memory"] as? NSNumber)?.int64Value ?? 0,
-                    steps: (budget["cpu"] as? NSNumber)?.int64Value
-                        ?? (budget["steps"] as? NSNumber)?.int64Value ?? 0
+                    mem: try LedgerValues.required(
+                        LedgerValues.integer(json: budget["memory"], "Yaci evaluation memory"),
+                        "Yaci evaluation memory"),
+                    steps: try LedgerValues.required(
+                        LedgerValues.integer(json: budget["cpu"] ?? budget["steps"], "Yaci evaluation cpu"),
+                        "Yaci evaluation cpu")
                 )
             }
         } else {
@@ -996,7 +1011,8 @@ public actor YaciDevkitChainContext: ChainContext {
             StakeAddressInfo(
                 active: active,
                 address: info.stakeAddress ?? bech32,
-                rewardAccountBalance: Int64(info.withdrawableAmount ?? 0),
+                rewardAccountBalance: try LedgerValues.required(
+                    info.withdrawableAmount, "Yaci withdrawable_amount").checked("Yaci withdrawable_amount"),
                 stakeDelegation: stakeDelegation,
                 voteDelegation: voteDelegation
             )
@@ -1179,17 +1195,15 @@ public actor YaciDevkitChainContext: ChainContext {
             result[id] = PoolParams(
                 poolOperator: PoolKeyHash(payload: idData),
                 vrfKeyHash: VrfKeyHash(payload: Data(hex: (pool["vrf"] as? String) ?? "")),
-                pledge: try (pool["pledge"] as? NSNumber).map {
-                    try LedgerValues.integer(text: $0.stringValue, "Yaci genesis pool pledge")
-                } ?? 0,
-                cost: try (pool["cost"] as? NSNumber).map {
-                    try LedgerValues.integer(text: $0.stringValue, "Yaci genesis pool cost")
-                } ?? 0,
+                pledge: try LedgerValues.required(
+                    LedgerValues.integer(json: pool["pledge"], "Yaci genesis pool pledge"), "Yaci genesis pool pledge"),
+                cost: try LedgerValues.required(
+                    LedgerValues.integer(json: pool["cost"], "Yaci genesis pool cost"), "Yaci genesis pool cost"),
                 // JSONSerialization reads the margin as a Double; its shortest
                 // description is the decimal in the genesis file.
-                margin: try (pool["margin"] as? NSNumber).map {
-                    try LedgerValues.unitInterval($0.doubleValue, "Yaci genesis pool margin")
-                } ?? UnitInterval(numerator: 0, denominator: 1),
+                margin: try LedgerValues.required(
+                    LedgerValues.unitInterval(json: pool["margin"], "Yaci genesis pool margin"),
+                    "Yaci genesis pool margin"),
                 rewardAccount: Self.genesisRewardAccount(pool["rewardAccount"]),
                 poolOwners: .list(owners),
                 relays: ((pool["relays"] as? [Any]) ?? []).compactMap { Self.genesisRelay($0) },
@@ -1247,10 +1261,10 @@ public actor YaciDevkitChainContext: ChainContext {
     /// retiring for every epoch before that one.
     private static func poolStatus(
         retirement: Components.Schemas.PoolRetirement?, epoch: Int
-    ) -> PoolStatus {
+    ) throws -> PoolStatus {
         guard let retirement else { return .registered }
-        if let retiringEpoch = retirement.retirementEpoch, Int32(epoch) < retiringEpoch {
-            return .retiring(epoch: UInt(retiringEpoch))
+        if let retiringEpoch = retirement.retirementEpoch, epoch < Int(retiringEpoch) {
+            return .retiring(epoch: try retiringEpoch.checked("Yaci retirement_epoch"))
         }
         return .retired
     }
@@ -1275,7 +1289,7 @@ public actor YaciDevkitChainContext: ChainContext {
             // genesis pools, which have no registration certificate to fold against.
             let retirement =
                 certificates[poolId].map { $0.retirement } ?? retirements[poolId]
-            if case .retired = Self.poolStatus(retirement: retirement, epoch: epoch) {
+            if case .retired = try Self.poolStatus(retirement: retirement, epoch: epoch) {
                 return nil
             }
             return try PoolOperator(from: Data(hex: poolId))
@@ -1333,11 +1347,11 @@ public actor YaciDevkitChainContext: ChainContext {
         // ledger's own answer for the epoch rather than a fold of the certificate log.
         let status: PoolStatus
         if let details {
-            status = Self.poolStatus(from: details, epoch: currentEpoch)
+            status = try Self.poolStatus(from: details, epoch: currentEpoch)
         } else if let certificate {
-            status = Self.poolStatus(retirement: certificate.retirement, epoch: currentEpoch)
+            status = try Self.poolStatus(retirement: certificate.retirement, epoch: currentEpoch)
         } else {
-            status = Self.poolStatus(
+            status = try Self.poolStatus(
                 retirement: (try? await poolRetirements())?[poolIdHex], epoch: currentEpoch)
         }
 
@@ -1353,7 +1367,7 @@ public actor YaciDevkitChainContext: ChainContext {
         for id in ids.compactMap({ $0 }) {
             guard
                 let output = try? await api.client.getPoolDetails(
-                    path: .init(poolId: id, epoch: Int32(epoch))
+                    path: .init(poolId: id, epoch: try epoch.checked("Yaci epoch"))
                 ),
                 case .ok(let ok) = output,
                 let details = try? ok.body.json,
@@ -1365,14 +1379,14 @@ public actor YaciDevkitChainContext: ChainContext {
     }
 
     private static func poolStatus(from details: Components.Schemas.PoolDetailsDto, epoch: Int)
-        -> PoolStatus
+        throws -> PoolStatus
     {
         switch details.status {
         case .retired:
             return .retired
         case .retiring:
-            if let retiring = details.retireEpoch, Int32(epoch) < retiring {
-                return .retiring(epoch: UInt(retiring))
+            if let retiring = details.retireEpoch, epoch < Int(retiring) {
+                return .retiring(epoch: try retiring.checked("Yaci retire_epoch"))
             }
             return .retired
         case .registration, .update, nil:
@@ -1466,14 +1480,15 @@ public actor YaciDevkitChainContext: ChainContext {
                           try LedgerValues.integer(denominator, as: UInt64.self, "Yaci pool margin denominator"))
             margin = try LedgerValues.unitInterval(text: "\(n)/\(d)", "Yaci pool margin")
         } else {
-            margin = try LedgerValues.unitInterval(registration.margin ?? 0, "Yaci pool margin")
+            margin = try LedgerValues.unitInterval(
+                LedgerValues.required(registration.margin, "Yaci pool margin"), "Yaci pool margin")
         }
 
         return PoolParams(
             poolOperator: PoolKeyHash(payload: Data(hex: registration.poolId ?? "")),
             vrfKeyHash: VrfKeyHash(payload: Data(hex: registration.vrfKeyHash ?? "")),
-            pledge: try LedgerValues.integer(registration.pledge ?? 0, "Yaci pool pledge"),
-            cost: try LedgerValues.integer(registration.cost ?? 0, "Yaci pool cost"),
+            pledge: try LedgerValues.required(registration.pledge, "Yaci pool pledge").checked("Yaci pool pledge"),
+            cost: try LedgerValues.required(registration.cost, "Yaci pool cost").checked("Yaci pool cost"),
             margin: margin,
             rewardAccount: try rewardAccount(
                 bech32: registration.rewardAccount, hex: registration.rewardAccount
@@ -1492,10 +1507,11 @@ public actor YaciDevkitChainContext: ChainContext {
         return PoolParams(
             poolOperator: PoolKeyHash(payload: Data(hex: details.poolHash ?? "")),
             vrfKeyHash: VrfKeyHash(payload: Data(hex: details.vrfKeyHash ?? "")),
-            pledge: try LedgerValues.integer(text: details.pledge ?? "0", "Yaci pool pledge"),
-            cost: try LedgerValues.integer(text: details.cost ?? "0", "Yaci pool cost"),
+            pledge: try LedgerValues.integer(text: LedgerValues.required(details.pledge, "Yaci pool pledge"), "Yaci pool pledge"),
+            cost: try LedgerValues.integer(text: LedgerValues.required(details.cost, "Yaci pool cost"), "Yaci pool cost"),
             // Yaci sends this margin as decimal text, read here exactly.
-            margin: try LedgerValues.unitInterval(text: details.margin ?? "0", "Yaci pool margin"),
+            margin: try LedgerValues.unitInterval(
+                text: LedgerValues.required(details.margin, "Yaci pool margin"), "Yaci pool margin"),
             rewardAccount: try rewardAccount(bech32: details.rewardAccount, hex: details.rewardAccount),
             poolOwners: .list(try (details.poolOwners ?? []).map { try poolOwner($0) }),
             relays: (details.relays ?? []).compactMap { relay(from: $0) },
@@ -1527,7 +1543,7 @@ public actor YaciDevkitChainContext: ChainContext {
             for id in ids where blocks.isEmpty {
                 blocks =
                     (try? await api.client.getBlocksBySlotLeaderEpoch(
-                        path: .init(poolId: id), query: .init(epoch: Int32(epoch))
+                        path: .init(poolId: id), query: .init(epoch: try epoch.checked("Yaci epoch"))
                     ).ok.body.json) ?? []
             }
         }
@@ -1543,18 +1559,19 @@ public actor YaciDevkitChainContext: ChainContext {
             try await api.client.getBlockByNumber(path: .init(numberOrHash: String(number)))
                 .ok.body.json
         }
-        guard let counter = block.opCertCounter.flatMap({ Int($0) }) else {
+        guard let counterText = block.opCertCounter else {
             throw CardanoChainError.yaciDevkitError(
                 "Block \(number) carries no operational certificate counter"
             )
         }
+        let counter: Int = try LedgerValues.integer(text: counterText, "Yaci op_cert_counter")
 
         if let opCert {
             return KESPeriodInfo(
                 onChainOpCertCount: counter,
-                onDiskOpCertCount: Int(opCert.sequenceNumber),
+                onDiskOpCertCount: try opCert.sequenceNumber.checked("operational certificate sequence number"),
                 nextChainOpCertCount: counter + 1,
-                onDiskKESStart: Int(opCert.kesPeriod)
+                onDiskKESStart: try opCert.kesPeriod.checked("operational certificate KES period")
             )
         }
         return KESPeriodInfo(onChainOpCertCount: counter, nextChainOpCertCount: counter + 1)
@@ -1618,28 +1635,33 @@ public actor YaciDevkitChainContext: ChainContext {
         }
 
         let retired = latest._type == .unregDrepCert
-        let deposit = certificates.reversed()
-            .first { $0._type == .regDrepCert }?
-            .deposit.map { Coin(UInt64(max(0, $0))) }
+        let registration = certificates.reversed().first { $0._type == .regDrepCert }
+        let deposit: Coin? = try registration?.deposit.map { try $0.checked("Yaci DRep deposit") }
 
         return DRepInfo(
             active: !retired,
             drep: drep,
             anchor: Self.anchor(url: latest.anchorUrl, hash: latest.anchorHash),
             deposit: deposit,
-            stake: await drepStake(hex: hex) ?? Coin(0),
+            // A retired DRep holds no voting power; for a registered one, no
+            // stake reading is not a stake of 0.
+            stake: retired
+                ? (try await drepStake(hex: hex) ?? 0)
+                : try LedgerValues.required(try await drepStake(hex: hex), "Yaci DRep stake"),
             expiry: nil,
             status: retired ? .retired : .registered
         )
     }
 
     /// A DRep's live voting power, or `nil` when the local-state endpoint is unavailable.
-    private func drepStake(hex: String) async -> Coin? {
+    ///
+    /// - Throws: When Yaci reports an amount that is not a valid `Coin`.
+    private func drepStake(hex: String) async throws -> Coin? {
         guard let output = try? await api.client.getDRepStakeDistr(path: .init(dRepHash: hex)),
             case .ok(let ok) = output,
             let amount = try? ok.body.json.amount
         else { return nil }
-        return Coin(UInt64(max(0, amount)))
+        return try amount.checked("Yaci DRep stake amount")
     }
 
     /// Effective stake delegated to each DRep this epoch.
@@ -1658,7 +1680,7 @@ public actor YaciDevkitChainContext: ChainContext {
         for hash in latestByHash.keys.sorted() {
             guard let certificate = latestByHash[hash], certificate._type != .unregDrepCert,
                 let payload = Data(hexString: hash), !payload.isEmpty,
-                let stake = await drepStake(hex: hash)
+                let stake = try await drepStake(hex: hash)
             else { continue }
             let drep =
                 certificate.credType == .scripthash
@@ -1702,11 +1724,13 @@ public actor YaciDevkitChainContext: ChainContext {
         return proposal
     }
 
-    private static func govActionID(of proposal: Components.Schemas.GovActionProposal) -> GovActionID? {
-        guard let txHash = proposal.txHash, let index = proposal.index else { return nil }
+    private static func govActionID(of proposal: Components.Schemas.GovActionProposal) throws -> GovActionID {
+        guard let txHash = proposal.txHash, let index = proposal.index else {
+            throw CardanoChainError.yaciDevkitError("Governance proposal without a transaction hash or index")
+        }
         return GovActionID(
             transactionID: TransactionId(payload: Data(hex: txHash)),
-            govActionIndex: UInt16(index)
+            govActionIndex: try index.checked("Yaci proposal index")
         )
     }
 
@@ -1721,18 +1745,22 @@ public actor YaciDevkitChainContext: ChainContext {
     public func govActionInfo(govActionID: GovActionID) async throws -> GovActionInfo {
         let proposal = try await findProposal(govActionID)
         let lifetime = try await govActionLifetime()
-        let proposedIn = proposal.epoch.map { UInt64($0) }
+        let proposedIn: UInt64? = try proposal.epoch.map { try $0.checked("Yaci proposal epoch") }
         return GovActionInfo(
             govActionId: govActionID,
-            govAction: Self.govAction(from: proposal, id: govActionID),
+            govAction: try Self.govAction(from: proposal, id: govActionID),
             proposedIn: proposedIn,
-            expiresAfter: Self.expiresAfter(proposedIn: proposedIn, lifetime: lifetime)
+            expiresAfter: try Self.expiresAfter(proposedIn: proposedIn, lifetime: lifetime)
         )
     }
 
-    private static func expiresAfter(proposedIn: UInt64?, lifetime: Int32?) -> UInt64? {
-        guard let proposedIn, let lifetime, lifetime >= 0 else { return nil }
-        return proposedIn + UInt64(lifetime)
+    private static func expiresAfter(proposedIn: UInt64?, lifetime: Int32?) throws -> UInt64? {
+        guard let proposedIn, let lifetime else { return nil }
+        let (sum, overflow) = proposedIn.addingReportingOverflow(try lifetime.checked("Yaci gov_action_lifetime"))
+        guard !overflow else {
+            throw CardanoChainError.yaciDevkitError("Proposal epoch \(proposedIn) + lifetime \(lifetime) overflows")
+        }
+        return sum
     }
 
     /// Get the votes recorded against a governance action, by voter class.
@@ -1761,7 +1789,7 @@ public actor YaciDevkitChainContext: ChainContext {
 
         var results: [GovActionVotes] = []
         for proposal in proposals {
-            guard let id = Self.govActionID(of: proposal) else { continue }
+            let id = try Self.govActionID(of: proposal)
             results.append(try await govActionVotes(proposal: proposal, id: id, lifetime: lifetime))
         }
         return results
@@ -1775,22 +1803,22 @@ public actor YaciDevkitChainContext: ChainContext {
     /// still listed, and the expiry is the proposal's epoch plus the current
     /// `govActionLifetime`.
     public func openGovActions() async throws -> [OpenGovAction] {
-        let epoch = UInt64(max(try await self.epoch(), 0))
+        let epoch = try LedgerValues.integer(try await self.epoch(), as: UInt64.self, "current epoch")
         let lifetime = try await govActionLifetime()
         let proposals = try await paginate("get the governance proposal list") { page, count in
             try await api.client.getGovActionProposalList(
                 query: .init(page: page, count: count, order: .desc)
             ).ok.body.json
         }
-        return proposals.compactMap { proposal in
-            guard let id = Self.govActionID(of: proposal) else { return nil }
-            let proposedIn = proposal.epoch.map { UInt64($0) }
-            let expiresAfter = Self.expiresAfter(proposedIn: proposedIn, lifetime: lifetime)
+        return try proposals.compactMap { proposal in
+            let id = try Self.govActionID(of: proposal)
+            let proposedIn: UInt64? = try proposal.epoch.map { try $0.checked("Yaci proposal epoch") }
+            let expiresAfter = try Self.expiresAfter(proposedIn: proposedIn, lifetime: lifetime)
             guard OpenGovAction.isOpen(expiresAfter: expiresAfter, in: epoch) else { return nil }
             return OpenGovAction(
                 govActionId: id,
-                type: OpenGovAction.code(of: Self.govAction(from: proposal, id: id)),
-                deposit: Coin(UInt64(max(0, proposal.deposit ?? 0))),
+                type: OpenGovAction.code(of: try Self.govAction(from: proposal, id: id)),
+                deposit: try LedgerValues.required(proposal.deposit, "Yaci proposal deposit").checked("Yaci proposal deposit"),
                 anchor: Self.anchor(url: proposal.anchorUrl, hash: proposal.anchorHash),
                 proposedIn: proposedIn,
                 expiresAfter: expiresAfter
@@ -1805,26 +1833,31 @@ public actor YaciDevkitChainContext: ChainContext {
     ) async throws -> GovActionVotes {
         let (committee, dreps, pools) = try await votes(
             txHash: proposal.txHash ?? id.transactionID.payload.toHex,
-            index: Int32(proposal.index ?? Int64(id.govActionIndex))
+            index: try (proposal.index ?? Int64(id.govActionIndex)).checked("Yaci proposal index")
         )
-        let proposedIn = proposal.epoch.map { UInt64($0) }
-        let returnAddress: Data = {
-            guard let address = proposal.returnAddress, !address.isEmpty else { return Data() }
+        let proposedIn: UInt64? = try proposal.epoch.map { try $0.checked("Yaci proposal epoch") }
+        let returnAddress: Data = try {
+            guard let address = proposal.returnAddress, !address.isEmpty else {
+                throw CardanoChainError.yaciDevkitError("Governance proposal \(id) has no return address")
+            }
             if let bytes = try? Address.fromBech32(address).toBytes() { return bytes }
-            return Data(hexString: address) ?? Data()
+            guard let bytes = Data(hexString: address) else {
+                throw CardanoChainError.yaciDevkitError("Return address \(address) is neither bech32 nor hex")
+            }
+            return bytes
         }()
 
         return GovActionVotes(
             govActionId: id,
-            govAction: Self.govAction(from: proposal, id: id),
+            govAction: try Self.govAction(from: proposal, id: id),
             committeeVotes: committee,
             dRepVotes: dreps,
             stakePoolVotes: pools,
-            deposit: Coin(UInt64(max(0, proposal.deposit ?? 0))),
+            deposit: try LedgerValues.required(proposal.deposit, "Yaci proposal deposit").checked("Yaci proposal deposit"),
             depositReturnAddr: returnAddress,
             anchor: Self.anchor(url: proposal.anchorUrl, hash: proposal.anchorHash),
             proposedIn: proposedIn,
-            expiresAfter: Self.expiresAfter(proposedIn: proposedIn, lifetime: lifetime)
+            expiresAfter: try Self.expiresAfter(proposedIn: proposedIn, lifetime: lifetime)
         )
     }
 
@@ -1914,7 +1947,7 @@ public actor YaciDevkitChainContext: ChainContext {
     /// `GovAction`. Unparseable payloads surface as `.infoAction`, so callers can detect the gap
     /// from the variant tag rather than from fabricated inner data.
     static func govAction(from proposal: Components.Schemas.GovActionProposal, id: GovActionID)
-        -> GovAction
+        throws -> GovAction
     {
         let details = jsonObject(proposal.details)
         let type = proposal._type?.rawValue ?? (details?["type"] as? String) ?? ""
@@ -1956,7 +1989,7 @@ public actor YaciDevkitChainContext: ChainContext {
         case "TREASURY_WITHDRAWALS_ACTION":
             var withdrawals: [RewardAccount: Coin] = [:]
             for (account, amount) in object("withdrawals") ?? [:] {
-                guard let lovelace = GovernanceParsing.parseLovelace(amount) else { continue }
+                guard let lovelace = try GovernanceParsing.parseLovelace(amount) else { continue }
                 let bytes: Data
                 if let decoded = try? Address.fromBech32(account).toBytes() {
                     bytes = decoded
@@ -2008,15 +2041,18 @@ public actor YaciDevkitChainContext: ChainContext {
                 (details?["newMembersAndTerms"] ?? details?["new_members_and_terms"]) as? [String: Any]
                 ?? [:]
             for (key, epoch) in additions {
-                guard let credential = committeeColdCredential(fromKey: key),
-                    let epochValue = (epoch as? NSNumber)?.int64Value, epochValue >= 0
-                else { continue }
+                guard let credential = committeeColdCredential(fromKey: key) else { continue }
+                let epochValue: UInt64 = try LedgerValues.required(
+                    LedgerValues.integer(json: epoch, "Yaci committee term epoch"), "Yaci committee term epoch")
                 coldCredentials.insert(credential)
-                credentialEpochs[credential] = UInt64(epochValue)
+                credentialEpochs[credential] = epochValue
             }
-            let interval =
-                unitInterval(details?["threshold"] ?? details?["quorumThreshold"] ?? details?["quorum"])
-                ?? UnitInterval(numerator: 0, denominator: 1)
+            // A committee update always carries its quorum; a missing one is not 0.
+            let interval = try LedgerValues.required(
+                LedgerValues.unitInterval(
+                    json: details?["threshold"] ?? details?["quorumThreshold"] ?? details?["quorum"],
+                    "Yaci committee update quorum"),
+                "Yaci committee update quorum")
 
             return .updateCommittee(
                 UpdateCommittee(
@@ -2120,7 +2156,7 @@ public actor YaciDevkitChainContext: ChainContext {
             if resigned.contains(member.credential) {
                 status = .expired
             } else if let expiration = member.expiration {
-                status = expiration >= Int32(currentEpoch) ? .active : .expired
+                status = Int(expiration) >= currentEpoch ? .active : .expired
             } else {
                 status = .active
             }
@@ -2128,7 +2164,7 @@ public actor YaciDevkitChainContext: ChainContext {
                 CommitteeStateInfo.Member(
                     coldCredential: member.credential,
                     hotCredential: hotCredential(for: member.credential),
-                    expiration: member.expiration.map { EpochNumber($0) },
+                    expiration: try member.expiration.map { try $0.checked("Yaci committee member expiration") },
                     status: status
                 ))
         }
@@ -2172,9 +2208,13 @@ public actor YaciDevkitChainContext: ChainContext {
                     expiration: member.expiredEpoch
                 )
             }
-            let numerator = Double(committee.thresholdNumerator ?? 0)
-            let denominator = Double(committee.thresholdDenominator ?? 0)
-            return (members, denominator == 0 ? 0 : numerator / denominator)
+            let numerator: UInt64 = try LedgerValues.required(
+                committee.thresholdNumerator, "Yaci committee threshold_numerator").checked("Yaci committee threshold_numerator")
+            let denominator: UInt64 = try LedgerValues.required(
+                committee.thresholdDenominator, "Yaci committee threshold_denominator")
+                .checked("Yaci committee threshold_denominator")
+            let quorum = try LedgerValues.unitInterval(text: "\(numerator)/\(denominator)", "Yaci committee threshold")
+            return (members, Double(quorum.numerator) / Double(quorum.denominator))
         }
 
         let live = try await perform("get the current committee") {
@@ -2189,7 +2229,11 @@ public actor YaciDevkitChainContext: ChainContext {
                 expiration: member.expiredEpoch
             )
         }
-        return (members, live.threshold ?? 0)
+        let threshold = try LedgerValues.required(live.threshold, "Yaci committee threshold")
+        guard (0...1).contains(threshold) else {
+            throw CardanoChainError.yaciDevkitError("Committee threshold \(threshold) is not between 0 and 1")
+        }
+        return (members, threshold)
     }
 
     /// The latest cold→hot authorisation and the set of resignations, folded from the committee

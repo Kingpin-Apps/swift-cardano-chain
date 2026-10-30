@@ -81,7 +81,7 @@ public actor OgmiosChainContext: ChainContext {
     ///
     /// The era is derived from the epoch number using `Era.fromEpoch()`.
     public func era() async throws -> SwiftCardanoCore.Era? {
-        SwiftCardanoCore.Era.fromEpoch(epoch: EpochNumber(try await self.epoch()))
+        SwiftCardanoCore.Era.fromEpoch(epoch: try await self.epoch().checked("Ogmios epoch"))
     }
 
     /// Returns the current epoch number.
@@ -116,7 +116,7 @@ public actor OgmiosChainContext: ChainContext {
 
     private func fetchEpochFromOgmios() async throws -> Int {
         let response = try await self.client.ledgerStateQuery.epoch.result()
-        return Int(response)
+        return try response.checked("Ogmios epoch")
     }
 
     /// Returns the slot number of the most recent block.
@@ -129,7 +129,7 @@ public actor OgmiosChainContext: ChainContext {
         case .origin:
             return 0
         case .point(let point):
-            return Int(point.slot)
+            return try point.slot.checked("Ogmios tip slot")
         }
     }
 
@@ -168,9 +168,7 @@ public actor OgmiosChainContext: ChainContext {
             let activeSlots = try LedgerValues.unitInterval(
                 text: genesis.activeSlotsCoefficient, "Ogmios genesis activeSlotsCoefficient")
 
-            // Parse startTime string to Date
-            let formatter = ISO8601DateFormatter()
-            let systemStartDate = formatter.date(from: genesis.startTime) ?? Date()
+            let systemStartDate = try Self.systemStart(genesis.startTime)
 
             return GenesisParameters(
                 activeSlotsCoefficient: activeSlots,
@@ -189,6 +187,18 @@ public actor OgmiosChainContext: ChainContext {
         default:
             throw CardanoChainError.operationError("Unexpected genesis configuration era")
         }
+    }
+
+    /// The genesis start time, which Ogmios sends in ISO 8601.
+    ///
+    /// - Throws: When it does not parse: the start time anchors every slot
+    ///   and epoch computed from it, so "now" is no substitute.
+    static func systemStart(_ text: String) throws -> Date {
+        let formatter = ISO8601DateFormatter()
+        if let date = formatter.date(from: text) { return date }
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = formatter.date(from: text) { return date }
+        throw CardanoChainError.valueError("Ogmios genesis startTime \(text) is not an ISO 8601 date")
     }
 
     /// Returns the current protocol parameters.
@@ -314,11 +324,13 @@ public actor OgmiosChainContext: ChainContext {
         case .origin:
             return ChainTip(
                 block: 0,
-                epoch: EpochNumber(health?.currentEpoch ?? 0),
+                // At the origin no block exists yet, so the epoch is 0 when
+                // the health probe does not say otherwise.
+                epoch: try (health?.currentEpoch ?? 0).checked("Ogmios health currentEpoch"),
                 era: health?.currentEra,
                 hash: nil,
                 slot: 0,
-                slotInEpoch: (health?.slotInEpoch).map { SlotNumber($0) },
+                slotInEpoch: try (health?.slotInEpoch).map { try $0.checked("Ogmios health slotInEpoch") },
                 slotsToEpochEnd: nil,
                 syncProgress: syncProgress
             )
@@ -330,12 +342,12 @@ public actor OgmiosChainContext: ChainContext {
                 resolvedEpoch = try await epoch()
             }
             return ChainTip(
-                block: (health?.lastKnownTip.height).map { BlockNumber($0) },
-                epoch: EpochNumber(resolvedEpoch),
+                block: try (health?.lastKnownTip.height).map { try $0.checked("Ogmios health height") },
+                epoch: try resolvedEpoch.checked("Ogmios epoch"),
                 era: health?.currentEra,
                 hash: point.id.description,
-                slot: SlotNumber(exactly: point.slot),
-                slotInEpoch: (health?.slotInEpoch).map { SlotNumber($0) },
+                slot: try point.slot.checked("Ogmios tip slot"),
+                slotInEpoch: try (health?.slotInEpoch).map { try $0.checked("Ogmios health slotInEpoch") },
                 slotsToEpochEnd: nil,
                 syncProgress: syncProgress
             )
@@ -457,8 +469,8 @@ public actor OgmiosChainContext: ChainContext {
         for evalResult in response {
             let key = "\(evalResult.validator.purpose.rawValue):\(evalResult.validator.index)"
             result[key] = SwiftCardanoCore.ExecutionUnits(
-                mem: Int64(evalResult.budget.memory),
-                steps: Int64(evalResult.budget.cpu)
+                mem: try evalResult.budget.memory.checked("Ogmios evaluation \(key) memory"),
+                steps: try evalResult.budget.cpu.checked("Ogmios evaluation \(key) cpu")
             )
         }
 
@@ -602,8 +614,8 @@ public actor OgmiosChainContext: ChainContext {
         let nextChainOpCertCount = onChainOpCertCount + 1
 
         if let opCert = opCert {
-            let onDiskOpCertCount = Int(opCert.sequenceNumber)
-            let onDiskKESStart = Int(opCert.kesPeriod)
+            let onDiskOpCertCount: Int = try opCert.sequenceNumber.checked("operational certificate sequence number")
+            let onDiskKESStart: Int = try opCert.kesPeriod.checked("operational certificate KES period")
 
             return KESPeriodInfo(
                 onChainOpCertCount: onChainOpCertCount,
@@ -714,35 +726,31 @@ public actor OgmiosChainContext: ChainContext {
     private func convertProtocolParameters(
         _ params: SwiftOgmios.ProtocolParameters
     ) throws -> SwiftCardanoCore.ProtocolParameters {
-        // Convert cost models - provide empty arrays as defaults
-        let costModels: ProtocolParametersCostModels
-        if let plutusCostModels = params.plutusCostModels {
-            costModels = ProtocolParametersCostModels(
-                PlutusV1: plutusCostModels.plutusV1?.compactMap { Int64($0) } ?? [],
-                PlutusV2: plutusCostModels.plutusV2?.compactMap { Int64($0) } ?? [],
-                PlutusV3: plutusCostModels.plutusV3?.compactMap { Int64($0) } ?? []
-            )
-        } else {
-            costModels = ProtocolParametersCostModels(PlutusV1: [], PlutusV2: [], PlutusV3: [])
+        // Every field core holds is required: Ogmios leaves out only what the
+        // node's era does not have, and a Conway parameter set has them all. A
+        // missing one is an error, never a default (a missing cost model would
+        // silently change the script data hash).
+        func required<T>(_ value: T?, _ what: String) throws -> T {
+            try LedgerValues.required(value, "Ogmios protocol parameter \(what)")
         }
 
-        let zeroUnit = UnitInterval(numerator: 0, denominator: 1)
-        let zeroNonNegative = NonNegativeInterval(numerator: 0, denominator: 1)
+        let plutusCostModels = try required(params.plutusCostModels, "plutusCostModels")
+        let costModels = ProtocolParametersCostModels(
+            PlutusV1: try required(plutusCostModels.plutusV1, "plutusCostModels plutus:v1").map { Int64($0) },
+            PlutusV2: try required(plutusCostModels.plutusV2, "plutusCostModels plutus:v2").map { Int64($0) },
+            PlutusV3: try required(plutusCostModels.plutusV3, "plutusCostModels plutus:v3").map { Int64($0) }
+        )
 
-        // Convert execution unit prices - provide default values
-        let executionPrices: ExecutionUnitPrices
-        if let prices = params.scriptExecutionPrices {
-            executionPrices = ExecutionUnitPrices(
-                priceMemory: try nonNegativeInterval(prices.memory, "scriptExecutionPrices.memory"),
-                priceSteps: try nonNegativeInterval(prices.cpu, "scriptExecutionPrices.cpu")
-            )
-        } else {
-            executionPrices = ExecutionUnitPrices(priceMemory: zeroNonNegative, priceSteps: zeroNonNegative)
-        }
+        let prices = try required(params.scriptExecutionPrices, "scriptExecutionPrices")
+        let executionPrices = ExecutionUnitPrices(
+            priceMemory: try nonNegativeInterval(prices.memory, "scriptExecutionPrices.memory"),
+            priceSteps: try nonNegativeInterval(prices.cpu, "scriptExecutionPrices.cpu")
+        )
 
-        // Convert DRep voting thresholds - provide default values
         let dRepVotingThresholds: DRepVotingThresholds
-        if let thresholds = params.delegateRepresentativeVotingThresholds {
+        do {
+            let thresholds = try required(
+                params.delegateRepresentativeVotingThresholds, "delegateRepresentativeVotingThresholds")
             dRepVotingThresholds = DRepVotingThresholds(
                 committeeNoConfidence: try unitInterval(
                     thresholds.constitutionalCommittee.stateOfNoConfidence,
@@ -771,18 +779,11 @@ public actor OgmiosChainContext: ChainContext {
                 updateToConstitution: try unitInterval(
                     thresholds.constitution, "delegateRepresentativeVotingThresholds.constitution")
             )
-        } else {
-            dRepVotingThresholds = DRepVotingThresholds(
-                committeeNoConfidence: zeroUnit, committeeNormal: zeroUnit, hardForkInitiation: zeroUnit,
-                motionNoConfidence: zeroUnit, ppEconomicGroup: zeroUnit, ppGovGroup: zeroUnit,
-                ppNetworkGroup: zeroUnit, ppTechnicalGroup: zeroUnit, treasuryWithdrawal: zeroUnit,
-                updateToConstitution: zeroUnit
-            )
         }
 
-        // Convert pool voting thresholds - provide default values
         let poolVotingThresholds: ProtocolParametersPoolVotingThresholds
-        if let thresholds = params.stakePoolVotingThresholds {
+        do {
+            let thresholds = try required(params.stakePoolVotingThresholds, "stakePoolVotingThresholds")
             poolVotingThresholds = ProtocolParametersPoolVotingThresholds(
                 committeeNoConfidence: try unitInterval(
                     thresholds.constitutionalCommittee.stateOfNoConfidence,
@@ -798,27 +799,12 @@ public actor OgmiosChainContext: ChainContext {
                     thresholds.protocolParametersUpdate.security,
                     "stakePoolVotingThresholds.protocolParametersUpdate.security")
             )
-        } else {
-            poolVotingThresholds = ProtocolParametersPoolVotingThresholds(
-                committeeNoConfidence: zeroUnit, committeeNormal: zeroUnit, hardForkInitiation: zeroUnit,
-                motionNoConfidence: zeroUnit, ppSecurityGroup: zeroUnit
-            )
         }
 
-        // Convert execution units - provide default values
-        let maxBlockExUnits: ProtocolParametersExecutionUnits
-        if let units = params.maxExecutionUnitsPerBlock {
-            maxBlockExUnits = ProtocolParametersExecutionUnits(memory: units.memory, steps: units.cpu)
-        } else {
-            maxBlockExUnits = ProtocolParametersExecutionUnits(memory: 0, steps: 0)
-        }
-
-        let maxTxExUnits: ProtocolParametersExecutionUnits
-        if let units = params.maxExecutionUnitsPerTransaction {
-            maxTxExUnits = ProtocolParametersExecutionUnits(memory: units.memory, steps: units.cpu)
-        } else {
-            maxTxExUnits = ProtocolParametersExecutionUnits(memory: 0, steps: 0)
-        }
+        let blockUnits = try required(params.maxExecutionUnitsPerBlock, "maxExecutionUnitsPerBlock")
+        let maxBlockExUnits = ProtocolParametersExecutionUnits(memory: blockUnits.memory, steps: blockUnits.cpu)
+        let txUnits = try required(params.maxExecutionUnitsPerTransaction, "maxExecutionUnitsPerTransaction")
+        let maxTxExUnits = ProtocolParametersExecutionUnits(memory: txUnits.memory, steps: txUnits.cpu)
 
         // SwiftOgmios reads `minFeeReferenceScripts.base` as a Double; its
         // shortest description is the decimal Ogmios sent.
@@ -834,35 +820,35 @@ public actor OgmiosChainContext: ChainContext {
         }
 
         return SwiftCardanoCore.ProtocolParameters(
-            collateralPercentage: try params.collateralPercentage.map { try integer($0, "collateralPercentage") } ?? 150,
-            committeeMaxTermLength: try params.constitutionalCommitteeMaxTermLength.map {
-                try integer($0, "constitutionalCommitteeMaxTermLength")
-            } ?? 0,
-            committeeMinSize: try params.constitutionalCommitteeMinSize.map {
-                try integer($0, "constitutionalCommitteeMinSize")
-            } ?? 0,
+            collateralPercentage: try integer(required(params.collateralPercentage, "collateralPercentage"),
+                                              "collateralPercentage"),
+            committeeMaxTermLength: try integer(
+                required(params.constitutionalCommitteeMaxTermLength, "constitutionalCommitteeMaxTermLength"),
+                "constitutionalCommitteeMaxTermLength"),
+            committeeMinSize: try integer(
+                required(params.constitutionalCommitteeMinSize, "constitutionalCommitteeMinSize"),
+                "constitutionalCommitteeMinSize"),
             costModels: costModels,
-            dRepActivity: try params.delegateRepresentativeMaxIdleTime.map {
-                try integer($0, "delegateRepresentativeMaxIdleTime")
-            } ?? 0,
-            dRepDeposit: try params.delegateRepresentativeDeposit.map {
-                try lovelace($0, "delegateRepresentativeDeposit")
-            } ?? 0,
+            dRepActivity: try integer(
+                required(params.delegateRepresentativeMaxIdleTime, "delegateRepresentativeMaxIdleTime"),
+                "delegateRepresentativeMaxIdleTime"),
+            dRepDeposit: try lovelace(
+                required(params.delegateRepresentativeDeposit, "delegateRepresentativeDeposit"),
+                "delegateRepresentativeDeposit"),
             dRepVotingThresholds: dRepVotingThresholds,
             executionUnitPrices: executionPrices,
-            govActionDeposit: try params.governanceActionDeposit.map {
-                try lovelace($0, "governanceActionDeposit")
-            } ?? 0,
-            govActionLifetime: try params.governanceActionLifetime.map {
-                try integer($0, "governanceActionLifetime")
-            } ?? 0,
+            govActionDeposit: try lovelace(
+                required(params.governanceActionDeposit, "governanceActionDeposit"), "governanceActionDeposit"),
+            govActionLifetime: try integer(
+                required(params.governanceActionLifetime, "governanceActionLifetime"), "governanceActionLifetime"),
             maxBlockBodySize: try integer(params.maxBlockBodySize.bytes, "maxBlockBodySize"),
             maxBlockExecutionUnits: maxBlockExUnits,
             maxBlockHeaderSize: try integer(params.maxBlockHeaderSize.bytes, "maxBlockHeaderSize"),
-            maxCollateralInputs: try params.maxCollateralInputs.map { try integer($0, "maxCollateralInputs") } ?? 3,
+            maxCollateralInputs: try integer(required(params.maxCollateralInputs, "maxCollateralInputs"),
+                                             "maxCollateralInputs"),
             maxTxExecutionUnits: maxTxExUnits,
-            maxTxSize: try params.maxTransactionSize.map { try integer($0.bytes, "maxTransactionSize") } ?? 16384,
-            maxValueSize: try params.maxValueSize.map { try integer($0.bytes, "maxValueSize") } ?? 5000,
+            maxTxSize: try integer(required(params.maxTransactionSize, "maxTransactionSize").bytes, "maxTransactionSize"),
+            maxValueSize: try integer(required(params.maxValueSize, "maxValueSize").bytes, "maxValueSize"),
             minFeeRefScriptCostPerByte: minFeeRefScriptCostPerByte,
             minPoolCost: try lovelace(params.minStakePoolCost, "minStakePoolCost"),
             monetaryExpansion: try unitInterval(params.monetaryExpansion, "monetaryExpansion"),
@@ -983,7 +969,7 @@ public actor OgmiosChainContext: ChainContext {
         if let opCerts = try? await client.ledgerStateQuery.operationalCertificates.result(),
             let matchingPool = opCerts.value.first(where: { $0.key.value == poolId })
         {
-            opcertCounter = UInt(matchingPool.value)
+            opcertCounter = try matchingPool.value.checked("Ogmios operational certificate counter")
         }
 
         // Get active stake, active size, and owner stake from stakePoolsPerformances
@@ -996,11 +982,11 @@ public actor OgmiosChainContext: ChainContext {
         {
             let poolStakeLovelace = poolSummary.stake.ada.lovelace
             let totalActiveStakeLovelace = performances.activeStakeInEpoch.ada.lovelace
-            liveStake = UInt(poolStakeLovelace)
+            liveStake = try poolStakeLovelace.checked("Ogmios pool stake")
             if totalActiveStakeLovelace > 0 {
                 liveSize = Decimal(poolStakeLovelace) / Decimal(totalActiveStakeLovelace)
             }
-            ownerStake = UInt(poolSummary.ownerStake.ada.lovelace)
+            ownerStake = try poolSummary.ownerStake.ada.lovelace.checked("Ogmios pool owner stake")
         }
 
         // Ogmios StakePool type does not expose retirement/retiring-epoch information.
@@ -1027,7 +1013,7 @@ public actor OgmiosChainContext: ChainContext {
             .treasuryAndReserves
             .result()
 
-        return Coin(response.treasury.ada.lovelace)
+        return try response.treasury.ada.lovelace.checked("Ogmios treasury")
     }
 
     /// Get the DRep information.
@@ -1039,8 +1025,8 @@ public actor OgmiosChainContext: ChainContext {
             drep: DRep,
             reg: DelegateRepresentativeSummary.Registered
         ) throws -> DRepInfo {
-            let stake = Coin(reg.stake.ada.lovelace)
-            let deposit = reg.deposit.map { Coin($0.ada.lovelace) }
+            let stake: Coin = try reg.stake.ada.lovelace.checked("Ogmios DRep stake")
+            let deposit: Coin? = try reg.deposit.map { try $0.ada.lovelace.checked("Ogmios DRep deposit") }
             let expiry = reg.mandate.map { $0.epoch }
 
             var anchor: SwiftCardanoCore.Anchor? = nil
@@ -1074,31 +1060,32 @@ public actor OgmiosChainContext: ChainContext {
                 .delegateRepresentatives
                 .result()
 
-            let stake: Coin
+            // SwiftOgmios decodes `{"type": "abstain", ...}` as `.noConfidence`
+            // (its decoder tries NoConfidence first and ignores `type`), so
+            // each summary is matched by its `type` field, not its case.
+            func summaryStake(_ type: String) throws -> Coin {
+                for delegate in delegates {
+                    switch delegate {
+                    case .abstain(let a) where a.type == type:
+                        return try a.stake.ada.lovelace.checked("Ogmios \(type) stake")
+                    case .noConfidence(let nc) where nc.type == type:
+                        return try nc.stake.ada.lovelace.checked("Ogmios \(type) stake")
+                    default:
+                        continue
+                    }
+                }
+                // Ogmios always reports both predefined DReps; a missing one is not 0.
+                throw CardanoChainError.valueError("Ogmios reported no \(type) DRep summary")
+            }
 
+            let stake: Coin
             switch drep.credential {
             case .alwaysAbstain:
-                let found = delegates.first {
-                    if case .abstain = $0 { return true }
-                    return false
-                }
-                if case .abstain(let a)? = found {
-                    stake = Coin(a.stake.ada.lovelace)
-                } else {
-                    stake = Coin(0)
-                }
+                stake = try summaryStake("abstain")
             case .alwaysNoConfidence:
-                let found = delegates.first {
-                    if case .noConfidence = $0 { return true }
-                    return false
-                }
-                if case .noConfidence(let nc)? = found {
-                    stake = Coin(nc.stake.ada.lovelace)
-                } else {
-                    stake = Coin(0)
-                }
+                stake = try summaryStake("noConfidence")
             default:
-                stake = Coin(0)
+                throw CardanoChainError.valueError("Unexpected DRep credential \(drep.credential)")
             }
             return DRepInfo(
                 active: true,
@@ -1215,7 +1202,7 @@ public actor OgmiosChainContext: ChainContext {
             )
         }
 
-        guard let expirationEpoch = member.mandate.map({ Int($0.epoch) }) else {
+        guard let expirationEpoch: Int = try member.mandate.map({ try $0.epoch.checked("Ogmios committee mandate epoch") }) else {
             throw CardanoChainError.valueError(
                 "Missing expiration epoch for committee member: \(cold)"
             )
@@ -1300,7 +1287,7 @@ public actor OgmiosChainContext: ChainContext {
             )
         }
 
-        guard let expirationEpoch = member.mandate.map({ Int($0.epoch) }) else {
+        guard let expirationEpoch: Int = try member.mandate.map({ try $0.epoch.checked("Ogmios committee mandate epoch") }) else {
             throw CardanoChainError.valueError(
                 "Missing expiration epoch for committee member: \(coldCredential)"
             )
@@ -1344,7 +1331,7 @@ public actor OgmiosChainContext: ChainContext {
         return try proposals.map { state in
             let id = GovActionID(
                 transactionID: TransactionId(payload: Data(hex: state.proposal.transaction.id)),
-                govActionIndex: UInt16(state.proposal.index)
+                govActionIndex: try state.proposal.index.checked("Ogmios proposal index")
             )
             return try Self.mapProposalState(state, fallbackID: id)
         }
@@ -1398,7 +1385,7 @@ public actor OgmiosChainContext: ChainContext {
             return CommitteeStateInfo.Member(
                 coldCredential: cold,
                 hotCredential: hot,
-                expiration: m.mandate.map { EpochNumber(Int($0.epoch)) },
+                expiration: m.mandate.map { $0.epoch },
                 status: status
             )
         }
@@ -1406,19 +1393,19 @@ public actor OgmiosChainContext: ChainContext {
         // Committee's own quorum is carried directly on the constitutionalCommittee result
         // as a `Ratio` ("num/den" string). Conway-genesis committees may report it as nil
         // — fall back to 0 in that case rather than reaching for a synthetic value.
-        let threshold = parseRatioString(constitutionalCommittee.quorum?.value)
+        let threshold = try Self.quorumThreshold(constitutionalCommittee.quorum?.value)
 
         return CommitteeStateInfo(members: members, threshold: threshold)
     }
 
-    private func parseRatioString(_ raw: String?) -> Double {
-        guard let raw else { return 0.0 }
-        let parts = raw.split(separator: "/")
-        guard parts.count == 2,
-              let num = Double(parts[0]),
-              let den = Double(parts[1]), den != 0
-        else { return 0.0 }
-        return num / den
+    /// The committee quorum, an Ogmios `"n/d"` ratio, as a Double.
+    ///
+    /// - Throws: When it is missing (Ogmios's schema requires it) or is not a
+    ///   unit interval; a missing quorum is not 0.
+    static func quorumThreshold(_ raw: String?) throws -> Double {
+        let interval = try LedgerValues.unitInterval(
+            text: LedgerValues.required(raw, "Ogmios committee quorum"), "Ogmios committee quorum")
+        return Double(interval.numerator) / Double(interval.denominator)
     }
 
     // MARK: - Helpers
@@ -1465,9 +1452,9 @@ public actor OgmiosChainContext: ChainContext {
         case .treasuryWithdrawals(let tw):
             var withdrawals: [SwiftCardanoCore.RewardAccount: Coin] = [:]
             for (stakeAddressBech32, delta) in tw.withdrawals.value {
-                guard let address = try? Address.fromBech32(stakeAddressBech32) else { continue }
+                let address = try Address.fromBech32(stakeAddressBech32)
                 withdrawals[SwiftCardanoCore.RewardAccount(address.toBytes())] =
-                    Coin(UInt64(max(0, delta.ada.lovelace)))
+                    try delta.ada.lovelace.checked("Ogmios treasury withdrawal amount")
             }
             return .treasuryWithdrawalsAction(TreasuryWithdrawalsAction(
                 withdrawals: withdrawals,
@@ -1487,8 +1474,10 @@ public actor OgmiosChainContext: ChainContext {
                     credentialEpochs[cred] = mandate.epoch
                 }
             }
-            let interval = parseOgmiosRatio(cc.quorum?.value)
-                ?? UnitInterval(numerator: 0, denominator: 1)
+            // Ogmios's schema requires the quorum; a missing one is not 0.
+            let interval = try LedgerValues.unitInterval(
+                text: LedgerValues.required(cc.quorum?.value, "Ogmios committee update quorum"),
+                "Ogmios committee update quorum")
             return .updateCommittee(UpdateCommittee(
                 id: fallbackID,
                 coldCredentials: coldCredentials,
@@ -1530,20 +1519,6 @@ public actor OgmiosChainContext: ChainContext {
                 credential: .verificationKeyHash(VerificationKeyHash(payload: payload))
             )
         }
-    }
-
-    /// Parse an Ogmios `Ratio.value` string ("n/d") directly into a
-    /// `UnitInterval` — preserves numerator/denominator exactly without
-    /// a lossy float round-trip.
-    private static func parseOgmiosRatio(_ raw: String?) -> UnitInterval? {
-        guard let raw else { return nil }
-        let parts = raw.split(separator: "/")
-        guard parts.count == 2,
-              let num = UInt64(parts[0]),
-              let den = UInt64(parts[1]),
-              den != 0
-        else { return nil }
-        return UnitInterval(numerator: num, denominator: den)
     }
 
     private static func mapProposalState(
@@ -1604,8 +1579,8 @@ public actor OgmiosChainContext: ChainContext {
         }
 
         // Convert deposit / returnAccount / metadata into core types.
-        let deposit = Coin(UInt64(max(0, state.deposit.ada.lovelace)))
-        let returnAddrData: Data = (try? Address.fromBech32(state.returnAccount.value).toBytes()) ?? Data()
+        let deposit: Coin = try state.deposit.ada.lovelace.checked("Ogmios proposal deposit")
+        let returnAddrData = try Address.fromBech32(state.returnAccount.value).toBytes()
         let anchor: SwiftCardanoCore.Anchor? = {
             guard let url = try? Url(state.metadata.url.absoluteString) else {
                 return nil as SwiftCardanoCore.Anchor?

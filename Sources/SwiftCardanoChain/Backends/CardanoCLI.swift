@@ -98,9 +98,9 @@ public actor CardanoCliChainContext: ChainContext {
         // No long-lived cache here — each fresh call invokes the CLI again.
         let task = Task<Int, Error> {
             do {
-                let value = try await self.cli.getEpoch()
+                let value: Int = try await self.cli.getEpoch().checked("cardano-cli epoch")
                 self._epochFetch = nil
-                return Int(value)
+                return value
             } catch {
                 self._epochFetch = nil
                 throw error
@@ -120,7 +120,7 @@ public actor CardanoCliChainContext: ChainContext {
 
         let task = Task<Int, Error> {
             do {
-                let value = Int(try await self.cli.getTip())
+                let value: Int = try await self.cli.getTip().checked("cardano-cli tip slot")
                 self.cache.insert(value, forKey: cacheKey)
                 self._lastBlockSlotFetch = nil
                 return value
@@ -463,7 +463,10 @@ public actor CardanoCliChainContext: ChainContext {
             script = try await getScript(from: referenceScript)
         }
 
-        let address = try Address(from: .string(utxoEntry["address"] as! String))
+        guard let addressText = utxoEntry["address"] as? String else {
+            throw CardanoChainError.valueError("cardano-cli UTxO \(txInStr) has no address")
+        }
+        let address = try Address(from: .string(addressText))
         let txOut = TransactionOutput(
             address: address,
             amount: value,
@@ -652,9 +655,16 @@ public actor CardanoCliChainContext: ChainContext {
             throw CardanoChainError.valueError("Top-level JSON is not a dictionary")
         }
 
-        let onChainOpCertCount = dict["qKesNodeStateOperationalCertificateNumber"] as? Int ?? -1
-        let onDiskOpCertCount = dict["qKesOnDiskOperationalCertificateNumber"] as? Int ?? 0
-        let onDiskKESStart = dict["qKesStartKesInterval"] as? Int ?? 0
+        // null until the pool has minted a block: -1, as the node-socket backend reports it.
+        let onChainOpCertCount: Int = try LedgerValues.integer(
+            json: dict["qKesNodeStateOperationalCertificateNumber"], "cardano-cli on-chain op cert counter") ?? -1
+        // These come from the certificate file passed in, so they are always there.
+        let onDiskOpCertCount: Int = try LedgerValues.required(
+            LedgerValues.integer(json: dict["qKesOnDiskOperationalCertificateNumber"], "cardano-cli on-disk op cert counter"),
+            "cardano-cli on-disk op cert counter")
+        let onDiskKESStart: Int = try LedgerValues.required(
+            LedgerValues.integer(json: dict["qKesStartKesInterval"], "cardano-cli KES start interval"),
+            "cardano-cli KES start interval")
 
         return KESPeriodInfo(
             onChainOpCertCount: onChainOpCertCount,
@@ -760,11 +770,12 @@ public actor CardanoCliChainContext: ChainContext {
 
         func parseDRepStateResult(_ result: String, drep: DRep) throws -> DRepInfo {
             guard let data = result.data(using: .utf8),
-                let entries = try? JSONSerialization.jsonObject(with: data) as? [[Any]],
-                let firstEntry = entries.first,
-                firstEntry.count == 2,
-                let stateDict = firstEntry[1] as? [String: Any]
+                let entries = try? JSONSerialization.jsonObject(with: data) as? [[Any]]
             else {
+                throw CardanoChainError.valueError("cardano-cli drep-state output is not a JSON list")
+            }
+            // An empty list is a DRep the ledger does not know: not registered.
+            guard let firstEntry = entries.first else {
                 return DRepInfo(
                     active: false,
                     drep: drep,
@@ -776,9 +787,15 @@ public actor CardanoCliChainContext: ChainContext {
                 )
             }
 
-            let deposit = (stateDict["deposit"] as? Int).map { Coin(UInt64($0)) }
-            let expiry = (stateDict["expiry"] as? Int).map { UInt64($0) }
-            let stakeRaw = stateDict["stake"] as? Int ?? 0
+            guard firstEntry.count == 2, let stateDict = firstEntry[1] as? [String: Any] else {
+                throw CardanoChainError.valueError("cardano-cli drep-state entry is not [drep, state]")
+            }
+
+            let deposit: Coin? = try LedgerValues.integer(json: stateDict["deposit"], "cardano-cli DRep deposit")
+            let expiry: UInt64? = try LedgerValues.integer(json: stateDict["expiry"], "cardano-cli DRep expiry")
+            // Asked for with --include-stake, so it must be there.
+            let stake: Coin = try LedgerValues.required(
+                LedgerValues.integer(json: stateDict["stake"], "cardano-cli DRep stake"), "cardano-cli DRep stake")
 
             var anchor: Anchor? = nil
             if let anchorDict = stateDict["anchor"] as? [String: Any],
@@ -797,7 +814,7 @@ public actor CardanoCliChainContext: ChainContext {
                 drep: drep,
                 anchor: anchor,
                 deposit: deposit,
-                stake: Coin(UInt64(stakeRaw)),
+                stake: stake,
                 expiry: expiry,
                 status: .registered
             )
@@ -818,14 +835,13 @@ public actor CardanoCliChainContext: ChainContext {
                     "--output-json",
                 ])
 
-            var stake = Coin(0)
-
-            if let distData = distResult.data(using: .utf8),
-                let distDict = try? JSONSerialization.jsonObject(with: distData) as? [String: Any],
-                let stakeRaw = distDict[distKey] as? Int64
-            {
-                stake = Coin(UInt64(stakeRaw))
+            guard let distData = distResult.data(using: .utf8),
+                let distDict = try? JSONSerialization.jsonObject(with: distData) as? [String: Any]
+            else {
+                throw CardanoChainError.valueError("cardano-cli drep-stake-distribution output is not a JSON object")
             }
+            // Absent from the distribution means no stake is delegated to it.
+            let stake: Coin = try LedgerValues.integer(json: distDict[distKey], "cardano-cli \(distKey) stake") ?? 0
 
             return DRepInfo(
                 active: true,
@@ -872,7 +888,7 @@ public actor CardanoCliChainContext: ChainContext {
         let nextRatifyState = govState["nextRatifyState"] as? [String: Any]
         let enactedGovActions = nextRatifyState?["enactedGovActions"] as? [[String: Any]] ?? []
         let expiredGovActions = nextRatifyState?["expiredGovActions"] as? [[String: Any]] ?? []
-        let currentEpoch = UInt64(try await self.epoch())
+        let currentEpoch: UInt64 = try await self.epoch().checked("cardano-cli epoch")
 
         func actionIdMatches(_ actionId: [String: Any]) -> Bool {
             guard let pTxId = actionId["txId"] as? String else {
@@ -912,15 +928,15 @@ public actor CardanoCliChainContext: ChainContext {
             else {
                 throw CardanoChainError.valueError("Missing proposalProcedure in proposal")
             }
-            return parseGovAction(actionDict: proposalProcedure["govAction"], id: govActionID)
+            return try parseGovAction(actionDict: proposalProcedure["govAction"], id: govActionID)
         }
 
         let inEnactedSet = actionExists(in: enactedGovActions)
         let inExpiredSet = actionExists(in: expiredGovActions)
         let proposalsEmpty = proposals.isEmpty
 
-        let proposedIn = (proposal?["proposedIn"] as? Int).map { UInt64($0) }
-        let expiresAfter = (proposal?["expiresAfter"] as? Int).map { UInt64($0) }
+        let proposedIn: UInt64? = try LedgerValues.integer(json: proposal?["proposedIn"], "cardano-cli proposedIn")
+        let expiresAfter: UInt64? = try LedgerValues.integer(json: proposal?["expiresAfter"], "cardano-cli expiresAfter")
         let expiredByEpoch = expiresAfter.map { currentEpoch > $0 } ?? false
         let missingFromProposals = proposal == nil
 
@@ -1046,7 +1062,7 @@ public actor CardanoCliChainContext: ChainContext {
         return CommitteeMemberInfo(
             coldCredential: cold,
             hotCredential: hotCred,
-            expiration: EpochNumber(expiration),
+            expiration: try expiration.checked("cardano-cli committee member expiration"),
             status: status
         )
     }
@@ -1125,7 +1141,7 @@ public actor CardanoCliChainContext: ChainContext {
         return CommitteeMemberInfo(
             coldCredential: coldCredential,
             hotCredential: hot,
-            expiration: EpochNumber(expiration),
+            expiration: try expiration.checked("cardano-cli committee member expiration"),
             status: status
         )
     }
@@ -1134,7 +1150,7 @@ public actor CardanoCliChainContext: ChainContext {
 
     public func govActionVotes(govActionID: GovActionID) async throws -> GovActionVotes {
         let proposals = try await fetchProposalsFromGovState()
-        let currentEpoch = UInt64(try await self.epoch())
+        let currentEpoch: UInt64 = try await self.epoch().checked("cardano-cli epoch")
 
         let txHash = govActionID.transactionID.payload.toHex.lowercased()
         let index = Int(govActionID.govActionIndex)
@@ -1153,7 +1169,7 @@ public actor CardanoCliChainContext: ChainContext {
 
     public func govActionsAll() async throws -> [GovActionVotes] {
         let proposals = try await fetchProposalsFromGovState()
-        let currentEpoch = UInt64(try await self.epoch())
+        let currentEpoch: UInt64 = try await self.epoch().checked("cardano-cli epoch")
 
         return try proposals.compactMap { proposal in
             guard let actionId = try parseActionId(from: proposal) else { return nil }
@@ -1182,13 +1198,13 @@ public actor CardanoCliChainContext: ChainContext {
         if let pairs = json as? [[Any]] {
             for pair in pairs where pair.count >= 2 {
                 guard let drep = parseDRepKey(pair[0]),
-                      let stake = parseLovelaceUInt(pair[1]) else { continue }
+                      let stake = try parseLovelaceUInt(pair[1]) else { continue }
                 entries.append(SwiftCardanoNetwork.DRepStakeEntry(drep: drep, stake: stake))
             }
         } else if let dict = json as? [String: Any] {
             for (key, value) in dict {
                 guard let drep = parseDRepKey(key),
-                      let stake = parseLovelaceUInt(value) else { continue }
+                      let stake = try parseLovelaceUInt(value) else { continue }
                 entries.append(SwiftCardanoNetwork.DRepStakeEntry(drep: drep, stake: stake))
             }
         } else {
@@ -1214,13 +1230,13 @@ public actor CardanoCliChainContext: ChainContext {
         if let pairs = json as? [[Any]] {
             for pair in pairs where pair.count >= 2 {
                 guard let pool = parsePoolKey(pair[0]),
-                      let stake = parseLovelaceUInt(pair[1]) else { continue }
+                      let stake = try parseLovelaceUInt(pair[1]) else { continue }
                 entries.append(SwiftCardanoNetwork.SPOStakeEntry(poolOperator: pool, stake: stake))
             }
         } else if let dict = json as? [String: Any] {
             for (key, value) in dict {
                 guard let pool = parsePoolKey(key),
-                      let stake = parseLovelaceUInt(value) else { continue }
+                      let stake = try parseLovelaceUInt(value) else { continue }
                 entries.append(SwiftCardanoNetwork.SPOStakeEntry(poolOperator: pool, stake: stake))
             }
         } else {
@@ -1266,7 +1282,7 @@ public actor CardanoCliChainContext: ChainContext {
                 }
             }
 
-            let expiration: EpochNumber? = (entry["expiration"] as? Int).map { EpochNumber($0) }
+            let expiration: EpochNumber? = try LedgerValues.integer(json: entry["expiration"], "cardano-cli committee member expiration")
 
             let statusStr = entry["status"] as? String ?? ""
             let status: CommitteeMemberStatus? = {
@@ -1285,12 +1301,12 @@ public actor CardanoCliChainContext: ChainContext {
             ))
         }
 
-        let threshold = GovernanceParsing.parseThreshold(root["threshold"])
+        let threshold = try GovernanceParsing.parseThreshold(root["threshold"])
         return CommitteeStateInfo(members: members, threshold: threshold)
     }
 
-    private func parseLovelaceUInt(_ any: Any) -> UInt64? {
-        GovernanceParsing.parseLovelace(any)
+    private func parseLovelaceUInt(_ any: Any) throws -> UInt64? {
+        try GovernanceParsing.parseLovelace(any)
     }
 
     // MARK: - Vote-query helpers (private)
@@ -1338,7 +1354,7 @@ public actor CardanoCliChainContext: ChainContext {
         }
         return GovActionID(
             transactionID: TransactionId(payload: txId.hexStringToData),
-            govActionIndex: UInt16(idx)
+            govActionIndex: try idx.checked("cardano-cli govActionIx")
         )
     }
 
@@ -1350,12 +1366,12 @@ public actor CardanoCliChainContext: ChainContext {
         let proposalProcedure = proposal["proposalProcedure"] as? [String: Any] ?? [:]
 
         // Parse govAction fully from the proposal procedure.
-        let govAction = parseGovAction(actionDict: proposalProcedure["govAction"], id: actionID)
+        let govAction = try parseGovAction(actionDict: proposalProcedure["govAction"], id: actionID)
 
         // Parse deposit + return address.
-        let depositNum = (proposalProcedure["deposit"] as? NSNumber)?.uint64Value
-            ?? UInt64((proposalProcedure["deposit"] as? Int) ?? 0)
-        let deposit = Coin(depositNum)
+        let deposit: Coin = try LedgerValues.required(
+            LedgerValues.integer(json: proposalProcedure["deposit"], "cardano-cli proposal deposit"),
+            "cardano-cli proposal deposit")
 
         let returnAddr: RewardAccount = (try? parseRewardAccount(proposalProcedure["returnAddr"]))
             ?? RewardAccount(Data())
@@ -1402,7 +1418,7 @@ public actor CardanoCliChainContext: ChainContext {
     /// than fabricated data — and where the tag itself is missing, we
     /// return `.infoAction` so consumers can detect "unparseable" via the
     /// variant tag.
-    private func parseGovAction(actionDict any: Any?, id: GovActionID) -> GovAction {
+    private func parseGovAction(actionDict any: Any?, id: GovActionID) throws -> GovAction {
         guard let dict = any as? [String: Any],
               let tag = dict["tag"] as? String
         else { return .infoAction(InfoAction()) }
@@ -1419,11 +1435,11 @@ public actor CardanoCliChainContext: ChainContext {
                 else { return nil }
                 return try? ScriptHash(from: .string(hex))
             }()
-            let update: ProtocolParamUpdate = {
+            let update: ProtocolParamUpdate = try {
                 guard contents.count >= 2,
                       let dict = contents[1] as? [String: Any]
                 else { return ProtocolParamUpdate() }
-                return parseProtocolParamUpdate(dict)
+                return try parseProtocolParamUpdate(dict)
             }()
             return .parameterChangeAction(ParameterChangeAction(
                 id: id,
@@ -1449,7 +1465,7 @@ public actor CardanoCliChainContext: ChainContext {
             if let pairs = contents.first as? [[Any]] {
                 for entry in pairs where entry.count >= 2 {
                     guard let credential = entry[0] as? [String: Any],
-                          let lovelace = GovernanceParsing.parseLovelace(entry[1])
+                          let lovelace = try GovernanceParsing.parseLovelace(entry[1])
                     else { continue }
                     guard let returnAddr = buildRewardAccountFromCredential(credential)
                     else { continue }
@@ -1561,87 +1577,88 @@ public actor CardanoCliChainContext: ChainContext {
     /// in the `contents[1]` slot of a ParameterChange governance-action.
     ///
     /// Only the fields actually present in the dict are populated; everything
-    /// else stays `nil`. Complex sub-objects (cost models, voting thresholds,
-    /// execution-unit prices) are decoded best-effort — if a sub-object can't
-    /// be parsed, the corresponding `ProtocolParamUpdate` field is left nil but
-    /// the rest of the update is still returned. Field-name keys mirror what
-    /// `cardano-cli conway query gov-state` emits.
-    private func parseProtocolParamUpdate(_ d: [String: Any]) -> ProtocolParamUpdate {
-        // Each value is read exactly; one that does not fit its ledger type
-        // (negative, too large, a ratio above one) is left nil, like a missing one.
-        func coin(_ key: String) -> Coin? {
-            try? LedgerValues.integer(json: d[key], "cardano-cli \(key)")
+    /// else stays `nil`, which in a `ProtocolParamUpdate` means "not changed".
+    /// A field that is present but does not fit its ledger type (negative,
+    /// too large, a ratio above one, not a number) throws. Field-name keys
+    /// mirror what `cardano-cli conway query gov-state` emits.
+    private func parseProtocolParamUpdate(_ d: [String: Any]) throws -> ProtocolParamUpdate {
+        func coin(_ key: String) throws -> Coin? {
+            try LedgerValues.integer(json: d[key], "cardano-cli \(key)")
         }
-        func uint32(_ key: String) -> UInt32? {
-            try? LedgerValues.integer(json: d[key], "cardano-cli \(key)")
+        func uint32(_ key: String) throws -> UInt32? {
+            try LedgerValues.integer(json: d[key], "cardano-cli \(key)")
         }
-        func uint16(_ key: String) -> UInt16? {
-            try? LedgerValues.integer(json: d[key], "cardano-cli \(key)")
+        func uint16(_ key: String) throws -> UInt16? {
+            try LedgerValues.integer(json: d[key], "cardano-cli \(key)")
         }
-        func epochInterval(_ key: String) -> EpochInterval? {
-            try? LedgerValues.integer(json: d[key], "cardano-cli \(key)")
+        func epochInterval(_ key: String) throws -> EpochInterval? {
+            try LedgerValues.integer(json: d[key], "cardano-cli \(key)")
         }
-        func nni(_ key: String) -> NonNegativeInterval? {
-            try? LedgerValues.nonNegativeInterval(json: d[key], "cardano-cli \(key)")
+        func nni(_ key: String) throws -> NonNegativeInterval? {
+            try LedgerValues.nonNegativeInterval(json: d[key], "cardano-cli \(key)")
         }
-        func unit(_ key: String) -> UnitInterval? {
-            try? LedgerValues.unitInterval(json: d[key], "cardano-cli \(key)")
+        func unit(_ key: String) throws -> UnitInterval? {
+            try LedgerValues.unitInterval(json: d[key], "cardano-cli \(key)")
         }
-        func exUnits(_ key: String) -> ExUnits? {
-            guard let pair = d[key] as? [String: Any] else { return nil }
-            func value(_ keys: String...) -> UInt64 {
-                keys.lazy.compactMap { try? LedgerValues.integer(json: pair[$0], as: UInt64.self, "cardano-cli \(key)") }
-                    .first ?? 0
+        func exUnits(_ key: String) throws -> ExUnits? {
+            guard let raw = d[key], !(raw is NSNull) else { return nil }
+            guard let pair = raw as? [String: Any] else {
+                throw CardanoChainError.valueError("cardano-cli \(key): \(raw) is not an execution-units object")
             }
-            let mem = value("memory", "mem")
-            let steps = value("steps", "step")
-            return ExUnits(mem: mem, steps: steps)
+            func value(_ keys: String...) throws -> UInt64 {
+                let present = keys.first { pair[$0] != nil }
+                return try LedgerValues.required(
+                    LedgerValues.integer(json: present.flatMap { pair[$0] }, as: UInt64.self, "cardano-cli \(key)"),
+                    "cardano-cli \(key) \(keys[0])")
+            }
+            return ExUnits(mem: try value("memory", "mem"), steps: try value("steps", "step"))
         }
 
         var u = ProtocolParamUpdate()
-        u.minFeeA = coin("txFeePerByte") ?? coin("minFeeA")
-        u.minFeeB = coin("txFeeFixed") ?? coin("minFeeB")
-        u.maxBlockBodySize = uint32("maxBlockBodySize")
-        u.maxTransactionSize = uint32("maxTxSize") ?? uint32("maxTransactionSize")
-        u.maxBlockHeaderSize = uint16("maxBlockHeaderSize")
-        u.keyDeposit = coin("stakeAddressDeposit") ?? coin("keyDeposit")
-        u.poolDeposit = coin("stakePoolDeposit") ?? coin("poolDeposit")
-        u.maximumEpoch = epochInterval("poolRetireMaxEpoch") ?? epochInterval("maximumEpoch")
-        u.nOpt = uint16("stakePoolTargetNum") ?? uint16("nOpt")
-        u.poolPledgeInfluence = nni("poolPledgeInfluence")
-        u.expansionRate = unit("monetaryExpansion") ?? unit("expansionRate")
-        u.treasuryGrowthRate = unit("treasuryCut") ?? unit("treasuryGrowthRate")
-        u.minPoolCost = coin("minPoolCost")
-        u.adaPerUtxoByte = coin("utxoCostPerByte") ?? coin("adaPerUTxOByte") ?? coin("adaPerUtxoByte")
-        u.maxValueSize = uint32("maxValueSize")
-        u.collateralPercentage = uint16("collateralPercentage")
-        u.maxCollateralInputs = uint16("maxCollateralInputs")
-        u.minCommitteeSize = uint16("committeeMinSize") ?? uint16("minCommitteeSize")
-        u.committeeTermLimit = epochInterval("committeeMaxTermLength") ?? epochInterval("committeeTermLimit")
-        u.governanceActionValidityPeriod = epochInterval("govActionLifetime") ?? epochInterval("governanceActionValidityPeriod")
-        u.governanceActionDeposit = coin("govActionDeposit") ?? coin("governanceActionDeposit")
-        u.drepDeposit = coin("dRepDeposit") ?? coin("drepDeposit")
-        u.drepInactivityPeriod = epochInterval("dRepActivity") ?? epochInterval("drepInactivityPeriod")
-        u.minFeeRefScriptCoinsPerByte = nni("minFeeRefScriptCostPerByte") ?? nni("minFeeRefScriptCoinsPerByte")
+        u.minFeeA = try coin("txFeePerByte") ?? (try coin("minFeeA"))
+        u.minFeeB = try coin("txFeeFixed") ?? (try coin("minFeeB"))
+        u.maxBlockBodySize = try uint32("maxBlockBodySize")
+        u.maxTransactionSize = try uint32("maxTxSize") ?? (try uint32("maxTransactionSize"))
+        u.maxBlockHeaderSize = try uint16("maxBlockHeaderSize")
+        u.keyDeposit = try coin("stakeAddressDeposit") ?? (try coin("keyDeposit"))
+        u.poolDeposit = try coin("stakePoolDeposit") ?? (try coin("poolDeposit"))
+        u.maximumEpoch = try epochInterval("poolRetireMaxEpoch") ?? (try epochInterval("maximumEpoch"))
+        u.nOpt = try uint16("stakePoolTargetNum") ?? (try uint16("nOpt"))
+        u.poolPledgeInfluence = try nni("poolPledgeInfluence")
+        u.expansionRate = try unit("monetaryExpansion") ?? (try unit("expansionRate"))
+        u.treasuryGrowthRate = try unit("treasuryCut") ?? (try unit("treasuryGrowthRate"))
+        u.minPoolCost = try coin("minPoolCost")
+        u.adaPerUtxoByte = try coin("utxoCostPerByte") ?? (try coin("adaPerUTxOByte") ?? (try coin("adaPerUtxoByte")))
+        u.maxValueSize = try uint32("maxValueSize")
+        u.collateralPercentage = try uint16("collateralPercentage")
+        u.maxCollateralInputs = try uint16("maxCollateralInputs")
+        u.minCommitteeSize = try uint16("committeeMinSize") ?? (try uint16("minCommitteeSize"))
+        u.committeeTermLimit = try epochInterval("committeeMaxTermLength") ?? (try epochInterval("committeeTermLimit"))
+        u.governanceActionValidityPeriod = try epochInterval("govActionLifetime") ?? (try epochInterval("governanceActionValidityPeriod"))
+        u.governanceActionDeposit = try coin("govActionDeposit") ?? (try coin("governanceActionDeposit"))
+        u.drepDeposit = try coin("dRepDeposit") ?? (try coin("drepDeposit"))
+        u.drepInactivityPeriod = try epochInterval("dRepActivity") ?? (try epochInterval("drepInactivityPeriod"))
+        u.minFeeRefScriptCoinsPerByte = try nni("minFeeRefScriptCostPerByte") ?? (try nni("minFeeRefScriptCoinsPerByte"))
 
-        u.protocolVersion = {
-            if let v = d["protocolVersion"] as? [String: Any],
-               let major = (v["major"] as? NSNumber)?.intValue,
-               let minor = (v["minor"] as? NSNumber)?.intValue {
-                return ProtocolVersion(major: major, minor: minor)
-            }
-            return nil
-        }()
+        if let v = d["protocolVersion"] as? [String: Any] {
+            u.protocolVersion = ProtocolVersion(
+                major: try LedgerValues.required(
+                    LedgerValues.integer(json: v["major"], "cardano-cli protocolVersion major"), "cardano-cli protocolVersion major"),
+                minor: try LedgerValues.required(
+                    LedgerValues.integer(json: v["minor"], "cardano-cli protocolVersion minor"), "cardano-cli protocolVersion minor"))
+        }
 
-        u.maxBlockExUnits = exUnits("maxBlockExecutionUnits") ?? exUnits("maxBlockExUnits")
-        u.maxTxExUnits = exUnits("maxTxExecutionUnits") ?? exUnits("maxTxExUnits")
+        u.maxBlockExUnits = try exUnits("maxBlockExecutionUnits") ?? (try exUnits("maxBlockExUnits"))
+        u.maxTxExUnits = try exUnits("maxTxExecutionUnits") ?? (try exUnits("maxTxExUnits"))
 
         if let prices = d["executionUnitPrices"] as? [String: Any] ?? d["executionCosts"] as? [String: Any] {
-            let mem = try? LedgerValues.nonNegativeInterval(json: prices["priceMemory"], "cardano-cli priceMemory")
-            let step = try? LedgerValues.nonNegativeInterval(json: prices["priceSteps"], "cardano-cli priceSteps")
-            if let mem, let step {
-                u.executionCosts = ExUnitPrices(memPrice: mem, stepPrice: step)
-            }
+            let mem = try LedgerValues.required(
+                LedgerValues.nonNegativeInterval(json: prices["priceMemory"], "cardano-cli priceMemory"),
+                "cardano-cli priceMemory")
+            let step = try LedgerValues.required(
+                LedgerValues.nonNegativeInterval(json: prices["priceSteps"], "cardano-cli priceSteps"),
+                "cardano-cli priceSteps")
+            u.executionCosts = ExUnitPrices(memPrice: mem, stepPrice: step)
         }
 
         if let cm = d["costModels"] as? [String: Any], !cm.isEmpty {
@@ -1666,14 +1683,16 @@ public actor CardanoCliChainContext: ChainContext {
         }
 
         if let pvt = d["poolVotingThresholds"] as? [String: Any] {
-            func ui(_ key: String) -> UnitInterval? {
-                try? LedgerValues.unitInterval(json: pvt[key], "cardano-cli \(key)")
+            // An update that carries the thresholds carries all of them.
+            func ui(_ key: String) throws -> UnitInterval? {
+                try LedgerValues.required(
+                    LedgerValues.unitInterval(json: pvt[key], "cardano-cli \(key)"), "cardano-cli poolVotingThresholds \(key)")
             }
-            if let cnc = ui("committeeNoConfidence"),
-               let cn = ui("committeeNormal"),
-               let hfi = ui("hardForkInitiation"),
-               let mnc = ui("motionNoConfidence"),
-               let psg = ui("ppSecurityGroup")
+            if let cnc = try ui("committeeNoConfidence"),
+               let cn = try ui("committeeNormal"),
+               let hfi = try ui("hardForkInitiation"),
+               let mnc = try ui("motionNoConfidence"),
+               let psg = try ui("ppSecurityGroup")
             {
                 u.poolVotingThresholds = PoolVotingThresholds(
                     motionNoConfidence: mnc,
@@ -1686,26 +1705,27 @@ public actor CardanoCliChainContext: ChainContext {
         }
 
         if let dvt = d["dRepVotingThresholds"] as? [String: Any] {
-            func ui(_ key: String) -> UnitInterval? {
-                try? LedgerValues.unitInterval(json: dvt[key], "cardano-cli \(key)")
+            func ui(_ key: String) throws -> UnitInterval? {
+                try LedgerValues.required(
+                    LedgerValues.unitInterval(json: dvt[key], "cardano-cli \(key)"), "cardano-cli dRepVotingThresholds \(key)")
             }
             let order: [(String, KeyPath<[String: UnitInterval?], UnitInterval?>)] = []  // unused; we'll inline
             _ = order
-            if let mnc = ui("motionNoConfidence"),
-               let cn = ui("committeeNormal"),
-               let cnc = ui("committeeNoConfidence"),
-               let utc = ui("updateToConstitution"),
-               let hfi = ui("hardForkInitiation"),
-               let net = ui("ppNetworkGroup"),
-               let eco = ui("ppEconomicGroup"),
-               let tech = ui("ppTechnicalGroup"),
-               let gov = ui("ppGovGroup"),
-               let tw = ui("treasuryWithdrawal")
+            if let mnc = try ui("motionNoConfidence"),
+               let cn = try ui("committeeNormal"),
+               let cnc = try ui("committeeNoConfidence"),
+               let utc = try ui("updateToConstitution"),
+               let hfi = try ui("hardForkInitiation"),
+               let net = try ui("ppNetworkGroup"),
+               let eco = try ui("ppEconomicGroup"),
+               let tech = try ui("ppTechnicalGroup"),
+               let gov = try ui("ppGovGroup"),
+               let tw = try ui("treasuryWithdrawal")
             {
                 // CDDL order: motionNoConfidence, committeeNormal, committeeNoConfidence,
                 //             updateToConstitution, hardForkInitiation, ppNetworkGroup,
                 //             ppEconomicGroup, ppTechnicalGroup, ppGovGroup, treasuryWithdrawal
-                u.drepVotingThresholds = try? DrepVotingThresholds(thresholds: [mnc, cn, cnc, utc, hfi, net, eco, tech, gov, tw])
+                u.drepVotingThresholds = try DrepVotingThresholds(thresholds: [mnc, cn, cnc, utc, hfi, net, eco, tech, gov, tw])
             }
         }
 
@@ -1886,8 +1906,8 @@ public actor CardanoCliChainContext: ChainContext {
         return nil
     }
 
-    private func parseLovelace(_ any: Any) -> Coin? {
-        GovernanceParsing.parseLovelace(any).map { Coin($0) }
+    private func parseLovelace(_ any: Any) throws -> Coin? {
+        try GovernanceParsing.parseLovelace(any)
     }
 
     private func parseVoteValue(_ any: Any) -> Vote? {

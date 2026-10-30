@@ -135,12 +135,18 @@ struct NodeSocketChainContextTests {
 
     @Test("slot(from:) extracts slot from blockPoint and returns 0 for origin")
     func testSlotFromPoint() async throws {
-        let originSlot = NodeSocketChainContext.slot(from: .origin)
+        let originSlot = try NodeSocketChainContext.slot(from: .origin)
         #expect(originSlot == 0)
 
-        let blockSlot = NodeSocketChainContext.slot(
+        let blockSlot = try NodeSocketChainContext.slot(
             from: .blockPoint(slot: 12_345, hash: BlockHash(Data(repeating: 0, count: 32))))
         #expect(blockSlot == 12_345)
+
+        // A slot beyond Int.max throws instead of trapping.
+        #expect(throws: CardanoChainError.self) {
+            try NodeSocketChainContext.slot(
+                from: .blockPoint(slot: UInt64.max, hash: BlockHash(Data(repeating: 0, count: 32))))
+        }
     }
 
     // MARK: - kesPeriodInfo nil-pool guard
