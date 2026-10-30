@@ -1,4 +1,5 @@
 #if CLIBACKENDS
+import BigInt
 import Foundation
 import SwiftCardanoCore
 import SwiftCardanoNetwork
@@ -414,34 +415,7 @@ public actor CardanoCliChainContext: ChainContext {
         guard let utxoValue = utxoEntry["value"]?.object else {
             throw CardanoChainError.valueError("cardano-cli UTxO \(txInStr) has no value")
         }
-
-        var value = Value(coin: 0)
-        var multiAsset = MultiAsset([:])
-
-        for (asset, amount) in utxoValue {
-            if asset == "lovelace" {
-                value.coin = try LedgerValues.required(
-                    LedgerValues.bigInt(json: amount, "cardano-cli lovelace"), "cardano-cli lovelace")
-            } else {
-                let policyId = asset
-                guard let assets = amount.object else {
-                    throw CardanoChainError.valueError(
-                        "cardano-cli UTxO \(txInStr) assets of \(policyId) are not an object")
-                }
-                for (assetHexName, assetAmount) in assets {
-                    let policy = try LedgerValues.hash(hex: policyId, as: ScriptHash.self, "cardano-cli ScriptHash")
-                    let assetName = AssetName(from: assetHexName)
-                    if multiAsset[policy] == nil {
-                        multiAsset[policy] = Asset([:])
-                    }
-                    multiAsset[policy]?[assetName] = try LedgerValues.required(
-                        LedgerValues.bigInt(json: assetAmount, "cardano-cli asset quantity"),
-                        "cardano-cli asset quantity")
-                }
-            }
-        }
-
-        value.multiAsset = multiAsset
+        let value = try Self.outputValue(utxoValue, "cardano-cli UTxO \(txInStr)")
 
         var datumHash: DatumHash? = nil
         if let datumHashStr = utxoEntry["datumhash"]?.string {
@@ -468,6 +442,39 @@ public actor CardanoCliChainContext: ChainContext {
         )
 
         return (UTxO(input: input, output: txOut), false)
+    }
+
+    /// An output's value from cardano-cli's UTxO JSON. An output's lovelace
+    /// and token quantities are a ledger Word64, so a larger number — or one
+    /// longer than the 38 digits a `Decimal` keeps — throws.
+    static func outputValue(_ utxoValue: [String: ChainJSON], _ what: String) throws -> Value {
+        var value = Value(coin: 0)
+        var multiAsset = MultiAsset([:])
+
+        for (asset, amount) in utxoValue {
+            if asset == "lovelace" {
+                value.coin = BigInt(try LedgerValues.required(
+                    LedgerValues.integer(json: amount, as: UInt64.self, "\(what) lovelace"), "\(what) lovelace"))
+            } else {
+                let policyId = asset
+                guard let assets = amount.object else {
+                    throw CardanoChainError.valueError("\(what) assets of \(policyId) are not an object")
+                }
+                for (assetHexName, assetAmount) in assets {
+                    let policy = try LedgerValues.hash(hex: policyId, as: ScriptHash.self, "cardano-cli ScriptHash")
+                    let assetName = AssetName(from: assetHexName)
+                    if multiAsset[policy] == nil {
+                        multiAsset[policy] = Asset([:])
+                    }
+                    multiAsset[policy]?[assetName] = BigInt(try LedgerValues.required(
+                        LedgerValues.integer(json: assetAmount, as: UInt64.self, "\(what) asset quantity"),
+                        "\(what) asset quantity"))
+                }
+            }
+        }
+
+        value.multiAsset = multiAsset
+        return value
     }
 
     /// Submit a transaction to the blockchain

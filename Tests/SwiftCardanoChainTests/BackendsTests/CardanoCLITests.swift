@@ -4,6 +4,7 @@
 // `MockCardanoCLIClient.swift` for the same gate.
 #if canImport(Darwin)
 
+import BigInt
 import Command
 import Foundation
 import Mockable
@@ -222,6 +223,28 @@ struct CardanoCLIContextTests {
 
         #expect(try CardanoCliChainContext.datumOption(["inlineDatum": nil], "test") == nil)
         #expect(try CardanoCliChainContext.datumOption([:], "test") == nil)
+    }
+
+    @Test("An output's lovelace and token quantities are read up to UInt64.max, and past it throw")
+    func testOutputValueBounds() throws {
+        let policy = String(repeating: "ab", count: 28)
+        let max = try ChainJSON.decode(
+            Data(#"{"lovelace": 18446744073709551615, "\#(policy)": {"01": 18446744073709551615}}"#.utf8), "test")
+        let value = try CardanoCliChainContext.outputValue(max.object ?? [:], "test")
+        #expect(value.coin == BigInt(UInt64.max))
+        let policyHash = ScriptHash(payload: Data(hexString: policy)!)
+        #expect(value.multiAsset[policyHash]?[AssetName(from: "01")] == BigInt(UInt64.max))
+        // Past UInt64, and past the 38 digits a Decimal keeps, which JSONDecoder truncates.
+        for big in ["18446744073709551616", "123456789012345678901234567890123456789012345"] {
+            let json = try ChainJSON.decode(Data(#"{"lovelace": \#(big)}"#.utf8), "test")
+            #expect(throws: CardanoChainError.self) {
+                try CardanoCliChainContext.outputValue(json.object ?? [:], "test")
+            }
+            let asset = try ChainJSON.decode(Data(#"{"\#(policy)": {"01": \#(big)}}"#.utf8), "test")
+            #expect(throws: CardanoChainError.self) {
+                try CardanoCliChainContext.outputValue(asset.object ?? [:], "test")
+            }
+        }
     }
 
     @Test("Stake distributions are read exactly in both shapes, and a bad stake throws")
