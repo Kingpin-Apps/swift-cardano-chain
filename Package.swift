@@ -33,10 +33,10 @@ let package = Package(
         ),
     ],
     dependencies: [
-        .package(url: "https://github.com/Kingpin-Apps/swift-cardano-core.git", from: "0.8.0"),
+        .package(url: "https://github.com/Kingpin-Apps/swift-cardano-core.git", from: "0.10.0"),
         // Consumers that enable CLIBackends must also enable SwiftCardanoUtils' CLITools trait
         // (top-level, e.g. scm). MansAmana enables neither, so utils' CLI/Command code is excluded.
-        .package(url: "https://github.com/Kingpin-Apps/swift-cardano-utils.git", from: "0.5.6"),
+        .package(url: "https://github.com/Kingpin-Apps/swift-cardano-utils.git", from: "0.5.9"),
         .package(url: "https://github.com/Kingpin-Apps/swift-blockfrost-api.git", from: "0.2.1"),
         .package(url: "https://github.com/Kingpin-Apps/swift-handles-api.git", from: "0.1.1"),
         .package(url: "https://github.com/Kingpin-Apps/swift-koios.git", from: "0.2.2"),
@@ -44,7 +44,7 @@ let package = Package(
         .package(url: "https://github.com/Kingpin-Apps/swift-kupo.git", from: "0.1.2"),
         .package(url: "https://github.com/Kingpin-Apps/swift-yaci-api.git", from: "0.1.0"),
         .package(url: "https://github.com/Kingpin-Apps/swift-cardano-network.git", from: "1.1.1"),
-        .package(url: "https://github.com/Kingpin-Apps/swift-cardano-uplc.git", from: "0.7.0"),
+        .package(url: "https://github.com/Kingpin-Apps/swift-cardano-uplc.git", from: "0.8.1"),
         // Direct dep (was transitive via SwiftCardanoUtils, now trait-gated out): OfflineTransfer
         // uses FilePath. Apple package, iOS-safe.
         .package(url: "https://github.com/apple/swift-system.git", from: "1.8.1"),
