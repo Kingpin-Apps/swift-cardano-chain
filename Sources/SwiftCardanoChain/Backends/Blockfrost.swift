@@ -1306,7 +1306,12 @@ public actor BlockFrostChainContext: ChainContext {
                 withdrawals[account] = try LedgerValues.integer(
                     text: item.amount, "Blockfrost proposal withdrawal amount")
             }
-            govAction = .treasuryWithdrawalsAction(.init(withdrawals: withdrawals, policyHash: nil))
+            // The withdrawals come from the typed endpoint; the policy hash only from
+            // `governance_description`: `{"tag": "TreasuryWithdrawals", "contents": [withdrawals, policyHash]}`.
+            let contents = try describedContents(govActionData, tag: "TreasuryWithdrawals", count: 2)
+            govAction = .treasuryWithdrawalsAction(.init(
+                withdrawals: withdrawals,
+                policyHash: try LedgerGovActionJSON.policyHash(contents[1], "Blockfrost proposal policy hash")))
         @unknown default:
             throw CardanoChainError.valueError(
                 "Blockfrost proposal type \(govActionData.governanceType) is not one this library reads")

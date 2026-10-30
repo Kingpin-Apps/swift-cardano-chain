@@ -155,6 +155,36 @@ struct GovActionPreviousIDTests {
         #expect(change.policyHash?.payload.toHex == ParameterChangeMockTransport.policyHash)
     }
 
+    @Test("Blockfrost reads a treasury withdrawal's policy hash from its description")
+    func blockfrostTreasuryPolicyHash() async throws {
+        let context = try await BlockFrostChainContext(
+            projectId: "fake-project-id", network: .preview,
+            client: SwiftBlockfrostAPI.Client(
+                serverURL: URL(string: "https://cardano-preview.blockfrost.io/api/v0")!,
+                transport: MockTransport()))
+        let info = try await context.govActionInfo(govActionID: Self.proposalID)
+        guard case .treasuryWithdrawalsAction(let treasury) = info.govAction else {
+            Issue.record("Expected a treasury withdrawal")
+            return
+        }
+        #expect(treasury.policyHash?.payload.toHex == MockTransport.treasuryPolicyHash)
+    }
+
+    static let treasuryDescriptionsWithoutPolicy: [String] = [
+        // No description: the policy hash cannot be read, and is not taken as none.
+        "null",
+        #"{"tag": "InfoAction"}"#,
+        #"{"tag": "TreasuryWithdrawals", "contents": [[]]}"#,
+    ]
+
+    @Test("A Blockfrost treasury withdrawal whose description is missing or malformed throws",
+          arguments: treasuryDescriptionsWithoutPolicy)
+    func blockfrostTreasuryNoDescription(_ description: String) async throws {
+        await #expect(throws: CardanoChainError.self) {
+            _ = try await self.blockfrost("treasury_withdrawals", description)
+        }
+    }
+
     // MARK: Ogmios
 
     private func ogmios(_ action: String) async throws -> GovAction {

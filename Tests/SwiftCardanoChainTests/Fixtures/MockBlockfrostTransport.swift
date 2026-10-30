@@ -5,6 +5,14 @@ import SwiftBlockfrostAPI
 
 
 struct MockTransport: ClientTransport {
+    /// The single proposal's action as db-sync records it in `governance_description`.
+    static let treasuryPolicyHash = "fa24fb305126805cf2164c161d852a0e7330cf988f1fe558cf7d4a64"
+    static let treasuryDescription = """
+        {"tag": "TreasuryWithdrawals", "contents": [[[{"network": "Testnet",
+          "credential": {"keyHash": "9139e5c0a42f0f2389634c3dd18dc621f5594c5ba825d9a8883c6627"}}, 1000]],
+          "\(treasuryPolicyHash)"]}
+        """
+
     func send(_ request: HTTPTypes.HTTPRequest, body: OpenAPIRuntime.HTTPBody?, baseURL: URL, operationID: String) async throws -> (
         HTTPTypes.HTTPResponse,
         OpenAPIRuntime.HTTPBody?
@@ -353,7 +361,9 @@ struct MockTransport: ClientTransport {
                         txHash: "2dd15e0ef6e6a17841cb9541c27724072ce4d4b79b91e58432fbaa32d9572531",
                         certIndex: 1,
                         governanceType: .treasuryWithdrawals,
-                        governanceDescription: Components.Schemas.Proposal.GovernanceDescriptionPayload(),
+                        governanceDescription: try JSONDecoder().decode(
+                            Components.Schemas.Proposal.GovernanceDescriptionPayload.self,
+                            from: Data(Self.treasuryDescription.utf8)),
                         deposit: "12000",
                         returnAddress: "stake_test1urd3hs7rlxwwdzthe6hj026dmyt3y0heuulctscyydh2kgck6nkmz",
                         ratifiedEpoch: nil,
