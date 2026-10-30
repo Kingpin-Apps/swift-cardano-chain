@@ -516,22 +516,27 @@ public actor NodeSocketChainContext: ChainContext {
             var liveSize: Decimal? = nil
             var retiringEpoch: UInt64? = nil
 
-            if let stateEntry = try? await connection.queryPoolState([poolOperator]).entries
-                .first(where: { $0.poolOperator == poolOperator })
-            {
+            // Each enrichment is `nil` only when the node does not support its
+            // query or does not list the pool; a reply that fails to decode, or
+            // holds a value out of range, throws.
+            if let stateEntry = try await Self.optionalQuery({
+                try await connection.queryPoolState([poolOperator])
+            })?.entries.first(where: { $0.poolOperator == poolOperator }) {
                 retiringEpoch = stateEntry.retiring
             }
 
-            if let distrEntry = try? await connection.queryPoolDistr([poolOperator]).entries
-                .first(where: { $0.poolOperator == poolOperator })
-            {
-                liveStake = distrEntry.absoluteStake.map { UInt($0) }
+            if let distrEntry = try await Self.optionalQuery({
+                try await connection.queryPoolDistr([poolOperator])
+            })?.entries.first(where: { $0.poolOperator == poolOperator }) {
+                liveStake = try distrEntry.absoluteStake.map { try $0.checked("node pool absolute stake") }
                 if distrEntry.stakeDenominator != 0 {
                     liveSize = Decimal(distrEntry.stakeNumerator) / Decimal(distrEntry.stakeDenominator)
                 }
             }
 
-            let status: PoolStatus = retiringEpoch.map { .retiring(epoch: UInt($0)) } ?? .registered
+            let status: PoolStatus = try retiringEpoch.map {
+                .retiring(epoch: try $0.checked("node pool retiring epoch"))
+            } ?? .registered
 
             return StakePoolInfo(
                 poolParams: entry.params,
@@ -915,6 +920,19 @@ public actor NodeSocketChainContext: ChainContext {
     // MARK: - Private: scoped connection helper
 
     @discardableResult
+    /// The result of a local-state query the node may not support, or `nil`
+    /// when the negotiated node-to-client version does not offer it. Any other
+    /// failure, including a reply that does not decode, throws.
+    static func optionalQuery<T>(
+        isolation: isolated (any Actor)? = #isolation, _ query: () async throws -> T
+    ) async throws -> T? {
+        do {
+            return try await query()
+        } catch LocalStateQueryError.queryNotSupported {
+            return nil
+        }
+    }
+
     private func withClient<Result: Sendable>(
         _ body: @Sendable (NodeToClientConnection) async throws -> Result
     ) async throws -> Result {

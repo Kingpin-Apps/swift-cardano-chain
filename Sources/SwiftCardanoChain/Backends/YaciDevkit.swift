@@ -2403,11 +2403,14 @@ public actor YaciDevkitChainContext: ChainContext {
     /// The committee's current membership and quorum, from Yaci's indexed view, falling back to
     /// the local-state view served while the DevKit cluster is running.
     private func currentCommittee() async throws -> ([CommitteeMemberTerm], UnitInterval?) {
-        if let output = try? await api.client.getCommitteeMembers(),
-            case .ok(let ok) = output,
-            let committee = try? ok.body.json,
-            let rows = committee.members, !rows.isEmpty
-        {
+        // The indexed view is used when Yaci serves it (a 200 with members); a
+        // non-200 answer or an empty list falls back to the live view. A failed
+        // request, or a 200 whose body does not decode, throws.
+        let output = try await perform("get the committee members") {
+            try await api.client.getCommitteeMembers()
+        }
+        let indexed = if case .ok(let ok) = output { try ok.body.json } else { nil as Components.Schemas.CommitteeDto? }
+        if let committee = indexed, let rows = committee.members, !rows.isEmpty {
             let members = try rows.map { member -> CommitteeMemberTerm in
                 let payload = try LedgerValues.hash28(
                     hex: LedgerValues.required(member.hash, "Yaci committee member hash"), "Yaci committee member hash")

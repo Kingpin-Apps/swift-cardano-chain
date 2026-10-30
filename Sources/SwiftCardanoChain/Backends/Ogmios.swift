@@ -979,19 +979,26 @@ public actor OgmiosChainContext: ChainContext {
             poolMetadata: poolMetadata
         )
 
-        // Get opcert counter from operationalCertificates query
+        // The opcert counter, from the operationalCertificates query. `nil` when
+        // the server does not answer that query or the pool has issued no
+        // certificate yet; a certificate it does report must be valid.
         var opcertCounter: UInt? = nil
-        if let opCerts = try? await client.ledgerStateQuery.operationalCertificates.result(),
+        if let opCerts = try await Self.optionalLedgerQuery({
+                try await client.ledgerStateQuery.operationalCertificates.result()
+            }),
             let matchingPool = opCerts.value.first(where: { $0.key.value == poolId })
         {
             opcertCounter = try matchingPool.value.checked("Ogmios operational certificate counter")
         }
 
-        // Get active stake, active size, and owner stake from stakePoolsPerformances
+        // Live stake, its share, and the owners' stake, from stakePoolsPerformances.
+        // `nil` when the server does not answer that query or does not list the pool.
         var liveStake: UInt? = nil
         var liveSize: Decimal? = nil
         var ownerStake: UInt? = nil
-        if let performances = try? await client.ledgerStateQuery.stakePoolsPerformances.result(),
+        if let performances = try await Self.optionalLedgerQuery({
+                try await client.ledgerStateQuery.stakePoolsPerformances.result()
+            }),
             let poolSummary = performances.stakePools.first(where: { $0.key.value == poolId })?
                 .value
         {
@@ -1016,6 +1023,26 @@ public actor OgmiosChainContext: ChainContext {
             opcertCounter: opcertCounter,
             status: .registered
         )
+    }
+
+    /// The result of a ledger-state query the server may not answer, or `nil`
+    /// when it does not: Ogmios answers with a JSON-RPC error (the query is
+    /// unknown to this server or unavailable in the current era), or its HTTP
+    /// endpoint refuses the request as not found or not implemented. Any other
+    /// failure — the server cannot be reached, or a successful response does
+    /// not decode — throws.
+    static func optionalLedgerQuery<T>(
+        isolation: isolated (any Actor)? = #isolation, _ query: () async throws -> T
+    ) async throws -> T? {
+        do {
+            return try await query()
+        } catch OgmiosError.responseError {
+            return nil
+        } catch OgmiosError.connectionError(let message?)
+            where ["HTTP Error: 404,", "HTTP Error: 501,"].contains(where: message.hasPrefix)
+        {
+            return nil
+        }
     }
 
     /// Get the treasury balance.

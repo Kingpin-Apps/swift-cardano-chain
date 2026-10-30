@@ -930,9 +930,10 @@ public actor BlockFrostChainContext: ChainContext {
         // 3. Get pool metadata
         var poolMetadata: PoolMetadata? = nil
 
-        // A separate call: when it fails (a pool with no metadata is a 404),
-        // the pool simply has none. A URL or hash it does return must be valid.
-        if case .ok(let metadataOK)? = try? await api.client.getPoolsPoolIdMetadata(
+        // A separate call: a non-200 answer (a pool with no metadata is a 404)
+        // means the pool has none. A failed request, a body that does not
+        // decode, or a URL or hash that is not valid throws.
+        if case .ok(let metadataOK) = try await api.client.getPoolsPoolIdMetadata(
             Operations.GetPoolsPoolIdMetadata.Input(
                 path: Operations.GetPoolsPoolIdMetadata.Input.Path(poolId: poolId)
             )
@@ -1110,10 +1111,11 @@ public actor BlockFrostChainContext: ChainContext {
             throw CardanoChainError.valueError("Failed to parse DRep stake amount")
         }
         
-        // A separate call: when it fails (a DRep with no anchor is a 404), the
-        // DRep has no anchor. An anchor it does return must be valid.
+        // A separate call: a non-200 answer (a DRep with no anchor is a 404)
+        // means the DRep has no anchor. A failed request, a body that does not
+        // decode, or an anchor that is not valid throws.
         var anchor: Anchor? = nil
-        if case .ok(let metadataOK)? = try? await api.client.getGovernanceDrepsDrepIdMetadata(
+        if case .ok(let metadataOK) = try await api.client.getGovernanceDrepsDrepIdMetadata(
             .init(path: .init(drepId: drepId))
         ) {
             let metaData = try metadataOK.body.json
@@ -1540,10 +1542,11 @@ public actor BlockFrostChainContext: ChainContext {
         let returnAddrData = try Address.fromBech32(proposal.returnAddress).toBytes()
 
         // Anchor metadata via a separate endpoint, which answers 404 until
-        // Blockfrost has indexed the off-chain document; when the call fails the
-        // anchor is left out. An anchor it does return must be valid.
+        // Blockfrost has indexed the off-chain document; a non-200 answer leaves
+        // the anchor out. A failed request, a body that does not decode, or an
+        // anchor that is not valid throws.
         var anchor: SwiftCardanoCore.Anchor? = nil
-        if case .ok(let metadataOK)? = try? await api.client.getGovernanceProposalsTxHashCertIndexMetadata(
+        if case .ok(let metadataOK) = try await api.client.getGovernanceProposalsTxHashCertIndexMetadata(
             .init(path: .init(
                 txHash: govActionID.transactionID.payload.toHex,
                 certIndex: Int(govActionID.govActionIndex)
