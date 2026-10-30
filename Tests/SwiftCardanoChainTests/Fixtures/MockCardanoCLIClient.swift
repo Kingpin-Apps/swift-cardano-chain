@@ -582,7 +582,7 @@ struct CLIResponse {
               "proposedIn": 100,
               "expiresAfter": 120,
               "committeeVotes": {
-                "keyHash-0000000000000000000000000000000000000000000000000000000000": "yes"
+                "keyHash-00000000000000000000000000000000000000000000000000000000": "yes"
               },
               "dRepVotes": {
                 "keyHash-b02f7b335aebf284bbdc20bdc3b59e4e183ae2cfc47ad2d8bc19a241": "abstain"

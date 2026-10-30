@@ -710,17 +710,17 @@ struct YaciDevkitChainContextTests {
     }
 
     @Test("Test the genesis reward account gets its stake-address header")
-    func testGenesisRewardAccount() {
+    func testGenesisRewardAccount() throws {
         let keyHash = "11a14edf73b08a0a27cb98b2c57eb37c780df18fcfcf6785ed5df84a"
-        let testnet = YaciDevkitChainContext.genesisRewardAccount(
+        let testnet = try YaciDevkitChainContext.genesisRewardAccount(
             ["credential": ["keyHash": keyHash], "network": "Testnet"])
         #expect(testnet.payload.first == 0xE0)
 
-        let mainnet = YaciDevkitChainContext.genesisRewardAccount(
+        let mainnet = try YaciDevkitChainContext.genesisRewardAccount(
             ["credential": ["keyHash": keyHash], "network": "Mainnet"])
         #expect(mainnet.payload.first == 0xE1)
 
-        let script = YaciDevkitChainContext.genesisRewardAccount(
+        let script = try YaciDevkitChainContext.genesisRewardAccount(
             ["credential": ["scriptHash": keyHash], "network": "Testnet"])
         #expect(script.payload.first == 0xF0)
     }

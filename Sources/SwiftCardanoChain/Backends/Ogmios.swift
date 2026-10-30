@@ -636,7 +636,7 @@ public actor OgmiosChainContext: ChainContext {
     /// Converts a SwiftOgmios UtxoEntry to a SwiftCardanoCore UTxO.
     private func convertUtxoEntry(_ entry: SwiftOgmios.UtxoEntry) throws -> SwiftCardanoCore.UTxO {
         let txIn = TransactionInput(
-            transactionId: try TransactionId(from: .string(entry.transaction.id)),
+            transactionId: try LedgerValues.hash(hex: entry.transaction.id, as: TransactionId.self, "Ogmios TransactionId"),
             index: try LedgerValues.integer(entry.index, "Ogmios output index")
         )
 
@@ -649,11 +649,11 @@ public actor OgmiosChainContext: ChainContext {
 
         if let assets = entry.value.assets {
             for (policyIdHex, assetMap) in assets {
-                let policyId = ScriptHash(payload: Data(hex: policyIdHex))
+                let policyId = try LedgerValues.hash(hex: policyIdHex, as: ScriptHash.self, "Ogmios ScriptHash")
                 var asset = Asset([:])
 
                 for (assetNameHex, quantity) in assetMap {
-                    let assetName = try AssetName(payload: Data(hex: assetNameHex))
+                    let assetName = try LedgerValues.assetName(hex: assetNameHex, "Ogmios asset name")
                     asset[assetName] = BigInt(quantity)
                 }
 
@@ -671,12 +671,11 @@ public actor OgmiosChainContext: ChainContext {
         var datumOption: DatumOption? = nil
 
         if let hash = entry.datumHash, entry.datum == nil {
-            datumHash = try DatumHash(from: .string(hash))
+            datumHash = try LedgerValues.hash(hex: hash, as: DatumHash.self, "Ogmios DatumHash")
         }
 
-        if let datumHex = entry.datum,
-            let datumData = Data(hexString: datumHex)
-        {
+        if let datumHex = entry.datum {
+            let datumData = try LedgerValues.hexBytes(datumHex, "Ogmios inline datum")
             datumOption = try DatumOption.fromCBOR(data: datumData)
         }
 
@@ -707,7 +706,7 @@ public actor OgmiosChainContext: ChainContext {
             return .nativeScript(native)
 
         case .plutus(let plutusScript):
-            let data = Data(hex: plutusScript.cbor)
+            let data = try LedgerValues.hexBytes(plutusScript.cbor, "Ogmios script cbor")
             switch plutusScript.language {
             case "plutus:v1":
                 return .plutusV1Script(PlutusV1Script(data: data))
@@ -942,12 +941,12 @@ public actor OgmiosChainContext: ChainContext {
         let margin = try unitInterval(ogmiosParams.margin, "stake pool margin")
 
         let poolOperator = try PoolOperator(from: poolId)
-        let vrfKeyHash = VrfKeyHash(
-            payload: Data(hex: ogmiosParams.vrfVerificationKeyHash.description))
+        let vrfKeyHash = try LedgerValues.hash(
+            hex: ogmiosParams.vrfVerificationKeyHash.description, as: VrfKeyHash.self, "Ogmios pool vrf")
         let rewardAddress = try Address(from: .string(ogmiosParams.rewardAccount.description))
         let rewardAccountHash = RewardAccountHash(payload: rewardAddress.toBytes())
-        let poolOwnersList: [VerificationKeyHash] = ogmiosParams.owners.map { owner in
-            VerificationKeyHash(payload: Data(hex: owner.description))
+        let poolOwnersList: [VerificationKeyHash] = try ogmiosParams.owners.map { owner in
+            try LedgerValues.hash(hex: owner.description, as: VerificationKeyHash.self, "Ogmios VerificationKeyHash")
         }
         let poolOwners = ListOrOrderedSet<VerificationKeyHash>.list(poolOwnersList)
 
@@ -1227,12 +1226,12 @@ public actor OgmiosChainContext: ChainContext {
                 switch delegate.from {
                     case .script:
                         hotCredential = CommitteeHotCredential(
-                            credential: .scriptHash(ScriptHash(payload: Data(hex: delegate.id.description)))
+                            credential: .scriptHash(try LedgerValues.hash(hex: delegate.id.description, as: ScriptHash.self, "Ogmios ScriptHash"))
                         )
                     case .verificationKey:
                         hotCredential = CommitteeHotCredential(
                             credential: .verificationKeyHash(
-                                VerificationKeyHash(payload: Data(hex: delegate.id.description))
+                                try LedgerValues.hash(hex: delegate.id.description, as: VerificationKeyHash.self, "Ogmios VerificationKeyHash")
                             )
                         )
                     }
@@ -1290,12 +1289,12 @@ public actor OgmiosChainContext: ChainContext {
         switch member.from {
         case .script:
             coldCredential = CommitteeColdCredential(
-                credential: .scriptHash(ScriptHash(payload: Data(hex: member.id.description)))
+                credential: .scriptHash(try LedgerValues.hash(hex: member.id.description, as: ScriptHash.self, "Ogmios ScriptHash"))
             )
         case .verificationKey:
             coldCredential = CommitteeColdCredential(
                 credential: .verificationKeyHash(
-                    VerificationKeyHash(payload: Data(hex: member.id.description))
+                    try LedgerValues.hash(hex: member.id.description, as: VerificationKeyHash.self, "Ogmios VerificationKeyHash")
                 )
             )
         }
@@ -1343,7 +1342,7 @@ public actor OgmiosChainContext: ChainContext {
         let proposals = try await client.ledgerStateQuery.governanceProposals.result()
         return try proposals.map { state in
             let id = GovActionID(
-                transactionID: TransactionId(payload: Data(hex: state.proposal.transaction.id)),
+                transactionID: try LedgerValues.hash(hex: state.proposal.transaction.id, as: TransactionId.self, "Ogmios TransactionId"),
                 govActionIndex: try state.proposal.index.checked("Ogmios proposal index")
             )
             return try Self.mapProposalState(state, fallbackID: id)
@@ -1353,17 +1352,17 @@ public actor OgmiosChainContext: ChainContext {
     public func committeeState() async throws -> CommitteeStateInfo {
         let constitutionalCommittee = try await client.ledgerStateQuery.constitutionalCommittee.result()
 
-        let members: [CommitteeStateInfo.Member] = constitutionalCommittee.members.map { m in
-            let cold: CommitteeColdCredential = {
+        let members: [CommitteeStateInfo.Member] = try constitutionalCommittee.members.map { m in
+            let cold: CommitteeColdCredential = try {
                 switch m.from {
                 case .script:
                     return CommitteeColdCredential(
-                        credential: .scriptHash(ScriptHash(payload: Data(hex: m.id.description)))
+                        credential: .scriptHash(try LedgerValues.hash(hex: m.id.description, as: ScriptHash.self, "Ogmios ScriptHash"))
                     )
                 case .verificationKey:
                     return CommitteeColdCredential(
                         credential: .verificationKeyHash(
-                            VerificationKeyHash(payload: Data(hex: m.id.description))
+                            try LedgerValues.hash(hex: m.id.description, as: VerificationKeyHash.self, "Ogmios VerificationKeyHash")
                         )
                     )
                 }
@@ -1375,12 +1374,12 @@ public actor OgmiosChainContext: ChainContext {
                 switch d.from {
                 case .script:
                     hot = CommitteeHotCredential(
-                        credential: .scriptHash(ScriptHash(payload: Data(hex: d.id.description)))
+                        credential: .scriptHash(try LedgerValues.hash(hex: d.id.description, as: ScriptHash.self, "Ogmios ScriptHash"))
                     )
                 case .verificationKey:
                     hot = CommitteeHotCredential(
                         credential: .verificationKeyHash(
-                            VerificationKeyHash(payload: Data(hex: d.id.description))
+                            try LedgerValues.hash(hex: d.id.description, as: VerificationKeyHash.self, "Ogmios VerificationKeyHash")
                         )
                     )
                 }
@@ -1475,7 +1474,7 @@ public actor OgmiosChainContext: ChainContext {
             var coldCredentials: Set<CommitteeColdCredential> = []
             var credentialEpochs: [CommitteeColdCredential: UInt64] = [:]
             for member in cc.members.added ?? [] {
-                let cred = makeCommitteeColdCredential(
+                let cred = try makeCommitteeColdCredential(
                     idHex: member.id.value,
                     from: member.from
                 )
@@ -1516,16 +1515,10 @@ public actor OgmiosChainContext: ChainContext {
     private static func makeCommitteeColdCredential(
         idHex: String,
         from origin: SwiftOgmios.CredentialOrigin
-    ) -> CommitteeColdCredential {
-        let payload = Data(hex: idHex)
-        switch origin {
-        case .script:
-            return CommitteeColdCredential(credential: .scriptHash(ScriptHash(payload: payload)))
-        case .verificationKey:
-            return CommitteeColdCredential(
-                credential: .verificationKeyHash(VerificationKeyHash(payload: payload))
-            )
-        }
+    ) throws -> CommitteeColdCredential {
+        CommitteeColdCredential(
+            credential: try LedgerValues.credential(
+                isScript: origin == .script, hex: idHex, "Ogmios committee member id"))
     }
 
     private static func mapProposalState(
@@ -1550,12 +1543,12 @@ public actor OgmiosChainContext: ChainContext {
                 switch cc.from {
                 case .script:
                     cred = CommitteeHotCredential(
-                        credential: .scriptHash(ScriptHash(payload: Data(hex: cc.id.description)))
+                        credential: .scriptHash(try LedgerValues.hash(hex: cc.id.description, as: ScriptHash.self, "Ogmios ScriptHash"))
                     )
                 case .verificationKey:
                     cred = CommitteeHotCredential(
                         credential: .verificationKeyHash(
-                            VerificationKeyHash(payload: Data(hex: cc.id.description))
+                            try LedgerValues.hash(hex: cc.id.description, as: VerificationKeyHash.self, "Ogmios VerificationKeyHash")
                         )
                     )
                 }
@@ -1565,20 +1558,18 @@ public actor OgmiosChainContext: ChainContext {
                 switch dr.from {
                 case .script:
                     cred = DRepCredential(
-                        credential: .scriptHash(ScriptHash(payload: Data(hex: dr.id.description)))
+                        credential: .scriptHash(try LedgerValues.hash(hex: dr.id.description, as: ScriptHash.self, "Ogmios ScriptHash"))
                     )
                 case .verificationKey:
                     cred = DRepCredential(
                         credential: .verificationKeyHash(
-                            VerificationKeyHash(payload: Data(hex: dr.id.description))
+                            try LedgerValues.hash(hex: dr.id.description, as: VerificationKeyHash.self, "Ogmios VerificationKeyHash")
                         )
                     )
                 }
                 dRepVotes.append(.init(credential: cred, vote: vote))
             case .stakePoolOperator(let spo):
-                if let pool = try? PoolOperator(from: .string(spo.id.value)) {
-                    stakePoolVotes.append(.init(poolOperator: pool, vote: vote))
-                }
+                stakePoolVotes.append(.init(poolOperator: try PoolOperator(from: .string(spo.id.value)), vote: vote))
             case .genesisDelegate:
                 // Genesis delegates are a pre-Conway construct — ignored for current vote tally.
                 break

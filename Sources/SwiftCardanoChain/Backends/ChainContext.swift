@@ -202,7 +202,7 @@ public extension ChainContext {
         case .bytes(let data):
             return try await submitTxCBOR(cbor: data)
         case .string(let string):
-            return try await submitTxCBOR(cbor: string.hexStringToData)
+            return try await submitTxCBOR(cbor: LedgerValues.hexBytes(string, "transaction CBOR"))
         }
     }
 

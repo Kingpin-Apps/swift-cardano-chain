@@ -23,8 +23,10 @@ extension LedgerValues {
     /// The bytes of a 32-byte hash written in hex, or an error when `hex` is
     /// not hex or not 32 bytes.
     static func hash32(hex: String, _ what: @autoclosure () -> String) throws -> Data {
-        guard hex.count == 64, let data = Data(hexString: hex) else {
-            throw CardanoChainError.valueError("\(what()): \(hex) is not a 32-byte hex hash")
+        let what = what()
+        let data = try hexBytes(hex, what)
+        guard data.count == 32 else {
+            throw CardanoChainError.valueError("\(what): \(hex) is not a 32-byte hex hash")
         }
         return data
     }

@@ -504,4 +504,30 @@ struct ChainValueHardeningTests {
             _ = try await context.govActionInfo(govActionID: govActionID)
         }
     }
+
+    // MARK: Strict hex
+
+    static let badHotKeys: [String] = [
+        // 29 bytes, which the lenient reader used to take as a key hash.
+        String(repeating: "00", count: 29),
+        "not hex",
+    ]
+
+    @Test("A Blockfrost committee hot key that is not a 28-byte hash throws", arguments: badHotKeys)
+    func blockfrostBadHotKey(_ hotHex: String) async throws {
+        let committee = try JSONEncoder().encode(
+            SwiftBlockfrostAPI.Components.Schemas.Committee(
+                govActionId: nil, proposalTxHash: nil, proposalIndex: nil, isDissolved: false,
+                quorum: .init(numerator: 2, denominator: 3),
+                members: [
+                    .init(
+                        ccColdId: "cc_cold1zgqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqz3la7s",
+                        ccColdHex: "13493790d9b03483a1e1e684ea4faf1ee48a58f402574e7f2246f4d4",
+                        ccColdHasScript: false,
+                        ccHotId: nil, ccHotHex: hotHex, ccHotHasScript: false,
+                        status: .authorized, expirationEpoch: 800)
+                ]))
+        let context = try await blockfrost(["get/governance/committee": committee])
+        await #expect(throws: CardanoChainError.self) { _ = try await context.committeeState() }
+    }
 }

@@ -267,10 +267,7 @@ public struct KupoChainContext: ChainContext {
         switch response {
         case .ok(let ok):
             guard case .Datum(let datum) = try ok.body.applicationJsonCharsetUtf8 else { return nil }
-            guard let cbor = Data(hexString: datum.datum) else {
-                throw CardanoChainError.valueError("Kupo returned datum \(hex) that is not hex")
-            }
-            return cbor
+            return try LedgerValues.hexBytes(datum.datum, "Kupo datum \(hex)")
         case .undocumented(statusCode: 404, _):
             return nil
         default:
@@ -306,7 +303,7 @@ public struct KupoChainContext: ChainContext {
             throw CardanoChainError.valueError("Kupo output index of \(reference) is out of range")
         }
         let input = TransactionInput(
-            transactionId: try TransactionId(from: .string(match.transactionId)),
+            transactionId: try LedgerValues.hash(hex: match.transactionId, as: TransactionId.self, "Kupo TransactionId"),
             index: index
         )
 
@@ -318,8 +315,8 @@ public struct KupoChainContext: ChainContext {
         for (unit, count) in match.value.assets?.additionalProperties ?? [:] {
             let parts = unit.split(separator: ".", maxSplits: 1).map(String.init)
             let quantity = BigInt(count)
-            let policy = ScriptHash(payload: Data(hex: parts[0]))
-            let name = try AssetName(payload: Data(hex: parts.count > 1 ? parts[1] : ""))
+            let policy = try LedgerValues.hash(hex: parts[0], as: ScriptHash.self, "Kupo ScriptHash")
+            let name = try LedgerValues.assetName(hex: parts.count > 1 ? parts[1] : "", "Kupo asset name")
             var asset = multiAsset[policy] ?? Asset([:])
             asset[name] = quantity
             multiAsset[policy] = asset
@@ -329,14 +326,14 @@ public struct KupoChainContext: ChainContext {
         var datumOption: DatumOption?
         if case .case1(let hash?)? = match.datumHash {
             if match.datumType == .inline {
-                var cbor = match.datum.flatMap { Data(hexString: $0) }
+                var cbor = try match.datum.map { try LedgerValues.hexBytes($0, "Kupo inline datum") }
                 if cbor == nil { cbor = try await datumCBOR(hex: hash) }
                 guard let cbor else {
                     throw CardanoChainError.valueError("Inline datum \(hash) of \(reference) is not known to Kupo")
                 }
                 datumOption = DatumOption(datum: try PlutusData.fromCBOR(data: cbor))
             } else {
-                outputDatumHash = try DatumHash(from: .string(hash))
+                outputDatumHash = try LedgerValues.hash(hex: hash, as: DatumHash.self, "Kupo DatumHash")
             }
         }
 
@@ -370,9 +367,7 @@ public struct KupoChainContext: ChainContext {
     /// unwrapped one layer and wrapped one layer are all tried, and the one with
     /// the right hash kept.
     static func scriptType(_ script: Components.Schemas.Script, hash: String) throws -> ScriptType {
-        guard let bytes = Data(hexString: script.script) else {
-            throw CardanoChainError.valueError("Script \(hash) is not hex")
-        }
+        let bytes = try LedgerValues.hexBytes(script.script, "Kupo script \(hash)")
         func make(_ data: Data) -> ScriptType? {
             switch script.language {
             case .plutus_colon_v1: return .plutusV1Script(PlutusV1Script(data: data))

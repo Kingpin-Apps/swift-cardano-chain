@@ -453,7 +453,7 @@ struct MockTransport: ClientTransport {
                                 ccColdHex: "13493790d9b03483a1e1e684ea4faf1ee48a58f402574e7f2246f4d4",
                                 ccColdHasScript: false,
                                 ccHotId: "cc_hot1qgqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqvcdjk7",
-                                ccHotHex: "0000000000000000000000000000000000000000000000000000000000",
+                                ccHotHex: "00000000000000000000000000000000000000000000000000000000",
                                 ccHotHasScript: false,
                                 status: .authorized,
                                 expirationEpoch: 800
@@ -524,7 +524,7 @@ struct BlockfrostPoolMockTransport: ClientTransport {
                 {
                     "pool_id": "pool1pu5jlj4q9w9jlxeu370a3c9myx47md5j5m2str0naunn2q3lkdy",
                     "hex": "0f292fcaa02b8b2f9b3c8f9fd8e0bb21abedb692a6d5058df3ef2735",
-                    "vrf_key": "vrf_key_hash_placeholder_32_bytes_00",
+                    "vrf_key": "d8b3d6c4f6c76d1e3a4c0f2e2bcd4f2a1d1f4b37c8e9b5a6d7c8e9f0a1b2c3d4",
                     "blocks_minted": 100,
                     "blocks_epoch": 10,
                     "live_stake": "1000000000000",

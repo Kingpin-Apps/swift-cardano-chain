@@ -455,7 +455,7 @@ public actor BlockFrostChainContext: ChainContext {
                 )
                 do {
                     let cbor = try LedgerValues.required(scriptCBOR.ok.body.json.cbor, "Blockfrost script cbor")
-                    let v1script = PlutusV1Script(data: Data(hex: cbor))
+                    let v1script = PlutusV1Script(data: try LedgerValues.hexBytes(cbor, "Blockfrost script cbor"))
                     return try tryFixScript(
                         hash: scriptHash,
                         script: .plutusV1Script(v1script)
@@ -474,7 +474,7 @@ public actor BlockFrostChainContext: ChainContext {
                 )
                 do {
                     let cbor = try LedgerValues.required(scriptCBOR.ok.body.json.cbor, "Blockfrost script cbor")
-                    let v1script = PlutusV2Script(data: Data(hex: cbor))
+                    let v1script = PlutusV2Script(data: try LedgerValues.hexBytes(cbor, "Blockfrost script cbor"))
                     return try tryFixScript(
                         hash: scriptHash,
                         script: .plutusV2Script(v1script)
@@ -493,7 +493,7 @@ public actor BlockFrostChainContext: ChainContext {
                 )
                 do {
                     let cbor = try LedgerValues.required(scriptCBOR.ok.body.json.cbor, "Blockfrost script cbor")
-                    let v1script = PlutusV3Script(data: Data(hex: cbor))
+                    let v1script = PlutusV3Script(data: try LedgerValues.hexBytes(cbor, "Blockfrost script cbor"))
                     return try tryFixScript(
                         hash: scriptHash,
                         script: .plutusV3Script(v1script)
@@ -551,7 +551,7 @@ public actor BlockFrostChainContext: ChainContext {
 
             for result in results {
                 let txIn = TransactionInput(
-                    transactionId: try TransactionId(from: .string(result.txHash)),
+                    transactionId: try LedgerValues.hash(hex: result.txHash, as: TransactionId.self, "Blockfrost TransactionId"),
                     index: try LedgerValues.integer(result.outputIndex, "Blockfrost output index")
                 )
 
@@ -563,13 +563,7 @@ public actor BlockFrostChainContext: ChainContext {
                         lovelaceAmount = try LedgerValues.integer(text: item.quantity, "Blockfrost lovelace quantity")
                     } else {
                         // The utxo contains Multi-asset
-                        let data = Data(hex: item.unit)
-                        let policyId = ScriptHash(
-                            payload: data.prefix(SCRIPT_HASH_SIZE)
-                        )
-                        let assetName = try AssetName(
-                            payload: data.suffix(from: SCRIPT_HASH_SIZE)
-                        )
+                        let (policyId, assetName) = try LedgerValues.asset(unit: item.unit, "Blockfrost asset unit")
 
                         if multiAssets[policyId] == nil {
                             multiAssets[policyId] = Asset([:])
@@ -588,12 +582,11 @@ public actor BlockFrostChainContext: ChainContext {
                 var script: ScriptType? = nil
 
                 if result.dataHash != nil && result.inlineDatum == nil {
-                    datumHash = try DatumHash(from: .string(result.dataHash!))
+                    datumHash = try LedgerValues.hash(hex: result.dataHash!, as: DatumHash.self, "Blockfrost DatumHash")
                 }
 
-                if let inlineDatum = result.inlineDatum,
-                    let datumData = Data(hexString: inlineDatum)
-                {
+                if let inlineDatum = result.inlineDatum {
+                    let datumData = try LedgerValues.hexBytes(inlineDatum, "Blockfrost inline datum")
                     // Parse as PlutusData first, then wrap in DatumOption
                     let plutusData = try PlutusData.fromCBOR(data: datumData)
                     datumOption = DatumOption(datum: plutusData)
@@ -654,7 +647,7 @@ public actor BlockFrostChainContext: ChainContext {
             let isSpent = result.consumedByTx != nil
 
             let txIn = TransactionInput(
-                transactionId: try TransactionId(from: .string(txHash)),
+                transactionId: try LedgerValues.hash(hex: txHash, as: TransactionId.self, "Blockfrost TransactionId"),
                 index: try LedgerValues.integer(outputIndex, "Blockfrost output index")
             )
 
@@ -665,9 +658,7 @@ public actor BlockFrostChainContext: ChainContext {
                 if item.unit == "lovelace" {
                     lovelaceAmount = try LedgerValues.integer(text: item.quantity, "Blockfrost lovelace quantity")
                 } else {
-                    let data = Data(hex: item.unit)
-                    let policyId = ScriptHash(payload: data.prefix(SCRIPT_HASH_SIZE))
-                    let assetName = try AssetName(payload: data.suffix(from: SCRIPT_HASH_SIZE))
+                    let (policyId, assetName) = try LedgerValues.asset(unit: item.unit, "Blockfrost asset unit")
                     if multiAssets[policyId] == nil {
                         multiAssets[policyId] = Asset([:])
                     }
@@ -685,12 +676,11 @@ public actor BlockFrostChainContext: ChainContext {
             var script: ScriptType? = nil
 
             if result.dataHash != nil && result.inlineDatum == nil {
-                datumHash = try DatumHash(from: .string(result.dataHash!))
+                datumHash = try LedgerValues.hash(hex: result.dataHash!, as: DatumHash.self, "Blockfrost DatumHash")
             }
 
-            if let inlineDatum = result.inlineDatum,
-               let datumData = Data(hexString: inlineDatum)
-            {
+            if let inlineDatum = result.inlineDatum {
+                let datumData = try LedgerValues.hexBytes(inlineDatum, "Blockfrost inline datum")
                 let plutusData = try PlutusData.fromCBOR(data: datumData)
                 datumOption = DatumOption(datum: plutusData)
             }
@@ -1022,7 +1012,7 @@ public actor BlockFrostChainContext: ChainContext {
         let margin = try LedgerValues.unitInterval(pool.marginCost, "Blockfrost pool margin_cost")
 
         let poolOperator = try PoolOperator(from: poolId)
-        let vrfKeyHash = VrfKeyHash(payload: Data(hex: pool.vrfKey))
+        let vrfKeyHash = try LedgerValues.hash(hex: pool.vrfKey, as: VrfKeyHash.self, "Blockfrost VrfKeyHash")
         let rewardAccount = try Address(from: .string(pool.rewardAccount))
         let rewardAccountHash = RewardAccountHash(payload: rewardAccount.toBytes())
         let poolOwnersList: [VerificationKeyHash] = try pool.owners.map { ownerBech32 in
@@ -1217,10 +1207,7 @@ public actor BlockFrostChainContext: ChainContext {
             // Blockfrost sends extra_entropy as the nonce's hash in hex, or null
             // for the neutral nonce.
             let extraEntropy = try params.extraEntropy.map { hex -> Nonce in
-                guard let hash = Data(hexString: hex) else {
-                    throw CardanoChainError.valueError("Blockfrost proposal extra_entropy \(hex) is not hex")
-                }
-                return try Nonce(hash: hash)
+                try Nonce(hash: LedgerValues.hexBytes(hex, "Blockfrost proposal extra_entropy"))
             }
             let executionCosts: ExUnitPrices?
             if let memPrice = try nonNegative(params.priceMem, "price_mem"),
@@ -1291,7 +1278,7 @@ public actor BlockFrostChainContext: ChainContext {
                 guard let hex = script as? String else {
                     throw CardanoChainError.valueError("Blockfrost constitution script \(script) is not a hash")
                 }
-                return try ScriptHash(from: .string(hex))
+                return try LedgerValues.hash(hex: hex, as: ScriptHash.self, "Blockfrost ScriptHash")
             }()
             govAction = .newConstitution(.init(
                 id: govActionID, constitution: .init(anchor: anchor, scriptHash: scriptHash)))
@@ -1305,7 +1292,9 @@ public actor BlockFrostChainContext: ChainContext {
             let withdrawalsData = try withdrawalsResponse.ok.body.json
             var withdrawals: [RewardAccount: Coin] = [:]
             for item in withdrawalsData {
-                withdrawals[RewardAccount(Data(hexString: item.stakeAddress) ?? Data())] = try LedgerValues.integer(
+                // Blockfrost names the account by its bech32 stake address.
+                let account = try Address.fromBech32(item.stakeAddress).toBytes()
+                withdrawals[account] = try LedgerValues.integer(
                     text: item.amount, "Blockfrost proposal withdrawal amount")
             }
             govAction = .treasuryWithdrawalsAction(.init(withdrawals: withdrawals, policyHash: nil))
@@ -1415,12 +1404,12 @@ public actor BlockFrostChainContext: ChainContext {
         } else if member.ccColdHasScript {
             coldCredential = CommitteeColdCredential(
                 credential: .scriptHash(
-                    ScriptHash(payload: Data(hex: member.ccColdHex)))
+                    try LedgerValues.hash(hex: member.ccColdHex, as: ScriptHash.self, "Blockfrost ScriptHash"))
             )
         } else {
             coldCredential = CommitteeColdCredential(
                 credential: .verificationKeyHash(
-                    VerificationKeyHash(payload: Data(hex: member.ccColdHex)))
+                    try LedgerValues.hash(hex: member.ccColdHex, as: VerificationKeyHash.self, "Blockfrost VerificationKeyHash"))
             )
         }
 
@@ -1430,12 +1419,12 @@ public actor BlockFrostChainContext: ChainContext {
         } else if let hotHex = member.ccHotHex {
             if member.ccHotHasScript ?? false {
                 hotCredential = CommitteeHotCredential(
-                    credential: .scriptHash(ScriptHash(payload: Data(hex: hotHex)))
+                    credential: .scriptHash(try LedgerValues.hash(hex: hotHex, as: ScriptHash.self, "Blockfrost ScriptHash"))
                 )
             } else {
                 hotCredential = CommitteeHotCredential(
                     credential: .verificationKeyHash(
-                        VerificationKeyHash(payload: Data(hex: hotHex)))
+                        try LedgerValues.hash(hex: hotHex, as: VerificationKeyHash.self, "Blockfrost VerificationKeyHash"))
                 )
             }
         } else {
@@ -1532,9 +1521,7 @@ public actor BlockFrostChainContext: ChainContext {
                     dRepVotes.append(.init(credential: cred, vote: vote))
                 }
             case .spo:
-                if let pool = try? PoolOperator(from: .string(row.voter)) {
-                    stakePoolVotes.append(.init(poolOperator: pool, vote: vote))
-                }
+                stakePoolVotes.append(.init(poolOperator: try PoolOperator(from: .string(row.voter)), vote: vote))
             }
         }
 
@@ -1563,7 +1550,7 @@ public actor BlockFrostChainContext: ChainContext {
         var results: [GovActionVotes] = []
         for proposal in proposals {
             let govActionID = GovActionID(
-                transactionID: TransactionId(payload: Data(hex: proposal.txHash)),
+                transactionID: try LedgerValues.hash(hex: proposal.txHash, as: TransactionId.self, "Blockfrost TransactionId"),
                 govActionIndex: try proposal.certIndex.checked("Blockfrost proposal cert_index")
             )
             if let votes = try? await govActionVotes(govActionID: govActionID) {
@@ -1616,7 +1603,7 @@ public actor BlockFrostChainContext: ChainContext {
                     guard !concluded else { continue }
                     open.append(OpenGovAction(
                         govActionId: GovActionID(
-                            transactionID: TransactionId(payload: Data(hex: detail.txHash)),
+                            transactionID: try LedgerValues.hash(hex: detail.txHash, as: TransactionId.self, "Blockfrost TransactionId"),
                             govActionIndex: try detail.certIndex.checked("Blockfrost proposal cert_index")
                         ),
                         type: Self.govActionCode(detail.governanceType),
@@ -1652,15 +1639,15 @@ public actor BlockFrostChainContext: ChainContext {
 
         let members: [CommitteeStateInfo.Member] = try committee.members.map { m in
             let cold: CommitteeColdCredential = m.ccColdHasScript
-                ? CommitteeColdCredential(credential: .scriptHash(ScriptHash(payload: Data(hex: m.ccColdHex))))
-                : CommitteeColdCredential(credential: .verificationKeyHash(VerificationKeyHash(payload: Data(hex: m.ccColdHex))))
+                ? CommitteeColdCredential(credential: .scriptHash(try LedgerValues.hash(hex: m.ccColdHex, as: ScriptHash.self, "Blockfrost ScriptHash")))
+                : CommitteeColdCredential(credential: .verificationKeyHash(try LedgerValues.hash(hex: m.ccColdHex, as: VerificationKeyHash.self, "Blockfrost VerificationKeyHash")))
 
-            let hot: CommitteeHotCredential? = {
+            let hot: CommitteeHotCredential? = try {
                 guard let hotHex = m.ccHotHex else { return nil }
                 let isScript = m.ccHotHasScript ?? false
                 return isScript
-                    ? CommitteeHotCredential(credential: .scriptHash(ScriptHash(payload: Data(hex: hotHex))))
-                    : CommitteeHotCredential(credential: .verificationKeyHash(VerificationKeyHash(payload: Data(hex: hotHex))))
+                    ? CommitteeHotCredential(credential: .scriptHash(try LedgerValues.hash(hex: hotHex, as: ScriptHash.self, "Blockfrost ScriptHash")))
+                    : CommitteeHotCredential(credential: .verificationKeyHash(try LedgerValues.hash(hex: hotHex, as: VerificationKeyHash.self, "Blockfrost VerificationKeyHash")))
             }()
 
             let status: CommitteeMemberStatus = {
@@ -1699,9 +1686,6 @@ extension BlockFrostChainContext {
             throw CardanoChainError.blockfrostError("Transaction \(hash) not found: \(response)")
         }
         let cbor = try ok.body.json.cbor
-        guard let data = Data(hexString: cbor) else {
-            throw CardanoChainError.blockfrostError("Transaction \(hash) CBOR is not hex")
-        }
-        return data
+        return try LedgerValues.hexBytes(cbor, "Blockfrost transaction \(hash) CBOR")
     }
 }

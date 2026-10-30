@@ -321,31 +321,28 @@ public actor CardanoCliChainContext: ChainContext {
         }
 
         if scriptType == "PlutusScriptV1" {
-            guard let cborHex = script["cborHex"] as? String,
-                let cborData = Data(hexString: cborHex)
-            else {
+            guard let cborHex = script["cborHex"] as? String else {
                 throw CardanoChainError.valueError("Invalid PlutusScriptV1 CBOR")
             }
+            let cborData = try LedgerValues.hexBytes(cborHex, "cardano-cli PlutusScriptV1 cborHex")
 
             // Create PlutusV1Script from CBOR
             let v1script = PlutusV1Script(data: cborData)
             return .plutusV1Script(v1script)
         } else if scriptType == "PlutusScriptV2" {
-            guard let cborHex = script["cborHex"] as? String,
-                let cborData = Data(hexString: cborHex)
-            else {
+            guard let cborHex = script["cborHex"] as? String else {
                 throw CardanoChainError.valueError("Invalid PlutusScriptV2 CBOR")
             }
+            let cborData = try LedgerValues.hexBytes(cborHex, "cardano-cli PlutusScriptV2 cborHex")
 
             // Create PlutusV2Script from CBOR
             let v2script = PlutusV2Script(data: cborData)
             return .plutusV2Script(v2script)
         } else if scriptType == "PlutusScriptV3" {
-            guard let cborHex = script["cborHex"] as? String,
-                let cborData = Data(hexString: cborHex)
-            else {
+            guard let cborHex = script["cborHex"] as? String else {
                 throw CardanoChainError.valueError("Invalid PlutusScriptV3 CBOR")
             }
+            let cborData = try LedgerValues.hexBytes(cborHex, "cardano-cli PlutusScriptV3 cborHex")
 
             // Create PlutusV3Script from CBOR
             let v3script = PlutusV3Script(data: cborData)
@@ -429,7 +426,7 @@ public actor CardanoCliChainContext: ChainContext {
                 let policyId = asset
                 guard let assets = amount as? [String: Any] else { continue }
                 for (assetHexName, assetAmount) in assets {
-                    let policy = try ScriptHash(from: .string(policyId))
+                    let policy = try LedgerValues.hash(hex: policyId, as: ScriptHash.self, "cardano-cli ScriptHash")
                     let assetName = AssetName(from: assetHexName)
                     if multiAsset[policy] == nil {
                         multiAsset[policy] = Asset([:])
@@ -444,13 +441,12 @@ public actor CardanoCliChainContext: ChainContext {
 
         var datumHash: DatumHash? = nil
         if let datumHashStr = utxoEntry["datumhash"] as? String {
-            datumHash = try DatumHash(from: .string(datumHashStr))
+            datumHash = try LedgerValues.hash(hex: datumHashStr, as: DatumHash.self, "cardano-cli DatumHash")
         }
 
         var datumOption: DatumOption? = nil
-        if let datumStr = utxoEntry["datum"] as? String,
-            let datumData = Data(hexString: datumStr)
-        {
+        if let datumStr = utxoEntry["datum"] as? String {
+            let datumData = try LedgerValues.hexBytes(datumStr, "cardano-cli UTxO datum")
             datumOption = try DatumOption.fromCBOR(data: datumData)
         } else if let inlineDatum = utxoEntry["inlineDatum"] as? [AnyHashable: Any] {
             let primitiveDict = try Primitive.fromAny(inlineDatum)
@@ -1037,10 +1033,10 @@ public actor CardanoCliChainContext: ChainContext {
             if let hotKeyHash = contents["keyHash"] as? String {
                 hotCredential = CommitteeHotCredential(
                     credential: .verificationKeyHash(
-                        VerificationKeyHash(payload: hotKeyHash.hexStringToData)))
+                        try LedgerValues.hash(hex: hotKeyHash, as: VerificationKeyHash.self, "cardano-cli VerificationKeyHash")))
             } else if let hotScriptHash = contents["scriptHash"] as? String {
                 hotCredential = CommitteeHotCredential(
-                    credential: .scriptHash(ScriptHash(payload: hotScriptHash.hexStringToData)))
+                    credential: .scriptHash(try LedgerValues.hash(hex: hotScriptHash, as: ScriptHash.self, "cardano-cli ScriptHash")))
             }
         }
 
@@ -1101,12 +1097,12 @@ public actor CardanoCliChainContext: ChainContext {
             let hex = String(coldKey.dropFirst("keyHash-".count))
             coldCredential = CommitteeColdCredential(
                 credential: .verificationKeyHash(
-                    VerificationKeyHash(payload: hex.hexStringToData))
+                    try LedgerValues.hash(hex: hex, as: VerificationKeyHash.self, "cardano-cli VerificationKeyHash"))
             )
         } else if coldKey.hasPrefix("scriptHash-") {
             let hex = String(coldKey.dropFirst("scriptHash-".count))
             coldCredential = CommitteeColdCredential(
-                credential: .scriptHash(ScriptHash(payload: hex.hexStringToData))
+                credential: .scriptHash(try LedgerValues.hash(hex: hex, as: ScriptHash.self, "cardano-cli ScriptHash"))
             )
         } else {
             throw CardanoChainError.valueError(
@@ -1187,14 +1183,14 @@ public actor CardanoCliChainContext: ChainContext {
 
         if let pairs = json as? [[Any]] {
             for pair in pairs where pair.count >= 2 {
-                guard let drep = parseDRepKey(pair[0]),
-                      let stake = try parseLovelaceUInt(pair[1]) else { continue }
+                let drep = try parseDRepKey(pair[0])
+                guard let stake = try parseLovelaceUInt(pair[1]) else { continue }
                 entries.append(SwiftCardanoNetwork.DRepStakeEntry(drep: drep, stake: stake))
             }
         } else if let dict = json as? [String: Any] {
             for (key, value) in dict {
-                guard let drep = parseDRepKey(key),
-                      let stake = try parseLovelaceUInt(value) else { continue }
+                let drep = try parseDRepKey(key)
+                guard let stake = try parseLovelaceUInt(value) else { continue }
                 entries.append(SwiftCardanoNetwork.DRepStakeEntry(drep: drep, stake: stake))
             }
         } else {
@@ -1219,14 +1215,14 @@ public actor CardanoCliChainContext: ChainContext {
 
         if let pairs = json as? [[Any]] {
             for pair in pairs where pair.count >= 2 {
-                guard let pool = parsePoolKey(pair[0]),
-                      let stake = try parseLovelaceUInt(pair[1]) else { continue }
+                let pool = try parsePoolKey(pair[0])
+                guard let stake = try parseLovelaceUInt(pair[1]) else { continue }
                 entries.append(SwiftCardanoNetwork.SPOStakeEntry(poolOperator: pool, stake: stake))
             }
         } else if let dict = json as? [String: Any] {
             for (key, value) in dict {
-                guard let pool = parsePoolKey(key),
-                      let stake = try parseLovelaceUInt(value) else { continue }
+                let pool = try parsePoolKey(key)
+                guard let stake = try parseLovelaceUInt(value) else { continue }
                 entries.append(SwiftCardanoNetwork.SPOStakeEntry(poolOperator: pool, stake: stake))
             }
         } else {
@@ -1251,7 +1247,7 @@ public actor CardanoCliChainContext: ChainContext {
 
         for (coldKey, anyEntry) in committeeDict {
             guard let entry = anyEntry as? [String: Any] else { continue }
-            guard let cold = parseCommitteeColdKey(coldKey) else { continue }
+            let cold = try parseCommitteeColdKey(coldKey)
 
             var hot: CommitteeHotCredential? = nil
             if let hotKey = entry["hotCredsAuthStatus"] as? [String: Any] {
@@ -1259,13 +1255,13 @@ public actor CardanoCliChainContext: ChainContext {
                     if let hexStr = memberAuthorizedHotCredential["keyHash"] as? String {
                         hot = CommitteeHotCredential(
                             credential: .verificationKeyHash(
-                                VerificationKeyHash(payload: hexStr.hexStringToData)
+                                try LedgerValues.hash(hex: hexStr, as: VerificationKeyHash.self, "cardano-cli VerificationKeyHash")
                             )
                         )
                     } else if let hexStr = memberAuthorizedHotCredential["scriptHash"] as? String {
                         hot = CommitteeHotCredential(
                             credential: .scriptHash(
-                                ScriptHash(payload: hexStr.hexStringToData)
+                                try LedgerValues.hash(hex: hexStr, as: ScriptHash.self, "cardano-cli ScriptHash")
                             )
                         )
                     }
@@ -1343,7 +1339,7 @@ public actor CardanoCliChainContext: ChainContext {
             return nil
         }
         return GovActionID(
-            transactionID: TransactionId(payload: txId.hexStringToData),
+            transactionID: try LedgerValues.hash(hex: txId, as: TransactionId.self, "cardano-cli TransactionId"),
             govActionIndex: try idx.checked("cardano-cli govActionIx")
         )
     }
@@ -1370,9 +1366,9 @@ public actor CardanoCliChainContext: ChainContext {
         let anchor = try parseAnchor(proposalProcedure["anchor"])
 
         // Parse vote arrays.
-        let committeeVotes = parseCommitteeVotes(proposal["committeeVotes"])
-        let dRepVotes = parseDRepVotes(proposal["dRepVotes"])
-        let stakePoolVotes = parseStakePoolVotes(proposal["stakePoolVotes"])
+        let committeeVotes = try parseCommitteeVotes(proposal["committeeVotes"])
+        let dRepVotes = try parseDRepVotes(proposal["dRepVotes"])
+        let stakePoolVotes = try parseStakePoolVotes(proposal["stakePoolVotes"])
 
         // Epochs.
         let proposedIn = (proposal["proposedIn"] as? NSNumber)?.uint64Value
@@ -1418,12 +1414,12 @@ public actor CardanoCliChainContext: ChainContext {
         switch tag {
         case "ParameterChange":
             // contents = [prevGovActionId, ProtocolParamUpdate, policyHash]
-            let policyHash: ScriptHash? = {
+            let policyHash: ScriptHash? = try {
                 guard contents.count > 2,
                       let hex = contents[2] as? String,
                       !hex.isEmpty
                 else { return nil }
-                return try? ScriptHash(from: .string(hex))
+                return try LedgerValues.hash(hex: hex, as: ScriptHash.self, "cardano-cli ScriptHash")
             }()
             let update: ProtocolParamUpdate = try {
                 guard contents.count >= 2,
@@ -1454,20 +1450,19 @@ public actor CardanoCliChainContext: ChainContext {
             var withdrawals: [RewardAccount: Coin] = [:]
             if let pairs = contents.first as? [[Any]] {
                 for entry in pairs where entry.count >= 2 {
-                    guard let credential = entry[0] as? [String: Any],
-                          let lovelace = try GovernanceParsing.parseLovelace(entry[1])
+                    guard let lovelace = try GovernanceParsing.parseLovelace(entry[1])
                     else { continue }
-                    guard let returnAddr = buildRewardAccountFromCredential(credential)
+                    guard let returnAddr = try parseRewardAccount(entry[0])
                     else { continue }
                     withdrawals[returnAddr] = Coin(lovelace)
                 }
             }
-            let policyHash: ScriptHash? = {
+            let policyHash: ScriptHash? = try {
                 guard contents.count > 1,
                       let hex = contents[1] as? String,
                       !hex.isEmpty
                 else { return nil }
-                return try? ScriptHash(from: .string(hex))
+                return try LedgerValues.hash(hex: hex, as: ScriptHash.self, "cardano-cli ScriptHash")
             }()
             return .treasuryWithdrawalsAction(TreasuryWithdrawalsAction(
                 withdrawals: withdrawals,
@@ -1484,15 +1479,13 @@ public actor CardanoCliChainContext: ChainContext {
             var credentialEpochs: [CommitteeColdCredential: UInt64] = [:]
             if contents.count >= 2, let removed = contents[1] as? [Any] {
                 for entry in removed {
-                    if let cred = parseColdCredential(entry) {
-                        coldCredentials.insert(cred)
-                    }
+                    coldCredentials.insert(try parseColdCredential(entry))
                 }
             }
             if contents.count >= 3, let added = contents[2] as? [String: Any] {
                 for (key, value) in added {
-                    guard let cred = parseCommitteeColdKey(key),
-                          let epoch = (value as? NSNumber)?.uint64Value
+                    let cred = try parseCommitteeColdKey(key)
+                    guard let epoch = (value as? NSNumber)?.uint64Value
                               ?? (value as? Int).map(UInt64.init)
                     else { continue }
                     coldCredentials.insert(cred)
@@ -1538,10 +1531,10 @@ public actor CardanoCliChainContext: ChainContext {
             let anchor = try LedgerValues.required(
                 LedgerValues.anchor(json: constitution["anchor"], "cardano-cli constitution anchor"),
                 "cardano-cli constitution anchor")
-            let scriptHash: ScriptHash? = {
+            let scriptHash: ScriptHash? = try {
                 guard let hex = constitution["script"] as? String, !hex.isEmpty
                 else { return nil }
-                return try? ScriptHash(from: .string(hex))
+                return try LedgerValues.hash(hex: hex, as: ScriptHash.self, "cardano-cli ScriptHash")
             }()
             return .newConstitution(NewConstitution(
                 id: id,
@@ -1715,216 +1708,111 @@ public actor CardanoCliChainContext: ChainContext {
         return u
     }
 
-    /// Build a `RewardAccount` from a bare cardano-cli credential blob
-    /// (`{keyHash: "..."}` or `{scriptHash: "..."}`). The network prefix is
-    /// fixed to mainnet — TreasuryWithdrawals is mainnet-only in practice
-    /// and the chain uses the prefix purely for credential typing.
-    ///
-    /// Header byte: high nibble 0xE (stake key) / 0xF (stake script);
-    ///              low  nibble 0x1 (mainnet)   / 0x0 (testnet).
-    private func buildRewardAccountFromCredential(_ dict: [String: Any]) -> RewardAccount? {
-        if let hex = dict["keyHash"] as? String {
-            // 0xE1 = mainnet + stake key reward account header byte.
-            var data = Data([0xE1])
-            data.append(hex.hexStringToData)
-            return RewardAccount(data)
-        }
-        if let hex = dict["scriptHash"] as? String {
-            // 0xF1 = mainnet + stake script reward account header byte.
-            var data = Data([0xF1])
-            data.append(hex.hexStringToData)
-            return RewardAccount(data)
-        }
-        return nil
+    /// A committee cold credential written as `{keyHash | scriptHash: hex}`
+    /// or as a `keyHash-<hex>` / `scriptHash-<hex>` map key.
+    private func parseColdCredential(_ any: Any) throws -> CommitteeColdCredential {
+        CommitteeColdCredential(credential: try LedgerValues.credential(json: any, "cardano-cli committee cold credential"))
     }
 
-    /// Parse a cardano-cli credential blob — used both for the standalone
-    /// "remove" credential entries in `UpdateCommittee` and for the keys
-    /// inside the "add" map (the latter goes through `parseCommitteeColdKey`).
-    private func parseColdCredential(_ any: Any) -> CommitteeColdCredential? {
-        if let key = any as? String { return parseCommitteeColdKey(key) }
-        guard let dict = any as? [String: Any] else { return nil }
-        if let hex = dict["keyHash"] as? String {
-            return CommitteeColdCredential(
-                credential: .verificationKeyHash(
-                    VerificationKeyHash(payload: hex.hexStringToData)
-                )
-            )
-        }
-        if let hex = dict["scriptHash"] as? String {
-            return CommitteeColdCredential(
-                credential: .scriptHash(ScriptHash(payload: hex.hexStringToData))
-            )
-        }
-        return nil
-    }
-
+    /// A reward account: the ledger's `{network, credential}` object, or its
+    /// 29 bytes in hex.
     private func parseRewardAccount(_ any: Any?) throws -> RewardAccount? {
+        guard let any, !(any is NSNull) else { return nil }
         if let hex = any as? String {
-            return RewardAccount(hex.hexStringToData)
-        }
-        if let dict = any as? [String: Any] {
-            // {"credential":{"keyHash":"..."},"network":"Mainnet"} shape — best-effort.
-            // Header byte: high nibble = 0xE (stake key) or 0xF (stake script);
-            //              low nibble  = 0x1 (mainnet) or 0x0 (testnet).
-            let network = (dict["network"] as? String)?.lowercased() ?? "mainnet"
-            let networkBit: UInt8 = network == "mainnet" ? 0x01 : 0x00
-            if let cred = dict["credential"] as? [String: Any] {
-                if let kh = cred["keyHash"] as? String {
-                    var d = Data([0xE0 | networkBit])
-                    d.append(kh.hexStringToData)
-                    return RewardAccount(d)
-                } else if let sh = cred["scriptHash"] as? String {
-                    var d = Data([0xF0 | networkBit])
-                    d.append(sh.hexStringToData)
-                    return RewardAccount(d)
-                }
+            let bytes = try LedgerValues.hexBytes(hex, "cardano-cli reward account")
+            guard bytes.count == 29 else {
+                throw CardanoChainError.valueError("cardano-cli reward account \(hex) is not 29 bytes")
             }
+            return bytes
         }
-        return nil
+        return try LedgerValues.rewardAccount(json: any, "cardano-cli reward account")
     }
 
     private func parseAnchor(_ any: Any?) throws -> Anchor? {
         try LedgerValues.anchor(json: any, "cardano-cli proposal anchor")
     }
 
-    private func parseDRepKey(_ any: Any) -> DRep? {
+    /// A DRep as cardano-cli writes one: a `keyHash-<hex>` / `scriptHash-<hex>`
+    /// key (with or without a `drep-` prefix), `alwaysAbstain` /
+    /// `alwaysNoConfidence`, or a `{keyHash | scriptHash}` object.
+    private func parseDRepKey(_ any: Any) throws -> DRep {
         if let s = any as? String {
             // `cardano-cli query drep-stake-distribution` emits keys with a
             // `drep-` prefix (`drep-keyHash-...`, `drep-alwaysAbstain`, etc).
-            // Strip it so the rest of the matching is independent of the
-            // command that produced the JSON.
             let stripped = s.hasPrefix("drep-") ? String(s.dropFirst("drep-".count)) : s
-            if stripped.hasPrefix("keyHash-") {
-                let hex = String(stripped.dropFirst("keyHash-".count))
-                return DRep(credential: .verificationKeyHash(
-                    VerificationKeyHash(payload: hex.hexStringToData)
-                ))
-            } else if stripped.hasPrefix("scriptHash-") {
-                let hex = String(stripped.dropFirst("scriptHash-".count))
-                return DRep(credential: .scriptHash(
-                    ScriptHash(payload: hex.hexStringToData)
-                ))
-            } else if stripped == "alwaysAbstain" || stripped == "AlwaysAbstain" {
-                return DRep(credential: .alwaysAbstain)
-            } else if stripped == "alwaysNoConfidence" || stripped == "AlwaysNoConfidence" {
-                return DRep(credential: .alwaysNoConfidence)
+            switch stripped {
+            case "alwaysAbstain", "AlwaysAbstain": return DRep(credential: .alwaysAbstain)
+            case "alwaysNoConfidence", "AlwaysNoConfidence": return DRep(credential: .alwaysNoConfidence)
+            default:
+                return try drep(LedgerValues.credential(json: stripped, "cardano-cli DRep"))
             }
         }
-        if let dict = any as? [String: Any] {
-            if let hex = dict["keyHash"] as? String {
-                return DRep(credential: .verificationKeyHash(
-                    VerificationKeyHash(payload: hex.hexStringToData)
-                ))
-            }
-            if let hex = dict["scriptHash"] as? String {
-                return DRep(credential: .scriptHash(
-                    ScriptHash(payload: hex.hexStringToData)
-                ))
-            }
-        }
-        return nil
+        return try drep(LedgerValues.credential(json: any, "cardano-cli DRep"))
     }
 
-    private func parsePoolKey(_ any: Any) -> PoolOperator? {
+    private func drep(_ credential: CredentialType) -> DRep {
+        switch credential {
+        case .verificationKeyHash(let hash): DRep(credential: .verificationKeyHash(hash))
+        case .scriptHash(let hash): DRep(credential: .scriptHash(hash))
+        }
+    }
+
+    /// A stake pool: bech32 `pool…` (the gov-state proposal body), or the pool
+    /// key hash in hex, bare or as `keyHash-<hex>` (the stake distribution).
+    private func parsePoolKey(_ any: Any) throws -> PoolOperator {
+        let text: String
         if let s = any as? String {
-            // `cardano-cli query spo-stake-distribution` emits raw hex
-            // (sometimes via a `keyHash-` prefix); the gov-state proposal
-            // body emits bech32 (`pool1...`). Try bech32 first, then fall
-            // back to hex bytes.
-            let stripped = s.hasPrefix("keyHash-") ? String(s.dropFirst("keyHash-".count)) : s
-            if let pool = try? PoolOperator(from: .string(stripped)) {
-                return pool
-            }
-            let bytes = stripped.hexStringToData
-            if !bytes.isEmpty {
-                return try? PoolOperator(from: bytes)
-            }
-            return nil
+            text = s.hasPrefix("keyHash-") ? String(s.dropFirst("keyHash-".count)) : s
+        } else if let dict = any as? [String: Any], dict.count == 1, let hex = dict["keyHash"] as? String {
+            text = hex
+        } else {
+            throw CardanoChainError.valueError("cardano-cli stake pool \(any) is not a pool id")
         }
-        if let dict = any as? [String: Any], let hex = dict["keyHash"] as? String {
-            let bytes = hex.hexStringToData
-            if !bytes.isEmpty {
-                return try? PoolOperator(from: bytes)
-            }
+        if text.hasPrefix("pool") {
+            return try PoolOperator(from: .string(text))
         }
-        return nil
+        return PoolOperator(poolKeyHash: try LedgerValues.hash(hex: text, as: PoolKeyHash.self, "cardano-cli pool key hash"))
     }
 
-    private func parseCommitteeColdKey(_ key: String) -> CommitteeColdCredential? {
-        if key.hasPrefix("keyHash-") {
-            let hex = String(key.dropFirst("keyHash-".count))
-            return CommitteeColdCredential(
-                credential: .verificationKeyHash(VerificationKeyHash(payload: hex.hexStringToData))
-            )
-        } else if key.hasPrefix("scriptHash-") {
-            let hex = String(key.dropFirst("scriptHash-".count))
-            return CommitteeColdCredential(
-                credential: .scriptHash(ScriptHash(payload: hex.hexStringToData))
-            )
-        }
-        return nil
+    private func parseCommitteeColdKey(_ key: String) throws -> CommitteeColdCredential {
+        CommitteeColdCredential(credential: try LedgerValues.credential(json: key, "cardano-cli committee cold key"))
     }
 
-    private func parseCommitteeHotKey(_ key: String) -> CommitteeHotCredential? {
-        if key.hasPrefix("keyHash-") {
-            let hex = String(key.dropFirst("keyHash-".count))
-            return CommitteeHotCredential(
-                credential: .verificationKeyHash(VerificationKeyHash(payload: hex.hexStringToData))
-            )
-        } else if key.hasPrefix("scriptHash-") {
-            let hex = String(key.dropFirst("scriptHash-".count))
-            return CommitteeHotCredential(
-                credential: .scriptHash(ScriptHash(payload: hex.hexStringToData))
-            )
-        }
-        return nil
+    private func parseCommitteeHotKey(_ key: String) throws -> CommitteeHotCredential {
+        CommitteeHotCredential(credential: try LedgerValues.credential(json: key, "cardano-cli committee hot key"))
     }
 
     private func parseLovelace(_ any: Any) throws -> Coin? {
         try GovernanceParsing.parseLovelace(any)
     }
 
-    private func parseVoteValue(_ any: Any) -> Vote? {
-        GovernanceParsing.parseVote(any)
+    private func parseVoteValue(_ any: Any) throws -> Vote {
+        guard let vote = GovernanceParsing.parseVote(any) else {
+            throw CardanoChainError.valueError("cardano-cli vote \(any) is not a vote")
+        }
+        return vote
     }
 
-    private func parseCommitteeVotes(_ any: Any?) -> [CommitteeVote] {
+    private func parseCommitteeVotes(_ any: Any?) throws -> [CommitteeVote] {
         guard let dict = any as? [String: Any] else { return [] }
-        return dict.compactMap { (k, v) -> CommitteeVote? in
-            guard let cred = parseCommitteeHotKey(k),
-                  let vote = parseVoteValue(v) else { return nil }
-            return CommitteeVote(credential: cred, vote: vote)
+        return try dict.map { (k, v) in
+            CommitteeVote(credential: try parseCommitteeHotKey(k), vote: try parseVoteValue(v))
         }
     }
 
-    private func parseDRepVotes(_ any: Any?) -> [DRepVote] {
+    private func parseDRepVotes(_ any: Any?) throws -> [DRepVote] {
         guard let dict = any as? [String: Any] else { return [] }
-        return dict.compactMap { (k, v) -> DRepVote? in
-            guard let vote = parseVoteValue(v) else { return nil }
-            let cred: DRepCredential
-            if k.hasPrefix("keyHash-") {
-                let hex = String(k.dropFirst("keyHash-".count))
-                cred = DRepCredential(credential: .verificationKeyHash(
-                    VerificationKeyHash(payload: hex.hexStringToData)
-                ))
-            } else if k.hasPrefix("scriptHash-") {
-                let hex = String(k.dropFirst("scriptHash-".count))
-                cred = DRepCredential(credential: .scriptHash(
-                    ScriptHash(payload: hex.hexStringToData)
-                ))
-            } else {
-                return nil
-            }
-            return DRepVote(credential: cred, vote: vote)
+        return try dict.map { (k, v) in
+            DRepVote(
+                credential: DRepCredential(credential: try LedgerValues.credential(json: k, "cardano-cli DRep voter")),
+                vote: try parseVoteValue(v))
         }
     }
 
-    private func parseStakePoolVotes(_ any: Any?) -> [StakePoolVote] {
+    private func parseStakePoolVotes(_ any: Any?) throws -> [StakePoolVote] {
         guard let dict = any as? [String: Any] else { return [] }
-        return dict.compactMap { (k, v) -> StakePoolVote? in
-            guard let pool = parsePoolKey(k), let vote = parseVoteValue(v) else { return nil }
-            return StakePoolVote(poolOperator: pool, vote: vote)
+        return try dict.map { (k, v) in
+            StakePoolVote(poolOperator: try parsePoolKey(k), vote: try parseVoteValue(v))
         }
     }
 }

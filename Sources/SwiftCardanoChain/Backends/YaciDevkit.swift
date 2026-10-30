@@ -653,7 +653,7 @@ public actor YaciDevkitChainContext: ChainContext {
         for row in rows {
             guard let txHash = row.txHash, let outputIndex = row.outputIndex else { continue }
             let input = TransactionInput(
-                transactionId: try TransactionId(from: .string(txHash)),
+                transactionId: try LedgerValues.hash(hex: txHash, as: TransactionId.self, "Yaci TransactionId"),
                 index: try LedgerValues.integer(outputIndex, "Yaci output index")
             )
             let units: [(unit: String, quantity: BigInt)] = try (row.amount ?? []).compactMap { item in
@@ -748,12 +748,7 @@ public actor YaciDevkitChainContext: ChainContext {
                 continue
             }
             // The unit is `<policy id><asset name>`, hex encoded.
-            let data = Data(hex: unit)
-            guard data.count >= SCRIPT_HASH_SIZE else {
-                throw CardanoChainError.yaciDevkitError("Asset unit \(unit) is shorter than a policy id")
-            }
-            let policyId = ScriptHash(payload: data.prefix(SCRIPT_HASH_SIZE))
-            let assetName = try AssetName(payload: data.suffix(from: SCRIPT_HASH_SIZE))
+            let (policyId, assetName) = try LedgerValues.asset(unit: unit, "Yaci asset unit")
             if multiAsset[policyId] == nil {
                 multiAsset[policyId] = Asset([:])
             }
@@ -763,9 +758,10 @@ public actor YaciDevkitChainContext: ChainContext {
         var datumHash: DatumHash? = nil
         var datumOption: DatumOption? = nil
         if let dataHash, !dataHash.isEmpty, inlineDatum == nil {
-            datumHash = try DatumHash(from: .string(dataHash))
+            datumHash = try LedgerValues.hash(hex: dataHash, as: DatumHash.self, "Yaci DatumHash")
         }
-        if let inlineDatum, let datumData = Data(hexString: inlineDatum), !datumData.isEmpty {
+        if let inlineDatum, !inlineDatum.isEmpty {
+            let datumData = try LedgerValues.hexBytes(inlineDatum, "Yaci inline datum")
             let plutusData = try PlutusData.fromCBOR(data: datumData)
             datumOption = DatumOption(datum: plutusData)
         }
@@ -798,9 +794,10 @@ public actor YaciDevkitChainContext: ChainContext {
             let cbor = try await perform("get the CBOR of script \(scriptHash)") {
                 try await api.client.getScriptCborByHash(path: .init(scriptHash: scriptHash)).ok.body.json
             }
-            guard let hex = cbor.cbor, let bytes = Data(hexString: hex), !bytes.isEmpty else {
+            guard let hex = cbor.cbor, !hex.isEmpty else {
                 throw CardanoChainError.yaciDevkitError("Script \(scriptHash) has no CBOR")
             }
+            let bytes = try LedgerValues.hexBytes(hex, "Yaci script \(scriptHash) CBOR")
             return try Self.plutusScript(
                 type: info._type?.rawValue ?? "", bytes: bytes, expectedHash: scriptHash
             )
@@ -1069,11 +1066,12 @@ public actor YaciDevkitChainContext: ChainContext {
         case .noConfidence:
             return DRep(credential: .alwaysNoConfidence)
         case .scripthash:
-            guard let hash = latest.drepHash, let payload = Data(hexString: hash) else { return nil }
-            return DRep(credential: .scriptHash(ScriptHash(payload: payload)))
+            let hash = try LedgerValues.required(latest.drepHash, "Yaci delegation drep_hash")
+            return DRep(credential: .scriptHash(try LedgerValues.hash(hex: hash, as: ScriptHash.self, "Yaci delegation drep_hash")))
         case .addrKeyhash:
-            guard let hash = latest.drepHash, let payload = Data(hexString: hash) else { return nil }
-            return DRep(credential: .verificationKeyHash(VerificationKeyHash(payload: payload)))
+            let hash = try LedgerValues.required(latest.drepHash, "Yaci delegation drep_hash")
+            return DRep(credential: .verificationKeyHash(
+                try LedgerValues.hash(hex: hash, as: VerificationKeyHash.self, "Yaci delegation drep_hash")))
         case nil:
             guard let id = latest.drepId else { return nil }
             return try? DRep(from: id)
@@ -1092,10 +1090,10 @@ public actor YaciDevkitChainContext: ChainContext {
     /// Normalise a bech32 or hex pool ID to a `PoolOperator`.
     static func poolOperator(from poolId: String) throws -> PoolOperator {
         if let pool = try? PoolOperator(from: poolId) { return pool }
-        if let data = Data(hexString: poolId), data.count == POOL_KEY_HASH_SIZE {
-            return try PoolOperator(from: data)
+        guard let hash = try? LedgerValues.hash(hex: poolId, as: PoolKeyHash.self, "pool ID") else {
+            throw CardanoChainError.invalidArgument("Invalid pool ID: \(poolId)")
         }
-        throw CardanoChainError.invalidArgument("Invalid pool ID: \(poolId)")
+        return PoolOperator(poolKeyHash: hash)
     }
 
     // MARK: - Stake pools
@@ -1177,9 +1175,11 @@ public actor YaciDevkitChainContext: ChainContext {
 
         var result: [String: PoolParams] = [:]
         for (poolId, value) in pools {
-            guard let pool = value as? [String: Any] else { continue }
+            guard let pool = value as? [String: Any] else {
+                throw CardanoChainError.valueError("Yaci genesis pool \(poolId) is not an object")
+            }
             let id = ((pool["publicKey"] as? String) ?? poolId).lowercased()
-            guard let idData = Data(hexString: id), !idData.isEmpty else { continue }
+            let poolKeyHash = try LedgerValues.hash(hex: id, as: PoolKeyHash.self, "Yaci genesis pool id")
 
             let owners: [VerificationKeyHash] = ((pool["owners"] as? [String]) ?? [])
                 .compactMap { try? Self.poolOwner($0) }
@@ -1198,8 +1198,10 @@ public actor YaciDevkitChainContext: ChainContext {
             }
 
             result[id] = PoolParams(
-                poolOperator: PoolKeyHash(payload: idData),
-                vrfKeyHash: VrfKeyHash(payload: Data(hex: (pool["vrf"] as? String) ?? "")),
+                poolOperator: poolKeyHash,
+                vrfKeyHash: try LedgerValues.hash(
+                    hex: LedgerValues.required(pool["vrf"] as? String, "Yaci genesis pool vrf"), as: VrfKeyHash.self,
+                    "Yaci genesis pool vrf"),
                 pledge: try LedgerValues.required(
                     LedgerValues.integer(json: pool["pledge"], "Yaci genesis pool pledge"), "Yaci genesis pool pledge"),
                 cost: try LedgerValues.required(
@@ -1209,7 +1211,7 @@ public actor YaciDevkitChainContext: ChainContext {
                 margin: try LedgerValues.required(
                     LedgerValues.unitInterval(json: pool["margin"], "Yaci genesis pool margin"),
                     "Yaci genesis pool margin"),
-                rewardAccount: Self.genesisRewardAccount(pool["rewardAccount"]),
+                rewardAccount: try Self.genesisRewardAccount(pool["rewardAccount"]),
                 poolOwners: .list(owners),
                 relays: ((pool["relays"] as? [Any]) ?? []).compactMap { Self.genesisRelay($0) },
                 poolMetadata: metadata
@@ -1220,21 +1222,8 @@ public actor YaciDevkitChainContext: ChainContext {
 
     /// The reward account of a genesis pool, which genesis writes as a credential plus a network
     /// rather than as the 29-byte on-chain form.
-    static func genesisRewardAccount(_ any: Any?) -> RewardAccountHash {
-        guard let wrapper = any as? [String: Any],
-            let credential = wrapper["credential"] as? [String: Any]
-        else { return RewardAccountHash(payload: Data()) }
-
-        let isMainnet = (wrapper["network"] as? String)?.lowercased() == "mainnet"
-        let isScript = credential["scriptHash"] != nil
-        guard let hex = (credential["keyHash"] ?? credential["scriptHash"]) as? String,
-            let hash = Data(hexString: hex), !hash.isEmpty
-        else { return RewardAccountHash(payload: Data()) }
-
-        // Stake address header: high nibble 0b1110 for a key hash and 0b1111 for a script hash,
-        // low nibble the network id.
-        let header: UInt8 = (isScript ? 0xF0 : 0xE0) | (isMainnet ? 1 : 0)
-        return RewardAccountHash(payload: Data([header]) + hash)
+    static func genesisRewardAccount(_ any: Any?) throws -> RewardAccountHash {
+        RewardAccountHash(payload: try LedgerValues.rewardAccount(json: any, "Yaci genesis pool reward account"))
     }
 
     /// One relay from a genesis pool, whose JSON tags the shape by key.
@@ -1297,7 +1286,7 @@ public actor YaciDevkitChainContext: ChainContext {
             if case .retired = try Self.poolStatus(retirement: retirement, epoch: epoch) {
                 return nil
             }
-            return try PoolOperator(from: Data(hex: poolId))
+            return PoolOperator(poolKeyHash: try LedgerValues.hash(hex: poolId, as: PoolKeyHash.self, "Yaci pool id"))
         }
     }
 
@@ -1436,10 +1425,7 @@ public actor YaciDevkitChainContext: ChainContext {
                 throw CardanoChainError.valueError("Pool owner has no staking credential: \(owner)")
             }
         }
-        guard let data = Data(hexString: owner) else {
-            throw CardanoChainError.valueError("Invalid pool owner: \(owner)")
-        }
-        return VerificationKeyHash(payload: data)
+        return try LedgerValues.hash(hex: owner, as: VerificationKeyHash.self, "Yaci pool owner")
     }
 
     /// The reward account as its 29-byte on-chain form, from either the bech32 stake address or
@@ -1448,13 +1434,14 @@ public actor YaciDevkitChainContext: ChainContext {
         if let bech32, bech32.hasPrefix("stake") {
             return RewardAccountHash(payload: try Address(from: .string(bech32)).toBytes())
         }
-        if let hex, let data = Data(hexString: hex), !data.isEmpty {
-            return RewardAccountHash(payload: data)
+        guard let hex = hex ?? bech32, !hex.isEmpty else {
+            throw CardanoChainError.valueError("Pool has no reward account")
         }
-        if let bech32, let data = Data(hexString: bech32), !data.isEmpty {
-            return RewardAccountHash(payload: data)
+        let data = try LedgerValues.hexBytes(hex, "Yaci pool reward account")
+        guard data.count == 29 else {
+            throw CardanoChainError.valueError("Yaci pool reward account \(hex) is not 29 bytes")
         }
-        throw CardanoChainError.valueError("Pool has no reward account")
+        return RewardAccountHash(payload: data)
     }
 
     private static func poolMetadata(url urlString: String?, hash hashString: String?, strict: Bool)
@@ -1490,8 +1477,11 @@ public actor YaciDevkitChainContext: ChainContext {
         }
 
         return PoolParams(
-            poolOperator: PoolKeyHash(payload: Data(hex: registration.poolId ?? "")),
-            vrfKeyHash: VrfKeyHash(payload: Data(hex: registration.vrfKeyHash ?? "")),
+            poolOperator: try LedgerValues.hash(
+                hex: LedgerValues.required(registration.poolId, "Yaci pool id"), as: PoolKeyHash.self, "Yaci pool id"),
+            vrfKeyHash: try LedgerValues.hash(
+                hex: LedgerValues.required(registration.vrfKeyHash, "Yaci pool vrf key hash"), as: VrfKeyHash.self,
+                "Yaci pool vrf key hash"),
             pledge: try LedgerValues.required(registration.pledge, "Yaci pool pledge").checked("Yaci pool pledge"),
             cost: try LedgerValues.required(registration.cost, "Yaci pool cost").checked("Yaci pool cost"),
             margin: margin,
@@ -1510,8 +1500,11 @@ public actor YaciDevkitChainContext: ChainContext {
         from details: Components.Schemas.PoolDetailsDto, strict: Bool
     ) async throws -> PoolParams {
         return PoolParams(
-            poolOperator: PoolKeyHash(payload: Data(hex: details.poolHash ?? "")),
-            vrfKeyHash: VrfKeyHash(payload: Data(hex: details.vrfKeyHash ?? "")),
+            poolOperator: try LedgerValues.hash(
+                hex: LedgerValues.required(details.poolHash, "Yaci pool hash"), as: PoolKeyHash.self, "Yaci pool hash"),
+            vrfKeyHash: try LedgerValues.hash(
+                hex: LedgerValues.required(details.vrfKeyHash, "Yaci pool vrf key hash"), as: VrfKeyHash.self,
+                "Yaci pool vrf key hash"),
             pledge: try LedgerValues.integer(text: LedgerValues.required(details.pledge, "Yaci pool pledge"), "Yaci pool pledge"),
             cost: try LedgerValues.integer(text: LedgerValues.required(details.cost, "Yaci pool cost"), "Yaci pool cost"),
             // Yaci sends this margin as decimal text, read here exactly.
@@ -1683,10 +1676,9 @@ public actor YaciDevkitChainContext: ChainContext {
 
         var entries: [SwiftCardanoNetwork.DRepStakeEntry] = []
         for hash in latestByHash.keys.sorted() {
-            guard let certificate = latestByHash[hash], certificate._type != .unregDrepCert,
-                let payload = Data(hexString: hash), !payload.isEmpty,
-                let stake = try await drepStake(hex: hash)
-            else { continue }
+            guard let certificate = latestByHash[hash], certificate._type != .unregDrepCert else { continue }
+            let payload = try LedgerValues.hash28(hex: hash, "Yaci DRep certificate hash")
+            guard let stake = try await drepStake(hex: hash) else { continue }
             let drep =
                 certificate.credType == .scripthash
                 ? DRep(credential: .scriptHash(ScriptHash(payload: payload)))
@@ -1730,7 +1722,7 @@ public actor YaciDevkitChainContext: ChainContext {
             throw CardanoChainError.yaciDevkitError("Governance proposal without a transaction hash or index")
         }
         return GovActionID(
-            transactionID: TransactionId(payload: Data(hex: txHash)),
+            transactionID: try LedgerValues.hash(hex: txHash, as: TransactionId.self, "Yaci TransactionId"),
             govActionIndex: try index.checked("Yaci proposal index")
         )
     }
@@ -1842,10 +1834,7 @@ public actor YaciDevkitChainContext: ChainContext {
                 throw CardanoChainError.yaciDevkitError("Governance proposal \(id) has no return address")
             }
             if let bytes = try? Address.fromBech32(address).toBytes() { return bytes }
-            guard let bytes = Data(hexString: address) else {
-                throw CardanoChainError.yaciDevkitError("Return address \(address) is neither bech32 nor hex")
-            }
-            return bytes
+            return try LedgerValues.hexBytes(address, "Yaci return address \(address) (neither bech32 nor hex)")
         }()
 
         return GovActionVotes(
@@ -1898,10 +1887,12 @@ public actor YaciDevkitChainContext: ChainContext {
         var pools: [SwiftCardanoNetwork.StakePoolVote] = []
 
         for key in order {
-            guard let row = latest[key],
-                let voterHash = row.voterHash, let payload = Data(hexString: voterHash), !payload.isEmpty,
-                let vote = GovernanceParsing.parseVote(row.vote?.rawValue)
-            else { continue }
+            guard let row = latest[key] else { continue }
+            let payload = try LedgerValues.hash28(
+                hex: LedgerValues.required(row.voterHash, "Yaci vote voter_hash"), "Yaci vote voter_hash")
+            guard let vote = GovernanceParsing.parseVote(row.vote?.rawValue) else {
+                throw CardanoChainError.valueError("Yaci vote \(String(describing: row.vote)) is not a vote")
+            }
 
             switch row.voterType {
             case .constitutionalCommitteeHotKeyHash:
@@ -1936,7 +1927,7 @@ public actor YaciDevkitChainContext: ChainContext {
                     .init(poolOperator: PoolOperator(poolKeyHash: PoolKeyHash(payload: payload)), vote: vote)
                 )
             case nil:
-                continue
+                throw CardanoChainError.valueError("Yaci vote by \(payload.toHex) has no voter type")
             }
         }
         return (committee, dreps, pools)
@@ -1965,9 +1956,9 @@ public actor YaciDevkitChainContext: ChainContext {
             }
             return nil
         }
-        func policyHash() -> ScriptHash? {
+        func policyHash() throws -> ScriptHash? {
             guard let hex = string("policyHash", "policy_hash") else { return nil }
-            return try? ScriptHash(from: .string(hex))
+            return try LedgerValues.hash(hex: hex, as: ScriptHash.self, "Yaci ScriptHash")
         }
 
         switch type {
@@ -1994,15 +1985,16 @@ public actor YaciDevkitChainContext: ChainContext {
                 let bytes: Data
                 if let decoded = try? Address.fromBech32(account).toBytes() {
                     bytes = decoded
-                } else if let hex = Data(hexString: account), !hex.isEmpty {
-                    bytes = hex
                 } else {
-                    continue
+                    bytes = try LedgerValues.hexBytes(account, "Yaci treasury withdrawal account")
+                    guard bytes.count == 29 else {
+                        throw CardanoChainError.valueError("Yaci treasury withdrawal account \(account) is not 29 bytes")
+                    }
                 }
                 withdrawals[bytes] = Coin(lovelace)
             }
             return .treasuryWithdrawalsAction(
-                TreasuryWithdrawalsAction(withdrawals: withdrawals, policyHash: policyHash())
+                TreasuryWithdrawalsAction(withdrawals: withdrawals, policyHash: try policyHash())
             )
 
         case "NEW_CONSTITUTION":
@@ -2010,9 +2002,10 @@ public actor YaciDevkitChainContext: ChainContext {
             let anchor = try LedgerValues.required(
                 LedgerValues.anchor(json: constitution["anchor"], "Yaci constitution anchor"),
                 "Yaci constitution anchor")
-            let scriptHash = ((constitution["scripthash"] ?? constitution["scriptHash"]
+            let scriptHash = try ((constitution["scripthash"] ?? constitution["scriptHash"]
                 ?? constitution["script"]) as? String)
-                .flatMap { $0.isEmpty ? nil : try? ScriptHash(from: .string($0)) }
+                .flatMap { $0.isEmpty ? nil : $0 }
+                .map { try LedgerValues.hash(hex: $0, as: ScriptHash.self, "Yaci constitution script hash") }
             return .newConstitution(
                 NewConstitution(
                     id: id, constitution: Constitution(anchor: anchor, scriptHash: scriptHash)
@@ -2025,15 +2018,13 @@ public actor YaciDevkitChainContext: ChainContext {
             let removals =
                 (details?["membersForRemoval"] ?? details?["members_for_removal"]) as? [Any] ?? []
             for entry in removals {
-                if let credential = committeeColdCredential(from: entry) {
-                    coldCredentials.insert(credential)
-                }
+                coldCredentials.insert(try committeeColdCredential(from: entry))
             }
             let additions =
                 (details?["newMembersAndTerms"] ?? details?["new_members_and_terms"]) as? [String: Any]
                 ?? [:]
             for (key, epoch) in additions {
-                guard let credential = committeeColdCredential(fromKey: key) else { continue }
+                let credential = try committeeColdCredential(fromKey: key)
                 let epochValue: UInt64 = try LedgerValues.required(
                     LedgerValues.integer(json: epoch, "Yaci committee term epoch"), "Yaci committee term epoch")
                 coldCredentials.insert(credential)
@@ -2060,7 +2051,7 @@ public actor YaciDevkitChainContext: ChainContext {
             // what the Koios and Ogmios backends also do.
             return .parameterChangeAction(
                 ParameterChangeAction(
-                    id: id, protocolParamUpdate: ProtocolParamUpdate(), policyHash: policyHash()
+                    id: id, protocolParamUpdate: ProtocolParamUpdate(), policyHash: try policyHash()
                 ))
 
         default:
@@ -2069,41 +2060,30 @@ public actor YaciDevkitChainContext: ChainContext {
     }
 
     /// Yaci serialises a credential as `{"type": "ADDR_KEYHASH" | "SCRIPTHASH", "hash": hex}`.
-    private static func committeeColdCredential(from any: Any) -> CommitteeColdCredential? {
-        if let key = any as? String { return committeeColdCredential(fromKey: key) }
-        guard let dict = any as? [String: Any],
-            let hash = dict["hash"] as? String,
-            let payload = Data(hexString: hash), !payload.isEmpty
-        else { return nil }
+    private static func committeeColdCredential(from any: Any) throws -> CommitteeColdCredential {
+        if let key = any as? String { return try committeeColdCredential(fromKey: key) }
+        guard let dict = any as? [String: Any], let hash = dict["hash"] as? String else {
+            throw CardanoChainError.valueError("Yaci committee credential \(any) is not a credential")
+        }
         let type = dict["type"] as? String ?? "ADDR_KEYHASH"
-        return makeCommitteeColdCredential(payload: payload, isScript: type == "SCRIPTHASH")
+        return makeCommitteeColdCredential(
+            payload: try LedgerValues.hash28(hex: hash, "Yaci committee credential"), isScript: type == "SCRIPTHASH")
     }
 
     /// Map keys arrive either in cardano-cli form (`keyHash-<hex>` / `scriptHash-<hex>`) or as
     /// Jackson's rendering of a credential (`Credential(type=ADDR_KEYHASH, hash=<hex>)`).
-    private static func committeeColdCredential(fromKey key: String) -> CommitteeColdCredential? {
-        if key.hasPrefix("keyHash-"),
-            let payload = Data(hexString: String(key.dropFirst("keyHash-".count))), !payload.isEmpty
-        {
-            return makeCommitteeColdCredential(payload: payload, isScript: false)
-        }
-        if key.hasPrefix("scriptHash-"),
-            let payload = Data(hexString: String(key.dropFirst("scriptHash-".count))), !payload.isEmpty
-        {
-            return makeCommitteeColdCredential(payload: payload, isScript: true)
+    private static func committeeColdCredential(fromKey key: String) throws -> CommitteeColdCredential {
+        if key.hasPrefix("keyHash-") || key.hasPrefix("scriptHash-") {
+            return CommitteeColdCredential(credential: try LedgerValues.credential(json: key, "Yaci committee member"))
         }
         if let range = key.range(of: "hash=") {
-            let hex = key[range.upperBound...].prefix { $0.isHexDigit }
-            if let payload = Data(hexString: String(hex)), !payload.isEmpty {
-                return makeCommitteeColdCredential(
-                    payload: payload, isScript: key.contains("SCRIPTHASH")
-                )
-            }
+            let hex = key[range.upperBound...].prefix { $0 != ")" && $0 != "," }
+            return makeCommitteeColdCredential(
+                payload: try LedgerValues.hash28(hex: String(hex), "Yaci committee member"),
+                isScript: key.contains("SCRIPTHASH"))
         }
-        if let payload = Data(hexString: key), payload.count == SCRIPT_HASH_SIZE {
-            return makeCommitteeColdCredential(payload: payload, isScript: false)
-        }
-        return nil
+        return makeCommitteeColdCredential(
+            payload: try LedgerValues.hash28(hex: key, "Yaci committee member"), isScript: false)
     }
 
     private static func makeCommitteeColdCredential(payload: Data, isScript: Bool)
@@ -2133,9 +2113,9 @@ public actor YaciDevkitChainContext: ChainContext {
         let currentEpoch = try await epoch()
         let (hotKeys, resigned) = try await committeeAuthorizations()
 
-        func hotCredential(for cold: CommitteeColdCredential) -> CommitteeHotCredential? {
-            guard let hex = hotKeys[cold], let payload = Data(hexString: hex), !payload.isEmpty
-            else { return nil }
+        func hotCredential(for cold: CommitteeColdCredential) throws -> CommitteeHotCredential? {
+            guard let hex = hotKeys[cold] else { return nil }
+            let payload = try LedgerValues.hash28(hex: hex, "Yaci committee hot key")
             return CommitteeHotCredential(
                 credential: .verificationKeyHash(VerificationKeyHash(payload: payload)))
         }
@@ -2155,7 +2135,7 @@ public actor YaciDevkitChainContext: ChainContext {
             members.append(
                 CommitteeStateInfo.Member(
                     coldCredential: member.credential,
-                    hotCredential: hotCredential(for: member.credential),
+                    hotCredential: try hotCredential(for: member.credential),
                     expiration: try member.expiration.map { try $0.checked("Yaci committee member expiration") },
                     status: status
                 ))
@@ -2169,7 +2149,7 @@ public actor YaciDevkitChainContext: ChainContext {
             members.append(
                 CommitteeStateInfo.Member(
                     coldCredential: cold,
-                    hotCredential: hotCredential(for: cold),
+                    hotCredential: try hotCredential(for: cold),
                     expiration: nil,
                     status: resigned.contains(cold) ? .expired : .unrecognized
                 ))
@@ -2191,9 +2171,9 @@ public actor YaciDevkitChainContext: ChainContext {
             let committee = try? ok.body.json,
             let rows = committee.members, !rows.isEmpty
         {
-            let members = rows.compactMap { member -> CommitteeMemberTerm? in
-                guard let hash = member.hash, let payload = Data(hexString: hash), !payload.isEmpty
-                else { return nil }
+            let members = try rows.map { member -> CommitteeMemberTerm in
+                let payload = try LedgerValues.hash28(
+                    hex: LedgerValues.required(member.hash, "Yaci committee member hash"), "Yaci committee member hash")
                 return CommitteeMemberTerm(
                     credential: Self.makeCommitteeColdCredential(
                         payload: payload, isScript: member.credType == .scripthash),
@@ -2211,9 +2191,9 @@ public actor YaciDevkitChainContext: ChainContext {
         let live = try await perform("get the current committee") {
             try await api.client.getCommitteeInfo().ok.body.json
         }
-        let members = (live.members ?? []).compactMap { member -> CommitteeMemberTerm? in
-            guard let hash = member.hash, let payload = Data(hexString: hash), !payload.isEmpty
-            else { return nil }
+        let members = try (live.members ?? []).map { member -> CommitteeMemberTerm in
+            let payload = try LedgerValues.hash28(
+                hex: LedgerValues.required(member.hash, "Yaci committee member hash"), "Yaci committee member hash")
             return CommitteeMemberTerm(
                 credential: Self.makeCommitteeColdCredential(
                     payload: payload, isScript: member.credType == .scripthash),
@@ -2239,9 +2219,10 @@ public actor YaciDevkitChainContext: ChainContext {
             ).ok.body.json
         }
         for row in registrations {
-            guard let coldHex = row.coldKey, let payload = Data(hexString: coldHex), !payload.isEmpty,
-                let hot = row.hotKey, !hot.isEmpty
-            else { continue }
+            let payload = try LedgerValues.hash28(
+                hex: LedgerValues.required(row.coldKey, "Yaci committee registration cold_key"),
+                "Yaci committee registration cold_key")
+            let hot = try LedgerValues.required(row.hotKey, "Yaci committee registration hot_key")
             let cold = Self.makeCommitteeColdCredential(
                 payload: payload, isScript: row.credType == .scripthash)
             events.append((Self.certificateOrder(row.slot, row.certIndex), cold, .authorized(hot: hot)))
@@ -2253,8 +2234,9 @@ public actor YaciDevkitChainContext: ChainContext {
             ).ok.body.json
         }
         for row in deregistrations {
-            guard let coldHex = row.coldKey, let payload = Data(hexString: coldHex), !payload.isEmpty
-            else { continue }
+            let payload = try LedgerValues.hash28(
+                hex: LedgerValues.required(row.coldKey, "Yaci committee deregistration cold_key"),
+                "Yaci committee deregistration cold_key")
             let cold = Self.makeCommitteeColdCredential(
                 payload: payload, isScript: row.credType == .scripthash)
             events.append((Self.certificateOrder(row.slot, row.certIndex), cold, .resigned))

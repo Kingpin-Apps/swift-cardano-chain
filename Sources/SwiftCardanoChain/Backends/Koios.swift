@@ -369,7 +369,7 @@ public actor KoiosChainContext: ChainContext {
             guard let bytes = referenceScript.bytes else {
                 throw CardanoChainError.koiosError("Missing script bytes")
             }
-            let data = Data(hex: bytes)
+            let data = try LedgerValues.hexBytes(bytes, "Koios reference script bytes")
 
             switch scriptType {
             case "plutusV1": return .plutusV1Script(PlutusV1Script(data: data))
@@ -442,8 +442,8 @@ public actor KoiosChainContext: ChainContext {
                             throw CardanoChainError.koiosError("Koios asset entry is missing its policy, name or quantity")
                         }
 
-                        let policyId = try ScriptHash(from: .string(policyIdStr))
-                        let assetName = try AssetName(payload: Data(hex: assetNameStr))
+                        let policyId = try LedgerValues.hash(hex: policyIdStr, as: ScriptHash.self, "Koios ScriptHash")
+                        let assetName = try LedgerValues.assetName(hex: assetNameStr, "Koios asset name")
 
                         if multiAssets[policyId] == nil {
                             multiAssets[policyId] = Asset([:])
@@ -462,12 +462,11 @@ public actor KoiosChainContext: ChainContext {
                 var script: ScriptType? = nil
 
                 if let datumHashValue = result.datumHash, result.inlineDatum == nil {
-                    datumHash = try DatumHash(from: .string(datumHashValue))
+                    datumHash = try LedgerValues.hash(hex: datumHashValue, as: DatumHash.self, "Koios DatumHash")
                 }
 
-                if let inlineDatumBytes = result.inlineDatum?.bytes,
-                    let datumData = Data(hexString: inlineDatumBytes)
-                {
+                if let inlineDatumBytes = result.inlineDatum?.bytes {
+                    let datumData = try LedgerValues.hexBytes(inlineDatumBytes, "Koios inline datum")
                     // Parse as PlutusData first, then wrap in DatumOption
                     let plutusData = try PlutusData.fromCBOR(data: datumData)
                     datumOption = DatumOption(datum: plutusData)
@@ -531,7 +530,7 @@ public actor KoiosChainContext: ChainContext {
             }
 
             let txIn = TransactionInput(
-                transactionId: try TransactionId(from: .string(txHashStr)),
+                transactionId: try LedgerValues.hash(hex: txHashStr, as: TransactionId.self, "Koios TransactionId"),
                 index: try LedgerValues.integer(txIndexDouble, as: UInt16.self, "Koios output index")
             )
 
@@ -553,8 +552,8 @@ public actor KoiosChainContext: ChainContext {
                         throw CardanoChainError.koiosError("Koios asset entry is missing its policy, name or quantity")
                     }
 
-                    let policyId = try ScriptHash(from: .string(policyIdStr))
-                    let assetName = try AssetName(payload: Data(hex: assetNameStr))
+                    let policyId = try LedgerValues.hash(hex: policyIdStr, as: ScriptHash.self, "Koios ScriptHash")
+                    let assetName = try LedgerValues.assetName(hex: assetNameStr, "Koios asset name")
 
                     if multiAssets[policyId] == nil {
                         multiAssets[policyId] = Asset([:])
@@ -573,12 +572,11 @@ public actor KoiosChainContext: ChainContext {
             var script: ScriptType? = nil
 
             if let datumHashValue = result.datumHash, result.inlineDatum == nil {
-                datumHash = try DatumHash(from: .string(datumHashValue))
+                datumHash = try LedgerValues.hash(hex: datumHashValue, as: DatumHash.self, "Koios DatumHash")
             }
 
-            if let inlineDatumBytes = result.inlineDatum?.bytes,
-                let datumData = Data(hexString: inlineDatumBytes)
-            {
+            if let inlineDatumBytes = result.inlineDatum?.bytes {
+                let datumData = try LedgerValues.hexBytes(inlineDatumBytes, "Koios inline datum")
                 let plutusData = try PlutusData.fromCBOR(data: datumData)
                 datumOption = DatumOption(datum: plutusData)
             }
@@ -909,7 +907,9 @@ public actor KoiosChainContext: ChainContext {
             ?? UnitInterval(numerator: 0, denominator: 1)
 
         let poolOperator = try PoolOperator(from: poolId)
-        let vrfKeyHash = VrfKeyHash(payload: Data(hex: pool.vrfKeyHash ?? ""))
+        let vrfKeyHash = try LedgerValues.hash(
+            hex: LedgerValues.required(pool.vrfKeyHash, "Koios pool vrf_key_hash"), as: VrfKeyHash.self,
+            "Koios pool vrf_key_hash")
         let rewardAddr = pool.rewardAddr ?? ""
         let rewardAddress = try Address(from: .string(rewardAddr))
         let rewardAccount = RewardAccountHash(payload: rewardAddress.toBytes())
@@ -1169,12 +1169,12 @@ public actor KoiosChainContext: ChainContext {
             let hotCredential: CommitteeHotCredential
             if hotHasScript {
                 hotCredential = CommitteeHotCredential(
-                    credential: .scriptHash(ScriptHash(payload: Data(hex: hotHex)))
+                    credential: .scriptHash(try LedgerValues.hash(hex: hotHex, as: ScriptHash.self, "Koios ScriptHash"))
                 )
             } else {
                 hotCredential = CommitteeHotCredential(
                     credential: .verificationKeyHash(
-                        VerificationKeyHash(payload: Data(hex: hotHex))
+                        try LedgerValues.hash(hex: hotHex, as: VerificationKeyHash.self, "Koios VerificationKeyHash")
                     )
                 )
             }
@@ -1242,12 +1242,12 @@ public actor KoiosChainContext: ChainContext {
             let coldCredential: CommitteeColdCredential
             if coldIsScript {
                 coldCredential = CommitteeColdCredential(
-                    credential: .scriptHash(ScriptHash(payload: Data(hex: coldHex)))
+                    credential: .scriptHash(try LedgerValues.hash(hex: coldHex, as: ScriptHash.self, "Koios ScriptHash"))
                 )
             } else {
                 coldCredential = CommitteeColdCredential(
                     credential: .verificationKeyHash(
-                        VerificationKeyHash(payload: Data(hex: coldHex))
+                        try LedgerValues.hash(hex: coldHex, as: VerificationKeyHash.self, "Koios VerificationKeyHash")
                     )
                 )
             }
@@ -1317,7 +1317,7 @@ public actor KoiosChainContext: ChainContext {
         for proposal in proposals {
             guard let txHashRaw = proposal.proposalTxHash?.value as? String else { continue }
             let govActionID = GovActionID(
-                transactionID: TransactionId(payload: Data(hex: txHashRaw)),
+                transactionID: try LedgerValues.hash(hex: txHashRaw, as: TransactionId.self, "Koios TransactionId"),
                 govActionIndex: try LedgerValues.required(proposal.proposalIndex, "Koios proposal_index")
                     .checked("Koios proposal_index")
             )
@@ -1367,7 +1367,7 @@ public actor KoiosChainContext: ChainContext {
                     url: proposal.metaUrl?.value, hash: proposal.metaHash?.value, "Koios proposal anchor")
                 return OpenGovAction(
                     govActionId: GovActionID(
-                        transactionID: TransactionId(payload: Data(hex: txHash)),
+                        transactionID: try LedgerValues.hash(hex: txHash, as: TransactionId.self, "Koios TransactionId"),
                         govActionIndex: try LedgerValues.required(proposal.proposalIndex, "Koios proposal_index")
                             .checked("Koios proposal_index")
                     ),
@@ -1422,19 +1422,18 @@ public actor KoiosChainContext: ChainContext {
             switch role {
             case .constitutionalCommittee:
                 let cred: CommitteeHotCredential = isScript
-                    ? CommitteeHotCredential(credential: .scriptHash(ScriptHash(payload: Data(hex: hotOrPoolHex))))
-                    : CommitteeHotCredential(credential: .verificationKeyHash(VerificationKeyHash(payload: Data(hex: hotOrPoolHex))))
+                    ? CommitteeHotCredential(credential: .scriptHash(try LedgerValues.hash(hex: hotOrPoolHex, as: ScriptHash.self, "Koios ScriptHash")))
+                    : CommitteeHotCredential(credential: .verificationKeyHash(try LedgerValues.hash(hex: hotOrPoolHex, as: VerificationKeyHash.self, "Koios VerificationKeyHash")))
                 committeeVotes.append(.init(credential: cred, vote: vote))
             case .dRep:
                 let cred: DRepCredential = isScript
-                    ? DRepCredential(credential: .scriptHash(ScriptHash(payload: Data(hex: hotOrPoolHex))))
-                    : DRepCredential(credential: .verificationKeyHash(VerificationKeyHash(payload: Data(hex: hotOrPoolHex))))
+                    ? DRepCredential(credential: .scriptHash(try LedgerValues.hash(hex: hotOrPoolHex, as: ScriptHash.self, "Koios ScriptHash")))
+                    : DRepCredential(credential: .verificationKeyHash(try LedgerValues.hash(hex: hotOrPoolHex, as: VerificationKeyHash.self, "Koios VerificationKeyHash")))
                 dRepVotes.append(.init(credential: cred, vote: vote))
             case .spo:
-                if let poolBech32 = row.voterId,
-                   let pool = try? PoolOperator(from: .string(poolBech32)) {
-                    stakePoolVotes.append(.init(poolOperator: pool, vote: vote))
-                }
+                let pool = try PoolOperator(
+                    from: .string(LedgerValues.required(row.voterId, "Koios stake pool vote voter_id")))
+                stakePoolVotes.append(.init(poolOperator: pool, vote: vote))
             }
         }
 
@@ -1467,15 +1466,15 @@ public actor KoiosChainContext: ChainContext {
             let coldIsScript = m.ccColdHasScript ?? false
 
             let cold: CommitteeColdCredential = coldIsScript
-                ? CommitteeColdCredential(credential: .scriptHash(ScriptHash(payload: Data(hex: coldHex))))
-                : CommitteeColdCredential(credential: .verificationKeyHash(VerificationKeyHash(payload: Data(hex: coldHex))))
+                ? CommitteeColdCredential(credential: .scriptHash(try LedgerValues.hash(hex: coldHex, as: ScriptHash.self, "Koios ScriptHash")))
+                : CommitteeColdCredential(credential: .verificationKeyHash(try LedgerValues.hash(hex: coldHex, as: VerificationKeyHash.self, "Koios VerificationKeyHash")))
 
-            let hot: CommitteeHotCredential? = {
+            let hot: CommitteeHotCredential? = try {
                 guard let hotHex = m.ccHotHex else { return nil }
                 let isScript = m.ccHotHasScript ?? false
                 return isScript
-                    ? CommitteeHotCredential(credential: .scriptHash(ScriptHash(payload: Data(hex: hotHex))))
-                    : CommitteeHotCredential(credential: .verificationKeyHash(VerificationKeyHash(payload: Data(hex: hotHex))))
+                    ? CommitteeHotCredential(credential: .scriptHash(try LedgerValues.hash(hex: hotHex, as: ScriptHash.self, "Koios ScriptHash")))
+                    : CommitteeHotCredential(credential: .verificationKeyHash(try LedgerValues.hash(hex: hotHex, as: VerificationKeyHash.self, "Koios VerificationKeyHash")))
             }()
 
             let expirationEpoch: Int? = try m.expirationEpoch.map { try $0.checked("Koios committee expiration_epoch") }
@@ -1558,19 +1557,18 @@ public actor KoiosChainContext: ChainContext {
             var withdrawals: [RewardAccount: Coin] = [:]
             if let pairs = contents.first as? [[Any]] {
                 for entry in pairs where entry.count >= 2 {
-                    guard let wrapper = entry[0] as? [String: Any],
-                          let lovelace = try GovernanceParsing.parseLovelace(entry[1]),
-                          let returnAddr = buildKoiosRewardAccount(wrapper)
+                    guard let lovelace = try GovernanceParsing.parseLovelace(entry[1])
                     else { continue }
+                    let returnAddr = try buildKoiosRewardAccount(entry[0])
                     withdrawals[returnAddr] = Coin(lovelace)
                 }
             }
-            let policyHash: ScriptHash? = {
+            let policyHash: ScriptHash? = try {
                 guard contents.count > 1,
                       let hex = contents[1] as? String,
                       !hex.isEmpty
                 else { return nil }
-                return try? ScriptHash(from: .string(hex))
+                return try LedgerValues.hash(hex: hex, as: ScriptHash.self, "Koios ScriptHash")
             }()
             return .treasuryWithdrawalsAction(TreasuryWithdrawalsAction(
                 withdrawals: withdrawals,
@@ -1586,15 +1584,13 @@ public actor KoiosChainContext: ChainContext {
             var credentialEpochs: [CommitteeColdCredential: UInt64] = [:]
             if contents.count >= 2, let removed = contents[1] as? [Any] {
                 for entry in removed {
-                    if let cred = parseKoiosColdCredential(entry) {
-                        coldCredentials.insert(cred)
-                    }
+                    coldCredentials.insert(try parseKoiosColdCredential(entry))
                 }
             }
             if contents.count >= 3, let added = contents[2] as? [String: Any] {
                 for (key, value) in added {
-                    guard let cred = parseKoiosColdCredentialKey(key),
-                          let epoch = (value as? NSNumber)?.uint64Value
+                    let cred = try parseKoiosColdCredentialKey(key)
+                    guard let epoch = (value as? NSNumber)?.uint64Value
                               ?? (value as? Int).map(UInt64.init)
                     else { continue }
                     coldCredentials.insert(cred)
@@ -1637,10 +1633,10 @@ public actor KoiosChainContext: ChainContext {
             let anchor = try LedgerValues.required(
                 LedgerValues.anchor(json: constitution["anchor"], "Koios constitution anchor"),
                 "Koios constitution anchor")
-            let scriptHash: ScriptHash? = {
+            let scriptHash: ScriptHash? = try {
                 guard let hex = constitution["script"] as? String, !hex.isEmpty
                 else { return nil }
-                return try? ScriptHash(from: .string(hex))
+                return try LedgerValues.hash(hex: hex, as: ScriptHash.self, "Koios ScriptHash")
             }()
             return .newConstitution(NewConstitution(
                 id: id,
@@ -1655,58 +1651,20 @@ public actor KoiosChainContext: ChainContext {
         }
     }
 
-    /// Koios's TreasuryWithdrawals credential wrapper is
+    /// Koios's TreasuryWithdrawals account is the ledger's
     /// `{network: "Mainnet" | "Testnet", credential: {keyHash | scriptHash}}`.
-    private func buildKoiosRewardAccount(_ wrapper: [String: Any]) -> RewardAccount? {
-        guard let credential = wrapper["credential"] as? [String: Any] else { return nil }
-        let isTestnet = (wrapper["network"] as? String)?.lowercased() == "testnet"
-        if let hex = credential["keyHash"] as? String {
-            // 0xE0 = mainnet+keyHash, 0xE2 = testnet+keyHash header byte.
-            var data = Data([isTestnet ? 0xE0 : 0xE0])
-            data.append(hex.hexStringToData)
-            return RewardAccount(data)
-        }
-        if let hex = credential["scriptHash"] as? String {
-            // 0xE1 = mainnet+scriptHash, 0xE3 = testnet+scriptHash header byte.
-            var data = Data([isTestnet ? 0xE1 : 0xE1])
-            data.append(hex.hexStringToData)
-            return RewardAccount(data)
-        }
-        return nil
+    private func buildKoiosRewardAccount(_ wrapper: Any) throws -> RewardAccount {
+        try LedgerValues.rewardAccount(json: wrapper, "Koios treasury withdrawal account")
     }
 
     /// Koios cold credentials can be either a bare `{keyHash | scriptHash}` dict
     /// or a stringified `keyHash-<hex>` / `scriptHash-<hex>` form.
-    private func parseKoiosColdCredential(_ any: Any) -> CommitteeColdCredential? {
-        if let key = any as? String { return parseKoiosColdCredentialKey(key) }
-        guard let dict = any as? [String: Any] else { return nil }
-        if let hex = dict["keyHash"] as? String {
-            return CommitteeColdCredential(
-                credential: .verificationKeyHash(VerificationKeyHash(payload: hex.hexStringToData))
-            )
-        }
-        if let hex = dict["scriptHash"] as? String {
-            return CommitteeColdCredential(
-                credential: .scriptHash(ScriptHash(payload: hex.hexStringToData))
-            )
-        }
-        return nil
+    private func parseKoiosColdCredential(_ any: Any) throws -> CommitteeColdCredential {
+        CommitteeColdCredential(credential: try LedgerValues.credential(json: any, "Koios committee cold credential"))
     }
 
-    private func parseKoiosColdCredentialKey(_ key: String) -> CommitteeColdCredential? {
-        if key.hasPrefix("keyHash-") {
-            let hex = String(key.dropFirst("keyHash-".count))
-            return CommitteeColdCredential(
-                credential: .verificationKeyHash(VerificationKeyHash(payload: hex.hexStringToData))
-            )
-        }
-        if key.hasPrefix("scriptHash-") {
-            let hex = String(key.dropFirst("scriptHash-".count))
-            return CommitteeColdCredential(
-                credential: .scriptHash(ScriptHash(payload: hex.hexStringToData))
-            )
-        }
-        return nil
+    private func parseKoiosColdCredentialKey(_ key: String) throws -> CommitteeColdCredential {
+        try parseKoiosColdCredential(key)
     }
 }
 
@@ -1729,9 +1687,6 @@ extension KoiosChainContext {
         guard let cbor = results.first?.cbor else {
             throw CardanoChainError.koiosError("Transaction \(hash) not found")
         }
-        guard let data = Data(hexString: cbor) else {
-            throw CardanoChainError.koiosError("Transaction \(hash) CBOR is not hex")
-        }
-        return data
+        return try LedgerValues.hexBytes(cbor, "Koios transaction \(hash) CBOR")
     }
 }
