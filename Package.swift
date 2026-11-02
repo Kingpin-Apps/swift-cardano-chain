@@ -12,8 +12,8 @@ let package = Package(
     platforms: [
       .iOS(.v18), // bumped from v17: depends on swift-cardano-utils, now iOS 18
       .macOS(.v15),
-      .watchOS(.v10),
-      .tvOS(.v16),
+      .watchOS(.v11), // bumped from v10: swift-utxorpc (grpc-swift 2) needs watchOS 11
+      .tvOS(.v18), // bumped from v16: swift-utxorpc (grpc-swift 2) needs tvOS 18
       .visionOS(.v2),
     ],
     products: [
@@ -42,6 +42,8 @@ let package = Package(
         .package(url: "https://github.com/Kingpin-Apps/swift-koios.git", from: "0.3.0"),
         .package(url: "https://github.com/Kingpin-Apps/swift-ogmios.git", from: "0.4.0"),
         .package(url: "https://github.com/Kingpin-Apps/swift-kupo.git", from: "0.2.0"),
+        // Local until swift-utxorpc has a GitHub repo and a tag: switch to the URL before release.
+        .package(path: "../swift-utxorpc"),
         .package(url: "https://github.com/Kingpin-Apps/swift-yaci-api.git", from: "0.2.0"),
         .package(url: "https://github.com/Kingpin-Apps/swift-cardano-network.git", from: "1.1.1"),
         .package(url: "https://github.com/Kingpin-Apps/swift-cardano-uplc.git", from: "0.8.1"),
@@ -49,6 +51,8 @@ let package = Package(
         // uses FilePath. Apple package, iOS-safe.
         .package(url: "https://github.com/apple/swift-system.git", from: "1.8.1"),
         .package(url: "https://github.com/attaswift/BigInt.git", "5.7.0"..<"7.0.0"),
+        // Tests only: an in-process gRPC transport for the UTxO RPC backend's fake server.
+        .package(url: "https://github.com/grpc/grpc-swift-2.git", from: "2.4.4"),
     ],
     targets: [
         .target(
@@ -64,6 +68,9 @@ let package = Package(
                 .product(name: "SwiftKoios", package: "swift-koios"),
                 .product(name: "SwiftOgmios", package: "swift-ogmios"),
                 .product(name: "SwiftKupo", package: "swift-kupo"),
+                .product(name: "UTxORPC", package: "swift-utxorpc"),
+                .product(name: "UTxORPCCardanoNode", package: "swift-utxorpc"),
+                .product(name: "UTxORPCClient", package: "swift-utxorpc"),
                 .product(name: "SwiftYaciAPI", package: "swift-yaci-api"),
                 .product(name: "SwiftCardanoNetwork", package: "swift-cardano-network"),
                 .product(name: "SwiftCardanoUPLC", package: "swift-cardano-uplc"),
@@ -77,7 +84,10 @@ let package = Package(
         ),
         .testTarget(
             name: "SwiftCardanoChainTests",
-            dependencies: ["SwiftCardanoChain"],
+            dependencies: [
+                "SwiftCardanoChain",
+                .product(name: "GRPCInProcessTransport", package: "grpc-swift-2"),
+            ],
             resources: [
                .copy("data")
            ],

@@ -14,6 +14,7 @@ SwiftCardanoChain provides a single ``ChainContext`` protocol and eight concrete
 | ``OgmiosChainContext`` | Local node via the Ogmios WebSocket bridge |
 | ``KupoChainContext`` | Kupo chain index, alone or wrapping another context |
 | ``NodeSocketChainContext`` | Local node via the NtC Unix socket directly |
+| ``UTxORPCChainContext`` | UTxO RPC (gRPC): cardano-node 11.x's built-in server, Dolos, or Demeter |
 | ``YaciDevkitChainContext`` | Local throw-away devnet run by Yaci DevKit |
 | ``OfflineTransferChainContext`` | Air-gapped / offline transaction signing |
 
@@ -308,6 +309,10 @@ do {
 - ``OgmiosChainContext``
 - ``KupoChainContext``
 - ``NodeSocketChainContext``
+- ``UTxORPCChainContext``
+- ``UTxORPCEndpointConnector``
+- ``UTxORPCConnector``
+- ``UTxORPCServices``
 - ``YaciDevkitChainContext``
 
 ### Offline Context
