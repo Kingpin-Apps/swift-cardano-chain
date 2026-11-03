@@ -39,7 +39,7 @@ Pick the one that matches your environment — the rest of your code stays the s
 | `OgmiosChainContext` | Local node via the Ogmios WebSocket bridge |
 | `KupoChainContext` | Kupo chain index, alone or wrapping another context |
 | `NodeSocketChainContext` | Local node via the NtC Unix socket directly |
-| `UTxORPCChainContext` | UTxO RPC (gRPC): cardano-node 11.x's built-in server, Dolos, or Demeter |
+| `UTxORPCChainContext` | UTxO RPC (gRPC): cardano-node 11.x's built-in server, Dolos, Demeter, or cardano-node-api |
 | `YaciDevkitChainContext` | Local throw-away devnet run by Yaci DevKit |
 | `OfflineTransferChainContext` | Air-gapped / offline transaction signing |
 
@@ -171,6 +171,20 @@ or governance queries, and cardano-node cannot look a transaction up by hash; pa
 `wrapping:` another context (Blockfrost, Ogmios, Kupo) and those calls go to it. A node's
 `SearchUtxos` scans the whole UTxO set, so `utxos(address:)` takes seconds on mainnet, as it
 does over the node socket.
+
+cardano-node-api speaks only the older v1alpha API. Give the endpoint `apiVersion: .v1alpha`
+and a wrapped context: it has no `ReadGenesis`, `EvalTx` or `ReadTx`, and its `ReadParams`
+leaves out the Conway governance parameters (and, in its last release, shifts the cost models by
+one), so the protocol and genesis parameters come from the wrapped context. UTxOs, the tip
+and submission go to cardano-node-api.
+
+```swift
+let context = try UTxORPCChainContext(
+    endpoint: try UTxORPCEndpoint(url: URL(string: "http://127.0.0.1:9090")!, apiVersion: .v1alpha),
+    network: .mainnet,
+    wrapping: ogmios
+)
+```
 
 ### NodeSocket (Local Node — Direct NtC)
 

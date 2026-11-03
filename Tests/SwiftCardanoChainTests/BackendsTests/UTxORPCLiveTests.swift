@@ -18,6 +18,8 @@ enum LiveUTxORPCServer: String, CaseIterable, CustomTestStringConvertible, Senda
     /// A hosted server such as Demeter (Dolos), from `UTXORPC_URL` and
     /// optionally `UTXORPC_API_KEY`, sent as `dmtr-api-key`.
     case hosted
+    /// A v1alpha-only server such as cardano-node-api, from `UTXORPC_V1ALPHA_URL`.
+    case v1alpha
 
     static let environment = ProcessInfo.processInfo.environment
 
@@ -39,11 +41,16 @@ enum LiveUTxORPCServer: String, CaseIterable, CustomTestStringConvertible, Senda
             guard let url = Self.environment["UTXORPC_URL"].flatMap(URL.init(string:)) else { return nil }
             let headers = Self.environment["UTXORPC_API_KEY"].map { ["dmtr-api-key": $0] } ?? [:]
             return try? UTxORPCEndpoint(url: url, headers: headers)
+        case .v1alpha:
+            guard let url = Self.environment["UTXORPC_V1ALPHA_URL"].flatMap(URL.init(string:)) else { return nil }
+            return try? UTxORPCEndpoint(url: url, apiVersion: .v1alpha)
         }
     }
 
+    /// The v1alpha server has no ReadGenesis, so it wraps the node's context.
     var context: UTxORPCChainContext {
-        try! UTxORPCChainContext(endpoint: endpoint!, network: Self.network)
+        let wrapped = self == .v1alpha ? Self.node.endpoint.map { _ in Self.node.context } : nil
+        return try! UTxORPCChainContext(endpoint: endpoint!, network: Self.network, wrapping: wrapped)
     }
 
     var testDescription: String { rawValue }
@@ -51,8 +58,9 @@ enum LiveUTxORPCServer: String, CaseIterable, CustomTestStringConvertible, Senda
 
 @Suite("UTxO RPC chain context, live servers")
 struct UTxORPCLiveTests {
-    static let servers = LiveUTxORPCServer.available
-    static let both = servers.count == 2
+    /// The v1beta servers; the v1alpha one has its own test below.
+    static let servers = LiveUTxORPCServer.available.filter { $0 != .v1alpha }
+    static let both = servers.contains(.node) && servers.contains(.hosted)
 
     static func pair(_ value: UnitInterval) -> (UInt64, UInt64) { (value.numerator, value.denominator) }
     static func pair(_ value: NonNegativeInterval) -> (UInt64, UInt64) { (value.numerator, value.denominator) }
@@ -208,5 +216,66 @@ struct UTxORPCLiveTests {
         await #expect(throws: CardanoChainError.self) {
             try await server.context.evaluateTxCBOR(cbor: Data([0x80]))
         }
+    }
+
+    /// cardano-node-api reads the same node over v1alpha: the same parameters,
+    /// tip and UTxOs as the node's own v1beta server.
+    @Test(.enabled(
+        if: LiveUTxORPCServer.v1alpha.endpoint != nil && LiveUTxORPCServer.node.endpoint != nil,
+        "set UTXORPC_V1ALPHA_URL and UTXORPC_NODE_SOCKET"))
+    func v1alphaServerMatchesTheNode() async throws {
+        let node = LiveUTxORPCServer.node.context
+        let v1alpha = LiveUTxORPCServer.v1alpha.context
+        Self.expectSame(try await v1alpha.protocolParameters(), try await node.protocolParameters())
+
+        // The pre-Conway fields it does send agree with the node's.
+        func rawParams(_ server: LiveUTxORPCServer) async throws -> Utxorpc_V1beta_Cardano_PParams {
+            try await withUTxORPCClient(endpoint: server.endpoint!) {
+                try await $0.query.readParams(Utxorpc_V1beta_Query_ReadParamsRequest()).values.cardano
+            }
+        }
+        let (alphaRaw, nodeRaw) = (try await rawParams(.v1alpha), try await rawParams(.node))
+        #expect(!UTxORPCMapping.hasGovernanceParameters(alphaRaw))
+        #expect(alphaRaw.minFeeConstant == nodeRaw.minFeeConstant)
+        #expect(alphaRaw.minFeeCoefficient == nodeRaw.minFeeCoefficient)
+        #expect(alphaRaw.coinsPerUtxoByte == nodeRaw.coinsPerUtxoByte)
+        #expect(alphaRaw.maxTxSize == nodeRaw.maxTxSize)
+        #expect(alphaRaw.prices == nodeRaw.prices)
+        #expect(alphaRaw.maxExecutionUnitsPerTransaction == nodeRaw.maxExecutionUnitsPerTransaction)
+        // gouroboros v0.160.2, which the archived cardano-node-api pins, maps the
+        // ledger's language ids 1...3 to V1...V3 where they are 0...2: V1 is lost,
+        // V2 arrives as V1 and V3 as V2. Another reason its parameters are not used.
+        withKnownIssue("cardano-node-api shifts the cost models by one") {
+            #expect(alphaRaw.costModels == nodeRaw.costModels)
+        }
+        #expect(alphaRaw.costModels.plutusV1 == nodeRaw.costModels.plutusV2)
+        #expect(alphaRaw.costModels.plutusV2 == nodeRaw.costModels.plutusV3)
+        #expect(alphaRaw.protocolVersion == nodeRaw.protocolVersion)
+
+        let (nodeTip, alphaTip) = (try await node.chainTip(), try await v1alpha.chainTip())
+        #expect(alphaTip.epoch == nodeTip.epoch)
+        #expect(abs(Int(alphaTip.slot ?? 0) - Int(nodeTip.slot ?? 0)) < 600)
+        #expect(alphaTip.era == "conway")
+
+        // An address the node's tip block paid, read through both servers.
+        let address = try await withUTxORPCClient(endpoint: LiveUTxORPCServer.node.endpoint!) { client in
+            let tip = try await client.sync.readTip(Utxorpc_V1beta_Sync_ReadTipRequest()).tip
+            let block = try #require(try await client.sync.fetchBlock(.with { $0.ref = [tip] }).block.first)
+            return try #require(block.cardano.body.tx.lazy.flatMap(\.outputs).last?.address)
+        }
+        let decoded = try Address(from: .bytes(address))
+        let (fromNode, fromAlpha) = (try await node.utxos(address: decoded), try await v1alpha.utxos(address: decoded))
+        // Blocks may land between the two reads; compare what both saw.
+        let common = Set(fromNode.map(\.input)).intersection(fromAlpha.map(\.input))
+        #expect(!common.isEmpty)
+        for utxo in fromAlpha where common.contains(utxo.input) {
+            #expect(fromNode.first { $0.input == utxo.input } == utxo)
+        }
+        if let first = fromAlpha.first {
+            #expect(try await v1alpha.utxo(input: first.input)?.0 == first)
+        }
+
+        await #expect(throws: CardanoChainError.self) { try await v1alpha.evaluateTxCBOR(cbor: Data([0x80])) }
+        print("UTxO RPC live v1alpha: epoch \(alphaTip.epoch ?? 0), slot \(alphaTip.slot ?? 0), \(fromAlpha.count) UTxOs at the address (node \(fromNode.count))")
     }
 }

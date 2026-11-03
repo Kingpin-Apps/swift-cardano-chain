@@ -76,7 +76,8 @@ public struct UTxORPCEndpointConnector: UTxORPCConnector {
 }
 
 /// A chain context backed by a [UTxO RPC](https://utxorpc.org) server: the
-/// gRPC interface built into cardano-node 11.x, Dolos, or Demeter.
+/// gRPC interface built into cardano-node 11.x, Dolos, Demeter, or
+/// cardano-node-api.
 ///
 /// It answers the tip, protocol and genesis parameters, UTxOs by address or
 /// output reference, and submits and evaluates transactions. Servers differ
@@ -87,6 +88,11 @@ public struct UTxORPCEndpointConnector: UTxORPCConnector {
 ///   Node 11.1.x has no era summary; the epoch is then worked out from the
 ///   genesis parameters.
 /// - **Dolos** also serves ``transactionCBOR(hash:)``.
+/// - **cardano-node-api** speaks only the older v1alpha API: give the endpoint
+///   `apiVersion: .v1alpha`. It has no `ReadGenesis`, `EvalTx` or `ReadTx`,
+///   and its `ReadParams` leaves out the Conway governance parameters, so
+///   the protocol and genesis parameters, and with them the epoch and tip,
+///   come from the wrapped context.
 ///
 /// UTxO RPC v1beta has no stake or governance queries. Those, and anything the
 /// server answers `UNIMPLEMENTED`, go to the context it wraps; without one they
@@ -159,6 +165,11 @@ public struct UTxORPCChainContext: ChainContext {
 
     // MARK: - Chain state
 
+    /// The current protocol parameters from `ReadParams`.
+    ///
+    /// A server that leaves out the Conway governance parameters
+    /// (cardano-node-api) cannot fill them in, so the wrapped context answers
+    /// instead.
     public func protocolParameters() async throws -> ProtocolParameters {
         let response = try await call("ReadParams") {
             try await $0.query.readParams(Utxorpc_V1beta_Query_ReadParamsRequest())
@@ -166,19 +177,29 @@ public struct UTxORPCChainContext: ChainContext {
         guard case .cardano(let params)? = response.values.params else {
             throw CardanoChainError.valueError("UTxO RPC ReadParams returned no Cardano parameters")
         }
+        guard UTxORPCMapping.hasGovernanceParameters(params) else {
+            return try await forward("Conway governance parameters in ReadParams").protocolParameters()
+        }
         return try UTxORPCMapping.protocolParameters(params)
     }
 
     /// The Shelley genesis parameters, read once and kept: they never change.
+    ///
+    /// From `ReadGenesis`, or from the wrapped context on a server without it
+    /// (cardano-node-api).
     public func genesisParameters() async throws -> GenesisParameters {
         if let cached = cache.state.withLock({ $0.genesis }) { return cached }
-        let response = try await call("ReadGenesis") {
+        let parameters: GenesisParameters
+        if let response = try await callIfImplemented("ReadGenesis", {
             try await $0.query.readGenesis(Utxorpc_V1beta_Query_ReadGenesisRequest())
+        }) {
+            guard case .cardano(let genesis)? = response.config else {
+                throw CardanoChainError.valueError("UTxO RPC ReadGenesis returned no Cardano genesis")
+            }
+            parameters = try UTxORPCMapping.genesisParameters(genesis)
+        } else {
+            parameters = try await forward("genesisParameters()").genesisParameters()
         }
-        guard case .cardano(let genesis)? = response.config else {
-            throw CardanoChainError.valueError("UTxO RPC ReadGenesis returned no Cardano genesis")
-        }
-        let parameters = try UTxORPCMapping.genesisParameters(genesis)
         cache.state.withLock { $0.genesis = parameters }
         return parameters
     }

@@ -252,6 +252,42 @@ struct UTxORPCTests {
         }
     }
 
+    /// cardano-node-api has no ReadGenesis; the wrapped context supplies it,
+    /// and with it the epoch and tip.
+    @Test func genesisWithoutReadGenesisComesFromTheWrappedContext() async throws {
+        var chain = FakeUTxORPCChain()
+        chain.servesGenesis = false
+        chain.nodeService = false
+        let context = Self.context(chain, wrapping: Self.context())
+        #expect(try await context.genesisParameters().epochLength == 432_000)
+        #expect(try await context.chainTip().epoch == (try await Self.context().chainTip().epoch))
+
+        do {
+            _ = try await Self.context(chain).genesisParameters()
+            Issue.record("genesisParameters should have failed")
+        } catch CardanoChainError.notImplemented(let message) {
+            #expect(message?.contains("wrapped context") == true)
+        }
+    }
+
+    /// cardano-node-api's ReadParams has no governance parameters; rather than
+    /// invent them, the wrapped context answers.
+    @Test func parametersWithoutGovernanceComeFromTheWrappedContext() async throws {
+        var chain = FakeUTxORPCChain()
+        chain.params.poolVotingThresholds = .init()
+        chain.params.drepVotingThresholds = .init()
+        chain.params.maxTxSize = 1
+        let context = Self.context(chain, wrapping: Self.context())
+        #expect(try await context.protocolParameters().maxTxSize == 16_384)
+
+        do {
+            _ = try await Self.context(chain).protocolParameters()
+            Issue.record("protocolParameters should have failed")
+        } catch CardanoChainError.notImplemented(let message) {
+            #expect(message?.contains("governance") == true)
+        }
+    }
+
     @Test func stakeAndGovernanceGoToTheWrappedContext() async throws {
         let context = Self.context()
         await #expect(throws: CardanoChainError.self) { try await context.treasury() }

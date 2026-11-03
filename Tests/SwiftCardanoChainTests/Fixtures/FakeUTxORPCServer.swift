@@ -16,6 +16,8 @@ struct FakeUTxORPCChain: Sendable {
     var tipTimestamp: UInt64 = 1_793_000_000_000
     var params = FakeUTxORPCChain.mainnetParams
     var genesis = FakeUTxORPCChain.mainnetGenesis
+    /// `false` answers `ReadGenesis` with `UNIMPLEMENTED`, as cardano-node-api does.
+    var servesGenesis = true
     /// `nil` answers `ReadEraSummary` with `UNIMPLEMENTED`.
     var eraSummaries: [Utxorpc_V1beta_Cardano_EraSummary]?
     /// Serve `cardano.rpc.Node`, as only cardano-node does.
@@ -155,7 +157,8 @@ struct FakeQueryService: Utxorpc_V1beta_Query_QueryService.SimpleServiceProtocol
     func readGenesis(
         request: Utxorpc_V1beta_Query_ReadGenesisRequest, context: ServerContext
     ) async throws -> Utxorpc_V1beta_Query_ReadGenesisResponse {
-        .with {
+        guard chain.servesGenesis else { throw unimplemented("ReadGenesis") }
+        return .with {
             $0.genesis = Data(repeating: 0x1A, count: 32)
             $0.caip2 = "cardano:mainnet"
             $0.cardano = chain.genesis

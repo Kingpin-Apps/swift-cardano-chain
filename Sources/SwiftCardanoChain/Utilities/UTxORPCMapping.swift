@@ -71,6 +71,13 @@ enum UTxORPCMapping {
     /// The voting thresholds arrive as lists in CIP-1694 order, the ledger's
     /// own order. UTxO RPC does not carry the reference-script size limits, so
     /// those stay `nil`.
+    /// Whether `p` carries the Conway governance parameters. cardano-node-api
+    /// sends only the pre-Conway ones: no voting thresholds, governance
+    /// deposits or committee limits.
+    static func hasGovernanceParameters(_ p: Utxorpc_V1beta_Cardano_PParams) -> Bool {
+        !p.poolVotingThresholds.thresholds.isEmpty || !p.drepVotingThresholds.thresholds.isEmpty
+    }
+
     static func protocolParameters(_ p: Utxorpc_V1beta_Cardano_PParams) throws -> ProtocolParameters {
         func units(_ u: Utxorpc_V1beta_Cardano_ExUnits) -> ProtocolParametersExecutionUnits {
             ProtocolParametersExecutionUnits(memory: u.memory, steps: u.steps)
