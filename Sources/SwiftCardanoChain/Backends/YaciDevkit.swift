@@ -906,10 +906,6 @@ public actor YaciDevkitChainContext: ChainContext {
         }
     }
 
-    /// Ogmios' names for script purposes, where they differ from the redeemer tags used by the
-    /// rest of this library.
-    private static let ogmiosPurposes = ["withdraw": "withdrawal", "publish": "certificate"]
-
     /// Evaluate execution units of a transaction.
     ///
     /// The transaction is sent as hex, which is the form this endpoint takes. It needs Ogmios
@@ -938,7 +934,8 @@ public actor YaciDevkitChainContext: ChainContext {
     /// The execution units in an evaluation response: Ogmios v5's
     /// `{"result": {"EvaluationResult": {"spend:0": {memory, steps}}}}` or v6's
     /// `{"result": [{"validator": {purpose, index}, "budget": {memory, cpu}}]}`.
-    /// An entry that does not read throws rather than being skipped.
+    /// An entry that does not read throws rather than being skipped. Keys use
+    /// the transaction builder's tag names (`cert:0`, not `publish:0`).
     static func evaluationUnits(_ body: ChainJSON) throws -> [String: ExecutionUnits] {
         // A budget is never negative; read as unsigned, then fit to the Int64 `ExecutionUnits` holds.
         func amount(_ value: ChainJSON?, _ what: String) throws -> Int64 {
@@ -953,12 +950,8 @@ public actor YaciDevkitChainContext: ChainContext {
         var result: [String: ExecutionUnits] = [:]
         if let evaluation = body["result"]?["EvaluationResult"]?.object {
             for (key, cost) in evaluation {
-                let parts = key.split(separator: ":", maxSplits: 1).map(String.init)
-                guard parts.count == 2 else {
-                    throw CardanoChainError.transactionFailed("Yaci evaluation key \(key) is not purpose:index")
-                }
-                let purpose = Self.ogmiosPurposes[parts[0]] ?? parts[0]
-                result["\(purpose):\(parts[1])"] = try units(cost, steps: "steps", "Yaci evaluation \(key)")
+                result[try LedgerValues.redeemerKey(key, "Yaci evaluation key")] =
+                    try units(cost, steps: "steps", "Yaci evaluation \(key)")
             }
         } else if let list = body["result"]?.array {
             for entry in list {
@@ -967,8 +960,8 @@ public actor YaciDevkitChainContext: ChainContext {
                 else {
                     throw CardanoChainError.transactionFailed("Yaci evaluation entry \(entry) has no validator")
                 }
-                let purpose = Self.ogmiosPurposes[purposeRaw] ?? purposeRaw
-                result["\(purpose):\(index)"] = try units(entry["budget"], steps: "cpu", "Yaci evaluation")
+                result[try LedgerValues.redeemerKey(purpose: purposeRaw, index: index, "Yaci evaluation")] =
+                    try units(entry["budget"], steps: "cpu", "Yaci evaluation")
             }
         } else {
             throw CardanoChainError.transactionFailed("Failed to evaluate transaction: \(body)")

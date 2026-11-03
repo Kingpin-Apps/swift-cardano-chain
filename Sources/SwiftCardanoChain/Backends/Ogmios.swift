@@ -444,7 +444,8 @@ public actor OgmiosChainContext: ChainContext {
     /// Evaluates execution units for a transaction.
     ///
     /// - Parameter cbor: The CBOR-encoded transaction data.
-    /// - Returns: A dictionary mapping redeemer pointers to their execution units.
+    /// - Returns: The execution units of each redeemer, keyed `<tag>:<index>`
+    ///   with the tag as `RedeemerTag.description()` (`cert:0`, not Ogmios's `publish:0`).
     /// - Throws: `CardanoChainError.operationError` if evaluation fails.
     ///
     /// ## Example
@@ -467,7 +468,9 @@ public actor OgmiosChainContext: ChainContext {
         var result: [String: SwiftCardanoCore.ExecutionUnits] = [:]
 
         for evalResult in response {
-            let key = "\(evalResult.validator.purpose.rawValue):\(evalResult.validator.index)"
+            let key = try LedgerValues.redeemerKey(
+                purpose: evalResult.validator.purpose.rawValue, index: evalResult.validator.index,
+                "Ogmios evaluation")
             result[key] = SwiftCardanoCore.ExecutionUnits(
                 mem: try evalResult.budget.memory.checked("Ogmios evaluation \(key) memory"),
                 steps: try evalResult.budget.cpu.checked("Ogmios evaluation \(key) cpu")

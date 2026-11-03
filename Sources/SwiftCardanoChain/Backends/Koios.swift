@@ -742,10 +742,8 @@ public actor KoiosChainContext: ChainContext {
                             let memory = budget["memory"] as? Int,
                             let cpu = budget["cpu"] as? Int
                         {
-
-                            // Handle purpose rename as in Python version
-                            let normalizedPurpose = purpose == "withdraw" ? "withdrawal" : purpose
-                            let key = "\(normalizedPurpose):\(index)"
+                            // Ogmios purpose names, keyed the way the transaction builder looks them up.
+                            let key = try LedgerValues.redeemerKey(purpose: purpose, index: index, "Koios evaluation")
 
                             returnVal[key] = ExecutionUnits(
                                 mem: Int64(memory),

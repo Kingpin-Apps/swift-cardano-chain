@@ -741,7 +741,8 @@ public actor BlockFrostChainContext: ChainContext {
                 as? [String: [String: Int]]
             {
                 for (key, value) in evaluationResult {
-                    returnVal[key] = ExecutionUnits(
+                    // Ogmios v5 purpose names, keyed the way the transaction builder looks them up.
+                    returnVal[try LedgerValues.redeemerKey(key, "Blockfrost evaluation key")] = ExecutionUnits(
                         mem: try LedgerValues.required(value["memory"], "Blockfrost evaluation \(key) memory")
                             .checked("Blockfrost evaluation \(key) memory"),
                         steps: try LedgerValues.required(value["steps"], "Blockfrost evaluation \(key) steps")

@@ -379,6 +379,22 @@ enum OgmiosMockData {
             {
               "validator": {"purpose": "mint", "index": 0},
               "budget": {"memory": 5000, "cpu": 42}
+            },
+            {
+              "validator": {"purpose": "publish", "index": 0},
+              "budget": {"memory": 11, "cpu": 12}
+            },
+            {
+              "validator": {"purpose": "withdraw", "index": 2},
+              "budget": {"memory": 21, "cpu": 22}
+            },
+            {
+              "validator": {"purpose": "vote", "index": 0},
+              "budget": {"memory": 31, "cpu": 32}
+            },
+            {
+              "validator": {"purpose": "propose", "index": 1},
+              "budget": {"memory": 41, "cpu": 42}
             }
           ]
         }

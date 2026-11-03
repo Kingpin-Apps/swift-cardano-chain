@@ -368,7 +368,12 @@ struct OgmiosChainContextTests {
         let cbor = Data(hex: "deadbeef01020304")
         let units = try await context.evaluateTxCBOR(cbor: cbor)
 
-        #expect(units.count == 2)
+        #expect(units.count == 6)
+        // Ogmios's publish/withdraw/vote/propose under the tags the transaction builder looks up.
+        #expect(units["cert:0"] == ExecutionUnits(mem: 11, steps: 12))
+        #expect(units["reward:2"] == ExecutionUnits(mem: 21, steps: 22))
+        #expect(units["voting:0"] == ExecutionUnits(mem: 31, steps: 32))
+        #expect(units["proposing:1"] == ExecutionUnits(mem: 41, steps: 42))
         #expect(units["spend:1"] != nil)
         #expect(units["spend:1"]?.mem == 5_236_222)
         #expect(units["spend:1"]?.steps == 1_212_353)
