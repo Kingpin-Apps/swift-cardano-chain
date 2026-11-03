@@ -289,6 +289,12 @@ public struct UTxORPCChainContext: ChainContext {
     /// The execution units of each redeemer, evaluated by the server against
     /// its current ledger state, keyed `<tag>:<index>`.
     ///
+    /// cardano-node evaluates an unsigned transaction, as a transaction
+    /// builder needs. Dolos (and so Demeter) checks the phase-1 rules first
+    /// and refuses one whose key witnesses are missing (`VKWitnessMissing`);
+    /// evaluate locally with `evaluateTx(tx:resolvedInputs:protocolParameters:slotTimeline:)`
+    /// there instead.
+    ///
     /// - Throws: ``CardanoChainError/transactionFailed(_:)`` when a script
     ///   fails or the server reports a transaction-level error.
     public func evaluateTxCBOR(cbor: Data) async throws -> [String: ExecutionUnits] {
