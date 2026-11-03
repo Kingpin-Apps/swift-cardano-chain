@@ -1,3 +1,9 @@
+## 0.16.0 (2026-11-03)
+
+### Feat
+
+- answer stakePools() from UTxO RPC ReadState
+
 ## 0.15.1 (2026-11-03)
 
 ### Fix
