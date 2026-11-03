@@ -259,10 +259,16 @@ enum UTxORPCMapping {
     /// - Throws: ``CardanoChainError/transactionFailed(_:)`` listing every
     ///   error when evaluation reported any: a script that failed, or a
     ///   transaction-level error such as a balance mismatch.
+    /// Whether `error` names a redeemer (a script failed), rather than the
+    /// transaction as a whole (a ledger rule such as a missing signature).
+    static func isRedeemerError(_ error: Utxorpc_V1beta_Cardano_EvalReport) -> Bool {
+        error.hasPurpose && redeemerTag(error.purpose) != nil
+    }
+
     static func executionUnits(_ report: Utxorpc_V1beta_Cardano_TxEval) throws -> [String: ExecutionUnits] {
         guard report.errors.isEmpty else {
             let messages = report.errors.map { error -> String in
-                guard error.hasPurpose, let tag = redeemerTag(error.purpose) else { return error.msg }
+                guard isRedeemerError(error), let tag = redeemerTag(error.purpose) else { return error.msg }
                 return "\(tag.description()):\(error.index): \(error.msg)"
             }
             throw CardanoChainError.transactionFailed(

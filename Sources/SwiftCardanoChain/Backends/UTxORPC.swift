@@ -89,7 +89,8 @@ public struct UTxORPCEndpointConnector: UTxORPCConnector {
 ///   genesis parameters.
 /// - **Dolos** also serves ``transactionCBOR(hash:)``.
 /// - **cardano-node-api** speaks only the older v1alpha API: give the endpoint
-///   `apiVersion: .v1alpha`. It has no `ReadGenesis`, `EvalTx` or `ReadTx`,
+///   `apiVersion: .v1alpha`. It has no `ReadGenesis`, `EvalTx` or `ReadTx`
+///   (transactions are evaluated locally),
 ///   and its `ReadParams` leaves out the Conway governance parameters, so
 ///   the protocol and genesis parameters, and with them the epoch and tip,
 ///   come from the wrapped context.
@@ -307,24 +308,69 @@ public struct UTxORPCChainContext: ChainContext {
         }
     }
 
-    /// The execution units of each redeemer, evaluated by the server against
-    /// its current ledger state, keyed `<tag>:<index>`.
+    /// The execution units of each redeemer, keyed `<tag>:<index>`.
     ///
-    /// cardano-node evaluates an unsigned transaction, as a transaction
-    /// builder needs. Dolos (and so Demeter) checks the phase-1 rules first
-    /// and refuses one whose key witnesses are missing (`VKWitnessMissing`);
-    /// evaluate locally with `evaluateTx(tx:resolvedInputs:protocolParameters:slotTimeline:)`
-    /// there instead.
+    /// The server evaluates the scripts against its current ledger state.
+    /// Evaluation is about the scripts, as with Ogmios: a transaction being
+    /// built is not signed or balanced yet, so ledger-rule complaints are
+    /// expected. When the server reports only those, with no script error
+    /// (Dolos, and so Demeter, refuses an unsigned transaction with
+    /// `VKWitnessMissing`), or has no `EvalTx` at all (cardano-node-api), the
+    /// scripts are evaluated locally instead, with inputs from `ReadUtxos`.
+    /// Local evaluation prices scripts with the server's own cost models, which
+    /// on Demeter can lag the network's.
     ///
     /// - Throws: ``CardanoChainError/transactionFailed(_:)`` when a script
-    ///   fails or the server reports a transaction-level error.
+    ///   fails, or when the server's ledger-rule errors stand because local
+    ///   evaluation can't run either.
     public func evaluateTxCBOR(cbor: Data) async throws -> [String: ExecutionUnits] {
         let request = Utxorpc_V1beta_Submit_EvalTxRequest.with { $0.tx.raw = cbor }
-        let response = try await call("EvalTx") { try await $0.submit.evalTx(request) }
+        guard let response = try await callIfImplemented("EvalTx", { try await $0.submit.evalTx(request) }) else {
+            return try await evaluateLocally(cbor: cbor)
+        }
         guard case .cardano(let report)? = response.report.chain else {
             throw CardanoChainError.valueError("UTxO RPC EvalTx returned no Cardano report")
         }
+        if !report.errors.isEmpty, !report.errors.contains(where: UTxORPCMapping.isRedeemerError) {
+            do {
+                return try await evaluateLocally(cbor: cbor)
+            } catch {
+                return try UTxORPCMapping.executionUnits(report)
+            }
+        }
         return try UTxORPCMapping.executionUnits(report)
+    }
+
+    /// Evaluates the transaction's scripts with the local CEK machine: its
+    /// inputs and reference inputs from the live UTxO set (or the wrapped
+    /// context), and this context's protocol parameters and slot timeline.
+    func evaluateLocally(cbor: Data) async throws -> [String: ExecutionUnits] {
+        let tx: Transaction
+        do {
+            tx = try Transaction.fromCBOR(data: cbor)
+        } catch {
+            throw CardanoChainError.invalidArgument("Failed to decode transaction CBOR: \(error)")
+        }
+        let inputs = tx.transactionBody.inputs.asArray + (tx.transactionBody.referenceInputs?.asList ?? [])
+        let request = Utxorpc_V1beta_Query_ReadUtxosRequest.with { $0.keys = inputs.map(UTxORPCMapping.txoRef) }
+        let found = try await call("ReadUtxos") { try await $0.query.readUtxos(request) }.items.map(UTxORPCMapping.utxo)
+
+        var resolved: [UTxO] = []
+        for input in inputs {
+            if let utxo = found.first(where: { $0.input == input }) {
+                resolved.append(utxo)
+            } else if let (utxo, _) = try await wrapped?.utxo(input: input) {
+                resolved.append(utxo)
+            } else {
+                throw CardanoChainError.valueError("Cannot evaluate transaction: input \(input) not found in the live UTxO set")
+            }
+        }
+        return try await evaluateTx(
+            tx: tx,
+            resolvedInputs: resolved,
+            protocolParameters: try await protocolParameters(),
+            slotTimeline: try await slotTimeline()
+        )
     }
 
     // MARK: - Forwarded to the wrapped context

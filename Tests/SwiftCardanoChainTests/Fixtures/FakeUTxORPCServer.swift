@@ -26,6 +26,8 @@ struct FakeUTxORPCChain: Sendable {
     /// `nil` answers `ReadTx` with `UNIMPLEMENTED`.
     var transactions: [Data: Data]?
     var evaluation = Utxorpc_V1beta_Cardano_TxEval()
+    /// `false` answers `EvalTx` with `UNIMPLEMENTED`, as cardano-node-api does.
+    var servesEvalTx = true
     /// A rejection reason makes `SubmitTx` fail with it.
     var submitRejection: String?
 
@@ -185,7 +187,8 @@ struct FakeSubmitService: Utxorpc_V1beta_Submit_SubmitService.SimpleServiceProto
     func evalTx(
         request: Utxorpc_V1beta_Submit_EvalTxRequest, context: ServerContext
     ) async throws -> Utxorpc_V1beta_Submit_EvalTxResponse {
-        .with { $0.report.cardano = chain.evaluation }
+        guard chain.servesEvalTx else { throw unimplemented("EvalTx") }
+        return .with { $0.report.cardano = chain.evaluation }
     }
 
     func submitTx(

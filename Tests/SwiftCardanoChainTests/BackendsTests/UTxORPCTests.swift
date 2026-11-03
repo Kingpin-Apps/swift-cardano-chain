@@ -1,6 +1,9 @@
 import BigInt
 import Foundation
+import OpenAPIRuntime
+import SwiftBlockfrostAPI
 import SwiftCardanoCore
+import SwiftCardanoUPLC
 import Testing
 import UTxORPC
 
@@ -231,6 +234,75 @@ struct UTxORPCTests {
         } catch CardanoChainError.transactionFailed(let message) {
             #expect(message?.contains("mint:0: script failed") == true)
             #expect(message?.contains("; value not conserved") == true)
+        }
+    }
+
+    /// A chain holding one 10 ADA output, with mainnet's real PlutusV3 cost
+    /// model, and an unsigned transaction minting from it under an
+    /// always-succeeds policy.
+    static func mintingChain() async throws -> (FakeUTxORPCChain, Data) {
+        let blockfrost = try await BlockFrostChainContext(
+            projectId: "fake-project-id",
+            network: .mainnet,
+            client: SwiftBlockfrostAPI.Client(
+                serverURL: URL(string: "https://cardano-mainnet.blockfrost.io/api/v0")!,
+                transport: MockTransport()
+            )
+        )
+        var chain = FakeUTxORPCChain()
+        chain.params.costModels.plutusV3.values = try await blockfrost.protocolParameters().costModels.PlutusV3
+        chain.utxos = [try utxo(0x11, 0, lovelace: 10_000_000)]
+
+        var parser = UPLCParser()
+        let program = try DeBruijnConverter().convert(try parser.parse("(program 1.1.0 (lam ctx (con unit ())))"))
+        let script = PlutusV3Script(data: try Primitive.bytes(try FlatEncoder().encode(program)).toCBORData())
+        let policy = try scriptHash(script: .plutusV3Script(script))
+        let address = try Address(from: .string(Self.address))
+        let input = TransactionInput(transactionId: TransactionId(payload: Data(repeating: 0x11, count: 32)), index: 0)
+        let minted = MultiAsset([policy: Asset([AssetName(from: "T"): BigInt(1)])])
+        let body = TransactionBody(
+            inputs: .list([input]),
+            outputs: [TransactionOutput(address: address, amount: Value(coin: 8_000_000, multiAsset: minted))],
+            fee: 2_000_000,
+            mint: minted,
+            collateral: .list([input])
+        )
+        let redeemer = Redeemer(
+            tag: .mint, index: 0, data: try Unit().toPlutusData(),
+            exUnits: ExecutionUnits(mem: 14_000_000, steps: 10_000_000_000))
+        let tx = Transaction(
+            transactionBody: body,
+            transactionWitnessSet: TransactionWitnessSet(redeemers: .list([redeemer]), plutusV3Script: .list([script])))
+        return (chain, try tx.toCBORData())
+    }
+
+    /// Dolos refuses an unsigned transaction with a ledger-rule error and no
+    /// script error; the scripts are then evaluated locally.
+    @Test func ledgerRuleErrorsFallBackToLocalEvaluation() async throws {
+        var (chain, cbor) = try await Self.mintingChain()
+        chain.evaluation = .with { $0.errors = [.with { $0.msg = "VKWitnessMissing" }] }
+        let units = try await Self.context(chain).evaluateTxCBOR(cbor: cbor)
+        #expect(units.keys.sorted() == ["mint:0"])
+        #expect((units["mint:0"]?.steps ?? 0) > 0)
+    }
+
+    /// cardano-node-api has no EvalTx at all.
+    @Test func noEvalTxEvaluatesLocally() async throws {
+        var (chain, cbor) = try await Self.mintingChain()
+        chain.servesEvalTx = false
+        #expect(try await Self.context(chain).evaluateTxCBOR(cbor: cbor).keys.sorted() == ["mint:0"])
+    }
+
+    /// When local evaluation can't run either, the server's errors stand.
+    @Test func ledgerRuleErrorsStandWithoutTheInputs() async throws {
+        var (chain, cbor) = try await Self.mintingChain()
+        chain.utxos = []
+        chain.evaluation = .with { $0.errors = [.with { $0.msg = "BadInputsUTxO" }] }
+        do {
+            _ = try await Self.context(chain).evaluateTxCBOR(cbor: cbor)
+            Issue.record("evaluation should have failed")
+        } catch CardanoChainError.transactionFailed(let message) {
+            #expect(message?.contains("BadInputsUTxO") == true)
         }
     }
 

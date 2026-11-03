@@ -90,18 +90,26 @@ struct UTxORPCPlutusLiveTests {
         print("UTxO RPC eval node: mint:0 \(mint.mem) mem / \(mint.steps) steps, local CEK \(local["mint:0"].map { "\($0.mem) / \($0.steps)" } ?? "-")")
     }
 
-    /// Dolos validates the transaction's phase-1 rules before evaluating its
-    /// scripts, so it refuses a transaction that is not yet signed: the state
-    /// a transaction builder evaluates in.
+    /// Dolos checks the ledger rules before the scripts, so it refuses a
+    /// transaction that isn't signed yet; the context then evaluates the
+    /// scripts locally, and prices them as the node would.
     @Test(.enabled(if: LiveUTxORPCServer.hosted.endpoint != nil, "set UTXORPC_URL"))
-    func dolosRefusesAnUnsignedTransaction() async throws {
-        let utxo = try await Self.liveInput(on: .hosted)
+    func dolosFallsBackToLocalEvaluation() async throws {
+        let server = LiveUTxORPCServer.hosted
+        let utxo = try await Self.liveInput(on: server)
         let tx = try Self.mintTransaction(spending: utxo, budget: ExecutionUnits(mem: 14_000_000, steps: 10_000_000_000))
-        do {
-            _ = try await LiveUTxORPCServer.hosted.context.evaluateTxCBOR(cbor: try tx.toCBORData())
-            Issue.record("Dolos now evaluates unsigned transactions; drop this test and the note on UTxORPCChainContext")
-        } catch CardanoChainError.transactionFailed(let message) {
-            #expect(message?.contains("VKWitnessMissing") == true)
+        let cbor = try tx.toCBORData()
+
+        let report = try await withUTxORPCClient(endpoint: server.endpoint!) {
+            try await $0.submit.evalTx(.with { $0.tx.raw = cbor }).report.cardano
         }
+        if !report.errors.contains(where: { $0.msg.contains("VKWitnessMissing") }) {
+            Issue.record("Dolos now evaluates unsigned transactions; the local fallback is no longer needed for it")
+        }
+
+        let units = try await server.context.evaluateTxCBOR(cbor: cbor)
+        let mint = try #require(units["mint:0"])
+        #expect(mint == ExecutionUnits(mem: 500, steps: 64_100))
+        print("UTxO RPC eval Dolos: local fallback mint:0 \(mint.mem) mem / \(mint.steps) steps")
     }
 }
