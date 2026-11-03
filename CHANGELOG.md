@@ -1,3 +1,9 @@
+## 0.15.1 (2026-11-03)
+
+### Fix
+
+- cache chain state for 20 seconds and refresh cardano-cli parameters per epoch
+
 ## 0.15.0 (2026-11-03)
 
 ### Feat
