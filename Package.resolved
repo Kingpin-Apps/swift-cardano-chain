@@ -1,5 +1,5 @@
 {
-  "originHash" : "14de7614cf8a5f9f6aa5c193a0a8ab7d135ae3cf983037ef59304305aaaf2ef3",
+  "originHash" : "54c47bc98eff3413d97582d424c7f7e85b2b1e0464fbde4979a6e46e92ce6141",
   "pins" : [
     {
       "identity" : "base32",
@@ -431,6 +431,15 @@
       "state" : {
         "revision" : "869129b7bf4ecc57b97d0193ad29690ca2134750",
         "version" : "1.8.1"
+      }
+    },
+    {
+      "identity" : "swift-utxorpc",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/Kingpin-Apps/swift-utxorpc.git",
+      "state" : {
+        "revision" : "7e6bdb7c1d28371ef9393d277371dddc2dee006b",
+        "version" : "0.1.0"
       }
     },
     {

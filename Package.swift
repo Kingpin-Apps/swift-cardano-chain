@@ -42,8 +42,7 @@ let package = Package(
         .package(url: "https://github.com/Kingpin-Apps/swift-koios.git", from: "0.3.0"),
         .package(url: "https://github.com/Kingpin-Apps/swift-ogmios.git", from: "0.4.0"),
         .package(url: "https://github.com/Kingpin-Apps/swift-kupo.git", from: "0.2.0"),
-        // Local until swift-utxorpc has a GitHub repo and a tag: switch to the URL before release.
-        .package(path: "../swift-utxorpc"),
+        .package(url: "https://github.com/Kingpin-Apps/swift-utxorpc.git", from: "0.1.0"),
         .package(url: "https://github.com/Kingpin-Apps/swift-yaci-api.git", from: "0.2.0"),
         .package(url: "https://github.com/Kingpin-Apps/swift-cardano-network.git", from: "1.1.1"),
         .package(url: "https://github.com/Kingpin-Apps/swift-cardano-uplc.git", from: "0.8.1"),
