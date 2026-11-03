@@ -1,3 +1,9 @@
+## 0.16.1 (2026-11-03)
+
+### Fix
+
+- prefer the wrapped context's complete stake pool list over ReadState
+
 ## 0.16.0 (2026-11-03)
 
 ### Feat
