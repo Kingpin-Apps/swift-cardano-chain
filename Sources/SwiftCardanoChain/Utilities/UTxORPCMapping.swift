@@ -153,8 +153,7 @@ enum UTxORPCMapping {
 
     // MARK: - Genesis
 
-    /// The Shelley genesis parameters from `ReadGenesis`. `slot_length` is in
-    /// milliseconds and `system_start` is ISO 8601.
+    /// The Shelley genesis parameters from `ReadGenesis`. `system_start` is ISO 8601.
     static func genesisParameters(_ g: Utxorpc_V1beta_Cardano_Genesis) throws -> GenesisParameters {
         GenesisParameters(
             activeSlotsCoefficient: try unitInterval(g.activeSlotsCoeff, "UTxO RPC genesis activeSlotsCoeff"),
@@ -164,12 +163,24 @@ enum UTxORPCMapping {
             networkId: g.networkID,
             networkMagic: g.networkMagic,
             securityParam: UInt64(g.securityParam),
-            // Seconds, exactly: a 200 ms slot is 0.2, not 0.
-            slotLength: Decimal(g.slotLength) / 1000,
+            slotLength: try slotLengthSeconds(g.slotLength),
             slotsPerKesPeriod: UInt64(g.slotsPerKesPeriod),
             systemStart: try systemStart(g.systemStart),
             updateQuorum: UInt64(g.updateQuorum)
         )
+    }
+
+    /// The genesis slot length in seconds, exactly: a 200 ms slot is 0.2, not 0.
+    ///
+    /// The spec gives `slot_length` no unit and servers disagree: cardano-node
+    /// sends milliseconds (1000 on mainnet), Dolos the genesis file's whole
+    /// seconds (1). A Shelley slot lasts well under 100 seconds, so 100 or more
+    /// is milliseconds and anything less is seconds.
+    static func slotLengthSeconds(_ raw: UInt32) throws -> Decimal {
+        guard raw > 0 else {
+            throw CardanoChainError.valueError("UTxO RPC genesis slot length is 0")
+        }
+        return raw >= 100 ? Decimal(raw) / 1000 : Decimal(raw)
     }
 
     /// The genesis start time.

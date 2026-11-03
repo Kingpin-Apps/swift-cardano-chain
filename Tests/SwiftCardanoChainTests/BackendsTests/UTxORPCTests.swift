@@ -95,6 +95,22 @@ struct UTxORPCTests {
         #expect(genesis.systemStart == Date(timeIntervalSince1970: 1_506_203_091))
     }
 
+    /// cardano-node sends milliseconds, Dolos the genesis file's seconds.
+    @Test(arguments: [(UInt32(1_000), "1"), (1, "1"), (200, "0.2"), (20, "20")])
+    func slotLengthInEitherUnit(_ raw: UInt32, _ seconds: String) throws {
+        #expect(try UTxORPCMapping.slotLengthSeconds(raw) == Decimal(string: seconds))
+    }
+
+    @Test func aZeroSlotLengthIsRejected() {
+        #expect(throws: CardanoChainError.self) { try UTxORPCMapping.slotLengthSeconds(0) }
+    }
+
+    @Test func aTipWithoutHeightHasNoBlockNumber() async throws {
+        var chain = FakeUTxORPCChain()
+        chain.tipHeight = 0
+        #expect(try await Self.context(chain).chainTip().block == nil)
+    }
+
     // MARK: - Tip and epochs
 
     /// Node 11.1.x has no era summary: the epoch comes from mainnet's Byron

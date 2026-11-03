@@ -185,7 +185,8 @@ public struct UTxORPCChainContext: ChainContext {
         let position = try await epochPosition(slot: tip.slot)
         let era = try await era()
         return ChainTip(
-            block: tip.height,
+            // Dolos leaves the height unset; only the genesis block is height 0.
+            block: tip.height > 0 ? tip.height : nil,
             epoch: position.epoch,
             era: era?.rawValue,
             hash: tip.hash.toHex,
