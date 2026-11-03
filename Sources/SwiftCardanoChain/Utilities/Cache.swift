@@ -1,12 +1,20 @@
 import Foundation
 
+/// How long backends reuse a chain state answer (tip, epoch) before asking again.
+///
+/// Short enough that a new block or epoch shows up quickly, long enough that
+/// the several calls one transaction build makes share a single query.
+public enum ChainStateCache {
+    public static let lifetime: TimeInterval = 20
+}
+
 final class Cache<Key: Hashable, Value> {
     private let wrapped = NSCache<WrappedKey, Entry>()
     private let dateProvider: () -> Date
     private let entryLifetime: TimeInterval
 
     init(dateProvider: @escaping () -> Date = Date.init,
-         entryLifetime: TimeInterval = 60) {
+         entryLifetime: TimeInterval = ChainStateCache.lifetime) {
         self.dateProvider = dateProvider
         self.entryLifetime = entryLifetime
     }

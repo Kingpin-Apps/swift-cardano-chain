@@ -61,7 +61,7 @@ public actor NodeSocketChainContext: ChainContext {
     private var _epoch: Int?
     private var lastEpochFetch: TimeInterval = 0
     private var _epochFetch: Task<Int, Error>?
-    private let epochCacheTTL: TimeInterval = 60
+    private let epochCacheTTL: TimeInterval = ChainStateCache.lifetime
 
     nonisolated public var networkId: NetworkId { _network.networkId }
 

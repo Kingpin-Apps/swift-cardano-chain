@@ -70,15 +70,18 @@ public actor CardanoCliChainContext: ChainContext {
     private var lastChainTipFetch: TimeInterval = 0
     private var refetchChainTipInterval: TimeInterval
     private var utxoCache: [String: ([UTxO], TimeInterval)]
+    private let utxoCacheSize: Int
     private var datumCache: [String: Any]
+    /// The tip slot and epoch, each reused for ``ChainStateCache/lifetime``.
     private let cache = Cache<String, Int>()
-    private let cacheTTL: TimeInterval = 1.0  // 1 second TTL
     private let _network: Network
     private var _epochFetch: Task<Int, Error>?
     private var _lastBlockSlotFetch: Task<Int, Error>?
     private var _genesisParameters: GenesisParameters?
     private var _genesisParametersFetch: Task<GenesisParameters, Error>?
     private var _protocolParameters: ProtocolParameters?
+    /// The epoch ``_protocolParameters`` were fetched in.
+    private var _protocolParametersEpoch: Int?
     private var _protocolParametersFetch: Task<ProtocolParameters, Error>?
 
     // MARK: - ChainContext Protocol Properties
@@ -92,14 +95,16 @@ public actor CardanoCliChainContext: ChainContext {
     }
 
     public func epoch() async throws -> Int {
+        let cacheKey = "epoch"
+        if let cachedValue = self.cache.value(forKey: cacheKey) { return cachedValue }
         if let inFlight = _epochFetch { return try await inFlight.value }
 
         // CLI calls fork a subprocess. Dedup concurrent callers via an in-flight
         // Task so we don't fork multiple `cardano-cli` processes for the same query.
-        // No long-lived cache here — each fresh call invokes the CLI again.
         let task = Task<Int, Error> {
             do {
                 let value: Int = try await self.cli.getEpoch().checked("cardano-cli epoch")
+                self.cache.insert(value, forKey: cacheKey)
                 self._epochFetch = nil
                 return value
             } catch {
@@ -178,14 +183,19 @@ public actor CardanoCliChainContext: ChainContext {
     }
 
     public func protocolParameters() async throws -> ProtocolParameters {
-        let chainTipUpdated = try await self.isChainTipUpdated()
-        if !chainTipUpdated, let cached = _protocolParameters { return cached }
+        // Parameters only change at an epoch boundary, so they are refetched
+        // when the epoch moves on, like the other backends.
+        let currentEpoch = try await epoch()
+        if let cached = _protocolParameters, _protocolParametersEpoch == currentEpoch {
+            return cached
+        }
         if let inFlight = _protocolParametersFetch { return try await inFlight.value }
 
         let task = Task<ProtocolParameters, Error> {
             do {
                 let value = try await self.queryCurrentProtocolParams()
                 self._protocolParameters = value
+                self._protocolParametersEpoch = currentEpoch
                 self._protocolParametersFetch = nil
                 return value
             } catch {
@@ -226,6 +236,7 @@ public actor CardanoCliChainContext: ChainContext {
     ) async throws {
         self.refetchChainTipInterval = refetchChainTipInterval ?? 1000
         self.utxoCache = [:]
+        self.utxoCacheSize = max(utxoCacheSize, 1)
         self.datumCache = [:]
         self._network = network
 
@@ -255,6 +266,7 @@ public actor CardanoCliChainContext: ChainContext {
     public init(cardanoConfig: CardanoConfig) async throws {
         self.refetchChainTipInterval = 1000
         self.utxoCache = [:]
+        self.utxoCacheSize = 10000
         self.datumCache = [:]
         self._network = cardanoConfig.network
 
@@ -296,6 +308,7 @@ public actor CardanoCliChainContext: ChainContext {
     ///
     /// - Returns: True if the chain tip has been updated, false otherwise
     /// - Throws: CardanoChainError if the query fails
+    @available(*, deprecated, message: "Unused: protocol parameters now refresh when the epoch changes. Only reports whether the node is still syncing.")
     public func isChainTipUpdated() async throws -> Bool {
         // Fetch at almost every refetchChainTipInterval seconds
         if Date().timeIntervalSince1970 - lastChainTipFetch < refetchChainTipInterval {
@@ -383,7 +396,9 @@ public actor CardanoCliChainContext: ChainContext {
         // Query the UTxOs
         let utxos = try await cli.utxos(address: address)
 
-        // Cache the UTxOs
+        // Cache the UTxOs. Entries are keyed by tip slot, so older ones are
+        // never read again; start over rather than grow past the size limit.
+        if utxoCache.count >= utxoCacheSize { utxoCache.removeAll(keepingCapacity: true) }
         utxoCache[cacheKey] = (utxos, Date().timeIntervalSince1970)
 
         return utxos

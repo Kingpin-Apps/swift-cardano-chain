@@ -131,6 +131,51 @@ struct CardanoCLIContextTests {
         #expect(protocolParameters.monetaryExpansion == unit(3, 1000))
     }
 
+    @Test("The tip, epoch and protocol parameters are each fetched once within the cache lifetime")
+    func testChainStateIsCached() async throws {
+        let config = createMockConfig()
+        let runner = createCardaonCLIMockCommandRunner(config: config)
+        let paramsArguments = [config.cardano!.cli!.string] + CLICommands.protocolParams
+        given(runner)
+            .run(arguments: .value(paramsArguments), environment: .any, workingDirectory: .any)
+            .willProduce { _, _, _ in
+                AsyncThrowingStream<CommandEvent, any Error> { continuation in
+                    continuation.yield(.standardOutput([UInt8](CLIResponse.protocolParams.utf8)))
+                    continuation.finish()
+                }
+            }
+        let tipArguments = [config.cardano!.cli!.string] + CLICommands.queryTip
+        given(runner)
+            .run(arguments: .value(tipArguments), environment: .any, workingDirectory: .any)
+            .willProduce { _, _, _ in
+                AsyncThrowingStream<CommandEvent, any Error> { continuation in
+                    continuation.yield(.standardOutput([UInt8](CLIResponse.tip100.utf8)))
+                    continuation.finish()
+                }
+            }
+
+        let cli = try await CardanoCLI(configuration: config, commandRunner: runner)
+        let chainContext = try await CardanoCliChainContext(
+            nodeConfig: FilePath(configFilePath!),
+            network: .preview,
+            cli: cli
+        )
+
+        for _ in 0..<3 {
+            _ = try await chainContext.protocolParameters()
+            _ = try await chainContext.epoch()
+        }
+
+        // Before the fix, a synced node never refetched its parameters, and
+        // every epoch() call ran cardano-cli again.
+        verify(runner)
+            .run(arguments: .value(paramsArguments), environment: .any, workingDirectory: .any)
+            .called(1)
+        verify(runner)
+            .run(arguments: .value(tipArguments), environment: .any, workingDirectory: .any)
+            .called(1)
+    }
+
     @Test("Test utxos")
     func testUTxOs() async throws {
         let config = createMockConfig()
