@@ -377,13 +377,16 @@ public struct UTxORPCChainContext: ChainContext {
 
     // MARK: - Stake pools
 
-    /// The pools in the ledger's stake pool distribution, from `ReadState`;
-    /// from the wrapped context on a server without it (cardano-node,
-    /// cardano-node-api).
+    /// The registered stake pools: from the wrapped context when there is one,
+    /// otherwise the pools in the ledger's stake pool distribution, from
+    /// `ReadState`.
     ///
-    /// The distribution lists the pools with delegated stake, so a pool that
-    /// is registered but has none is left out.
+    /// The distribution lists only pools with delegated stake, so a pool that
+    /// is registered but has none is left out. The wrapped context's list is
+    /// complete, so it comes first: callers use the list to tell a new pool
+    /// from a registered one.
     public func stakePools() async throws -> [PoolOperator] {
+        if let wrapped { return try await wrapped.stakePools() }
         let request = Utxorpc_V1beta_Query_ReadStateRequest.with {
             $0.query.cardano.stakePoolDistribution = .init()
         }

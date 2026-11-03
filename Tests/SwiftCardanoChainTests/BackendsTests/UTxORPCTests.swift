@@ -370,6 +370,17 @@ struct UTxORPCTests {
         #expect(pools.map(\.poolKeyHash.payload) == hashes)
     }
 
+    /// ReadState leaves out pools without stake, so a wrapped context's
+    /// complete list wins even when the server has ReadState.
+    @Test func aWrappedContextAnswersStakePoolsFirst() async throws {
+        var chain = FakeUTxORPCChain()
+        chain.poolDistribution = [.with { $0.poolKeyhash = Data(repeating: 0x0A, count: 28) }]
+        var wrappedChain = FakeUTxORPCChain()
+        wrappedChain.poolDistribution = [.with { $0.poolKeyhash = Data(repeating: 0x0C, count: 28) }]
+        let pools = try await Self.context(chain, wrapping: Self.context(wrappedChain)).stakePools()
+        #expect(pools.map(\.poolKeyHash.payload) == [Data(repeating: 0x0C, count: 28)])
+    }
+
     /// cardano-node has no ReadState: the wrapped context answers, and
     /// without one the call is "not implemented".
     @Test func stakePoolsWithoutReadStateNeedAWrappedContext() async throws {
