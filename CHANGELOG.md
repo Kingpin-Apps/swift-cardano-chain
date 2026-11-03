@@ -1,3 +1,18 @@
+## 0.15.0 (2026-11-03)
+
+### Feat
+
+- evaluate locally when a UTxO RPC server can't
+- UTxO RPC v1alpha servers via a wrapped context
+- reuse one UTxO RPC connection per context
+- UTxO RPC chain context
+
+### Fix
+
+- read Dolos genesis slot length and tip height
+- key local evaluation by redeemer tag name
+- key evaluation results by redeemer tag
+
 ## 0.14.0 (2026-10-30)
 
 ### Feat
