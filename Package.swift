@@ -40,7 +40,7 @@ let package = Package(
         .package(url: "https://github.com/Kingpin-Apps/swift-blockfrost-api.git", from: "0.3.0"),
         .package(url: "https://github.com/Kingpin-Apps/swift-handles-api.git", from: "0.1.1"),
         .package(url: "https://github.com/Kingpin-Apps/swift-koios.git", from: "0.3.0"),
-        .package(url: "https://github.com/Kingpin-Apps/swift-ogmios.git", from: "0.4.0"),
+        .package(url: "https://github.com/Kingpin-Apps/swift-ogmios.git", from: "0.4.2"),
         .package(url: "https://github.com/Kingpin-Apps/swift-kupo.git", from: "0.2.0"),
         .package(url: "https://github.com/Kingpin-Apps/swift-utxorpc.git", from: "0.1.0"),
         .package(url: "https://github.com/Kingpin-Apps/swift-yaci-api.git", from: "0.2.0"),
