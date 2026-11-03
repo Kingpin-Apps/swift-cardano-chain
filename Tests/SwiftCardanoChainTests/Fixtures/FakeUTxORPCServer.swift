@@ -28,6 +28,8 @@ struct FakeUTxORPCChain: Sendable {
     var evaluation = Utxorpc_V1beta_Cardano_TxEval()
     /// `false` answers `EvalTx` with `UNIMPLEMENTED`, as cardano-node-api does.
     var servesEvalTx = true
+    /// `nil` answers `ReadState` with `UNIMPLEMENTED`, as cardano-node does.
+    var poolDistribution: [Utxorpc_V1beta_Cardano_PoolStakeShare]?
     /// A rejection reason makes `SubmitTx` fail with it.
     var submitRejection: String?
 
@@ -177,7 +179,13 @@ struct FakeQueryService: Utxorpc_V1beta_Query_QueryService.SimpleServiceProtocol
     func readState(
         request: Utxorpc_V1beta_Query_ReadStateRequest, context: ServerContext
     ) async throws -> Utxorpc_V1beta_Query_ReadStateResponse {
-        throw unimplemented("ReadState")
+        guard let pools = chain.poolDistribution else { throw unimplemented("ReadState") }
+        let wanted = request.query.cardano.stakePoolDistribution.poolKeyhashes
+        return .with {
+            $0.result.cardano.stakePoolDistribution.pools = wanted.isEmpty
+                ? pools : pools.filter { wanted.contains($0.poolKeyhash) }
+            $0.ledgerTip = tip
+        }
     }
 }
 

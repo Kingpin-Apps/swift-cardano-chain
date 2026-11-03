@@ -360,6 +360,32 @@ struct UTxORPCTests {
         }
     }
 
+    @Test func stakePoolsFromReadState() async throws {
+        var chain = FakeUTxORPCChain()
+        let hashes = [Data(repeating: 0x0A, count: 28), Data(repeating: 0x0B, count: 28)]
+        chain.poolDistribution = hashes.map { hash in
+            .with { $0.poolKeyhash = hash; $0.stakeFraction = .ratio(1, 2) }
+        }
+        let pools = try await Self.context(chain).stakePools()
+        #expect(pools.map(\.poolKeyHash.payload) == hashes)
+    }
+
+    /// cardano-node has no ReadState: the wrapped context answers, and
+    /// without one the call is "not implemented".
+    @Test func stakePoolsWithoutReadStateNeedAWrappedContext() async throws {
+        var wrappedChain = FakeUTxORPCChain()
+        wrappedChain.poolDistribution = [.with { $0.poolKeyhash = Data(repeating: 0x0C, count: 28) }]
+        let pools = try await Self.context(wrapping: Self.context(wrappedChain)).stakePools()
+        #expect(pools.map(\.poolKeyHash.payload) == [Data(repeating: 0x0C, count: 28)])
+
+        do {
+            _ = try await Self.context().stakePools()
+            Issue.record("stakePools should have failed")
+        } catch CardanoChainError.notImplemented(let message) {
+            #expect(message?.contains("stakePools()") == true)
+        }
+    }
+
     @Test func stakeAndGovernanceGoToTheWrappedContext() async throws {
         let context = Self.context()
         await #expect(throws: CardanoChainError.self) { try await context.treasury() }

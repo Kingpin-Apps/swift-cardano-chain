@@ -95,9 +95,11 @@ public struct UTxORPCEndpointConnector: UTxORPCConnector {
 ///   the protocol and genesis parameters, and with them the epoch and tip,
 ///   come from the wrapped context.
 ///
-/// UTxO RPC v1beta has no stake or governance queries. Those, and anything the
+/// Of the stake queries, UTxO RPC v1beta's `ReadState` answers only
+/// ``stakePools()``, and it has no governance queries. Those, and anything the
 /// server answers `UNIMPLEMENTED`, go to the context it wraps; without one they
-/// throw `CardanoChainError.notImplemented`.
+/// throw `CardanoChainError.notImplemented`. The wrapped context is optional:
+/// on its own the context answers everything the server does.
 ///
 /// ```swift
 /// // A local cardano-node started with "EnableRpc": true
@@ -373,14 +375,33 @@ public struct UTxORPCChainContext: ChainContext {
         )
     }
 
+    // MARK: - Stake pools
+
+    /// The pools in the ledger's stake pool distribution, from `ReadState`;
+    /// from the wrapped context on a server without it (cardano-node,
+    /// cardano-node-api).
+    ///
+    /// The distribution lists the pools with delegated stake, so a pool that
+    /// is registered but has none is left out.
+    public func stakePools() async throws -> [PoolOperator] {
+        let request = Utxorpc_V1beta_Query_ReadStateRequest.with {
+            $0.query.cardano.stakePoolDistribution = .init()
+        }
+        guard let response = try await callIfImplemented("ReadState", { try await $0.query.readState(request) }) else {
+            return try await forward("stakePools()").stakePools()
+        }
+        guard case .cardano(let state)? = response.result.result,
+              case .stakePoolDistribution(let distribution)? = state.result
+        else {
+            throw CardanoChainError.valueError("UTxO RPC ReadState returned no stake pool distribution")
+        }
+        return distribution.pools.map { PoolOperator(poolKeyHash: PoolKeyHash(payload: $0.poolKeyhash)) }
+    }
+
     // MARK: - Forwarded to the wrapped context
 
     public func stakeAddressInfo(address: Address) async throws -> [StakeAddressInfo] {
         try await forward("stakeAddressInfo(address:)").stakeAddressInfo(address: address)
-    }
-
-    public func stakePools() async throws -> [PoolOperator] {
-        try await forward("stakePools()").stakePools()
     }
 
     public func kesPeriodInfo(pool: PoolOperator?, opCert: OperationalCertificate?) async throws -> KESPeriodInfo {

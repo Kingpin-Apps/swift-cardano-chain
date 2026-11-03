@@ -166,9 +166,11 @@ let context = try UTxORPCChainContext(
 ```
 
 It answers the tip, epoch, era, protocol and genesis parameters, UTxOs by address or
-reference, and submits and evaluates transactions on the server. UTxO RPC v1beta has no stake
-or governance queries, and cardano-node cannot look a transaction up by hash; pass
-`wrapping:` another context (Blockfrost, Ogmios, Kupo) and those calls go to it. A node's
+reference, and submits and evaluates transactions on the server. On a server with `ReadState`,
+`stakePools()` comes from its stake pool distribution. UTxO RPC v1beta has no other stake
+queries and no governance queries, and cardano-node cannot look a transaction up by hash or
+answer `ReadState`. On its own the context throws `notImplemented` for those; pass `wrapping:`
+another context (Blockfrost, Ogmios, Kupo) and they go to it instead. A node's
 `SearchUtxos` scans the whole UTxO set, so `utxos(address:)` takes seconds on mainnet, as it
 does over the node socket.
 
