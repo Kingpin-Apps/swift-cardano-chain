@@ -88,9 +88,9 @@ public actor OgmiosChainContext: ChainContext {
     ///
     /// The epoch is cached and refreshed periodically to avoid unnecessary API calls.
     public func epoch() async throws -> Int {
-        // Refresh epoch if cache is stale (older than 60 seconds)
+        // Refresh epoch if cache is stale (older than ChainStateCache.lifetime)
         if let cached = _epoch,
-            (Date().timeIntervalSince1970 - lastEpochFetch) <= 60
+            (Date().timeIntervalSince1970 - lastEpochFetch) <= ChainStateCache.lifetime
         {
             return cached
         }
