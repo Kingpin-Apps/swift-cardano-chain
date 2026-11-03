@@ -36,7 +36,29 @@ public protocol UTxORPCConnector: Sendable {
     ) async throws -> Result
 }
 
-/// Connects to an endpoint for each call and closes the connection after it.
+/// Runs every call over one long-lived connection, which reconnects on its own
+/// and closes when the last context holding it goes away.
+public struct UTxORPCConnectionConnector: UTxORPCConnector {
+    public let connection: UTxORPCConnection
+
+    public init(connection: UTxORPCConnection) {
+        self.connection = connection
+    }
+
+    public init(endpoint: UTxORPCEndpoint) throws {
+        self.init(connection: try UTxORPCConnection(endpoint: endpoint))
+    }
+
+    public func withServices<Result: Sendable>(
+        _ body: (UTxORPCServices) async throws -> Result
+    ) async throws -> Result {
+        try await body(UTxORPCServices(connection.client))
+    }
+}
+
+/// Connects to an endpoint for each call and closes the connection after it:
+/// nothing stays open between calls, at the cost of a new connection (and for
+/// TLS, a handshake) every time.
 public struct UTxORPCEndpointConnector: UTxORPCConnector {
     public let endpoint: UTxORPCEndpoint
 
@@ -72,13 +94,13 @@ public struct UTxORPCEndpointConnector: UTxORPCConnector {
 ///
 /// ```swift
 /// // A local cardano-node started with "EnableRpc": true
-/// let node = UTxORPCChainContext(
+/// let node = try UTxORPCChainContext(
 ///     endpoint: .unixSocket("/opt/cardano/mainnet/socket/rpc.sock"),
 ///     network: .mainnet
 /// )
 ///
 /// // Demeter, with governance from Blockfrost
-/// let demeter = UTxORPCChainContext(
+/// let demeter = try UTxORPCChainContext(
 ///     endpoint: try UTxORPCEndpoint(
 ///         url: URL(string: "https://preview.utxorpc-v0.demeter.run")!,
 ///         headers: ["dmtr-api-key": apiKey]
@@ -124,13 +146,15 @@ public struct UTxORPCChainContext: ChainContext {
         self.wrapped = wrapping
     }
 
-    /// A context over the server at `endpoint`, connecting once per call.
+    /// A context over the server at `endpoint`, keeping one connection open
+    /// for all its calls. Pass a ``UTxORPCEndpointConnector`` to
+    /// ``init(connector:network:wrapping:)`` to connect per call instead.
     public init(
         endpoint: UTxORPCEndpoint,
         network: SwiftCardanoCore.Network = .mainnet,
         wrapping: (any ChainContext)? = nil
-    ) {
-        self.init(connector: UTxORPCEndpointConnector(endpoint: endpoint), network: network, wrapping: wrapping)
+    ) throws {
+        self.init(connector: try UTxORPCConnectionConnector(endpoint: endpoint), network: network, wrapping: wrapping)
     }
 
     // MARK: - Chain state

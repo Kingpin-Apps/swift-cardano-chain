@@ -43,7 +43,7 @@ enum LiveUTxORPCServer: String, CaseIterable, CustomTestStringConvertible, Senda
     }
 
     var context: UTxORPCChainContext {
-        UTxORPCChainContext(endpoint: endpoint!, network: Self.network)
+        try! UTxORPCChainContext(endpoint: endpoint!, network: Self.network)
     }
 
     var testDescription: String { rawValue }

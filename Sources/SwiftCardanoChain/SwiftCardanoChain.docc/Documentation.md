@@ -310,6 +310,7 @@ do {
 - ``KupoChainContext``
 - ``NodeSocketChainContext``
 - ``UTxORPCChainContext``
+- ``UTxORPCConnectionConnector``
 - ``UTxORPCEndpointConnector``
 - ``UTxORPCConnector``
 - ``UTxORPCServices``

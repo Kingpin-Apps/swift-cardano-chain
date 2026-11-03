@@ -147,7 +147,7 @@ To configure the HTTP client yourself, pass a swift-kupo `Kupo` or `Client` inst
 itself when started with `"EnableRpc": true`, on a `rpc.sock` next to `node.socket`:
 
 ```swift
-let context = UTxORPCChainContext(
+let context = try UTxORPCChainContext(
     endpoint: .unixSocket("/opt/cardano/mainnet/socket/rpc.sock"),
     network: .mainnet
 )
@@ -156,7 +156,7 @@ let context = UTxORPCChainContext(
 Hosted servers take a URL and headers, such as Demeter's API key:
 
 ```swift
-let context = UTxORPCChainContext(
+let context = try UTxORPCChainContext(
     endpoint: try UTxORPCEndpoint(
         url: URL(string: "https://preview.utxorpc-v0.demeter.run")!,
         headers: ["dmtr-api-key": apiKey]
@@ -530,7 +530,7 @@ do {
 | CardanoCLI | Genesis params (permanent), protocol params (per tip update), UTxOs (per slot+address), datums (LRU) |
 | Ogmios | Epoch + protocol params (60s TTL), genesis params (permanent) |
 | NodeSocket | Epoch (60s TTL), protocol params (per epoch), genesis params (permanent) |
-| UTxO RPC | Genesis params (permanent); each call opens its own connection |
+| UTxO RPC | Genesis params (permanent); one connection kept open for all calls |
 | YaciDevkit | Epoch (10s TTL), protocol params (per epoch), genesis params and files (permanent) |
 | OfflineTransfer | Everything read from file — no caching needed |
 
