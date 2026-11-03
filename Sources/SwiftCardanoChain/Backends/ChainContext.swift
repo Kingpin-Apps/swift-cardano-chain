@@ -270,7 +270,9 @@ public extension ChainContext {
         for r in result.redeemers {
             guard r.passed, r.index < redeemers.count, let consumed = r.consumedBudget else { continue }
             let original = redeemers[r.index]
-            let tag = original.tag.map { "\($0)" } ?? "unknown"
+            // `description()`, the name the transaction builder keys on: string
+            // interpolation of a `RedeemerTag` gives its JSON form instead.
+            let tag = original.tag.map { $0.description() } ?? "unknown"
             let key = "\(tag):\(original.index)"
             out[key] = ExecutionUnits(
                 mem: max(0, consumed.mem),
