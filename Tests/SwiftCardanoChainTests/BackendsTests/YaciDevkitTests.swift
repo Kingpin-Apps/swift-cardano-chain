@@ -559,10 +559,10 @@ struct YaciDevkitChainContextTests {
         #expect(units.count == 3)
         #expect(units["spend:0"]?.mem == 1_000_000)
         #expect(units["spend:0"]?.steps == 500_000_000)
-        // Ogmios says `withdraw` and `publish` where this library says `withdrawal` and
-        // `certificate`.
-        #expect(units["withdrawal:1"]?.mem == 2000)
-        #expect(units["certificate:0"]?.steps == 20)
+        // Ogmios says `withdraw` and `publish` where the transaction builder looks up
+        // `reward` and `cert`.
+        #expect(units["reward:1"]?.mem == 2000)
+        #expect(units["cert:0"]?.steps == 20)
     }
 
     @Test("Test evaluateTxCBOR handles the Ogmios v6 list shape")
