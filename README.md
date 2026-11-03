@@ -28,7 +28,7 @@ import SwiftCardanoChain
 
 ## Overview
 
-SwiftCardanoChain provides a single `ChainContext` protocol and eight concrete implementations.
+SwiftCardanoChain provides a single `ChainContext` protocol and nine concrete implementations.
 Pick the one that matches your environment — the rest of your code stays the same.
 
 | Context | When to use |
@@ -39,6 +39,7 @@ Pick the one that matches your environment — the rest of your code stays the s
 | `OgmiosChainContext` | Local node via the Ogmios WebSocket bridge |
 | `KupoChainContext` | Kupo chain index, alone or wrapping another context |
 | `NodeSocketChainContext` | Local node via the NtC Unix socket directly |
+| `UTxORPCChainContext` | UTxO RPC (gRPC): cardano-node 11.x's built-in server, Dolos, Demeter, or cardano-node-api |
 | `YaciDevkitChainContext` | Local throw-away devnet run by Yaci DevKit |
 | `OfflineTransferChainContext` | Air-gapped / offline transaction signing |
 
@@ -138,6 +139,52 @@ let context = try KupoChainContext(
 
 To configure the HTTP client yourself, pass a swift-kupo `Kupo` or `Client` instead of a URL:
 `KupoChainContext(kupo: try Kupo(basePath: "http://localhost:1442"), network: .preview, wrapping: ogmios)`.
+
+### UTxO RPC (cardano-node 11.x, Dolos, Demeter)
+
+`UTxORPCChainContext` talks [UTxO RPC](https://utxorpc.org) v1beta over gRPC through
+[swift-utxorpc](https://github.com/Kingpin-Apps/swift-utxorpc). cardano-node 11.x serves it
+itself when started with `"EnableRpc": true`, on a `rpc.sock` next to `node.socket`:
+
+```swift
+let context = try UTxORPCChainContext(
+    endpoint: .unixSocket("/opt/cardano/mainnet/socket/rpc.sock"),
+    network: .mainnet
+)
+```
+
+Hosted servers take a URL and headers, such as Demeter's API key:
+
+```swift
+let context = try UTxORPCChainContext(
+    endpoint: try UTxORPCEndpoint(
+        url: URL(string: "https://preview.utxorpc-v0.demeter.run")!,
+        headers: ["dmtr-api-key": apiKey]
+    ),
+    network: .preview
+)
+```
+
+It answers the tip, epoch, era, protocol and genesis parameters, UTxOs by address or
+reference, and submits and evaluates transactions on the server. UTxO RPC v1beta has no stake
+or governance queries, and cardano-node cannot look a transaction up by hash; pass
+`wrapping:` another context (Blockfrost, Ogmios, Kupo) and those calls go to it. A node's
+`SearchUtxos` scans the whole UTxO set, so `utxos(address:)` takes seconds on mainnet, as it
+does over the node socket.
+
+cardano-node-api speaks only the older v1alpha API. Give the endpoint `apiVersion: .v1alpha`
+and a wrapped context: it has no `ReadGenesis`, `EvalTx` or `ReadTx`, and its `ReadParams`
+leaves out the Conway governance parameters (and, in its last release, shifts the cost models by
+one), so the protocol and genesis parameters come from the wrapped context. UTxOs, the tip
+and submission go to cardano-node-api.
+
+```swift
+let context = try UTxORPCChainContext(
+    endpoint: try UTxORPCEndpoint(url: URL(string: "http://127.0.0.1:9090")!, apiVersion: .v1alpha),
+    network: .mainnet,
+    wrapping: ogmios
+)
+```
 
 ### NodeSocket (Local Node — Direct NtC)
 
@@ -287,7 +334,7 @@ print("Submitted: \(txId)")
 
 ### Evaluating Plutus Script Execution Units
 
-Contexts with a remote evaluator (BlockFrost, Koios, Ogmios) call out directly:
+Contexts with a remote evaluator (BlockFrost, Koios, Ogmios, UTxO RPC) call out directly:
 
 ```swift
 let units = try await context.evaluateTx(tx: transaction)
@@ -497,6 +544,7 @@ do {
 | CardanoCLI | Genesis params (permanent), protocol params (per tip update), UTxOs (per slot+address), datums (LRU) |
 | Ogmios | Epoch + protocol params (60s TTL), genesis params (permanent) |
 | NodeSocket | Epoch (60s TTL), protocol params (per epoch), genesis params (permanent) |
+| UTxO RPC | Genesis params (permanent); one connection kept open for all calls |
 | YaciDevkit | Epoch (10s TTL), protocol params (per epoch), genesis params and files (permanent) |
 | OfflineTransfer | Everything read from file — no caching needed |
 
