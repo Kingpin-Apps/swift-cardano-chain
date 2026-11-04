@@ -211,6 +211,19 @@ struct UTxORPCLiveTests {
         }
     }
 
+    /// On its own, the context lists pools from ReadState where the server
+    /// has it, and says "not implemented" where it doesn't (cardano-node).
+    @Test(arguments: servers)
+    func stakePoolsFromReadStateOrNotImplemented(_ server: LiveUTxORPCServer) async throws {
+        do {
+            let pools = try await server.context.stakePools()
+            #expect(!pools.isEmpty)
+            print("UTxO RPC live \(server): ReadState lists \(pools.count) pools")
+        } catch CardanoChainError.notImplemented(let message) {
+            print("UTxO RPC live \(server): no ReadState (\(message ?? ""))")
+        }
+    }
+
     @Test(arguments: servers)
     func evaluatingGarbageFails(_ server: LiveUTxORPCServer) async throws {
         await #expect(throws: CardanoChainError.self) {
