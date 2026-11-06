@@ -33,19 +33,19 @@ let package = Package(
         ),
     ],
     dependencies: [
-        .package(url: "https://github.com/Kingpin-Apps/swift-cardano-core.git", from: "0.10.0"),
+        .package(url: "https://github.com/Kingpin-Apps/swift-cardano-core.git", from: "0.10.2"),
         // Linked only when the CLIBackends trait is on (see the target's dependencies below);
         // SwiftCardanoUtils declares no traits of its own, so nothing else needs enabling.
-        .package(url: "https://github.com/Kingpin-Apps/swift-cardano-utils.git", from: "0.5.10"),
+        .package(url: "https://github.com/Kingpin-Apps/swift-cardano-utils.git", from: "0.5.11"),
         .package(url: "https://github.com/Kingpin-Apps/swift-blockfrost-api.git", from: "0.3.0"),
         .package(url: "https://github.com/Kingpin-Apps/swift-handles-api.git", from: "0.1.1"),
         .package(url: "https://github.com/Kingpin-Apps/swift-koios.git", from: "0.3.0"),
-        .package(url: "https://github.com/Kingpin-Apps/swift-ogmios.git", from: "0.4.2"),
-        .package(url: "https://github.com/Kingpin-Apps/swift-kupo.git", from: "0.2.0"),
+        .package(url: "https://github.com/Kingpin-Apps/swift-ogmios.git", from: "0.4.3"),
+        .package(url: "https://github.com/Kingpin-Apps/swift-kupo.git", from: "0.2.1"),
         .package(url: "https://github.com/Kingpin-Apps/swift-utxorpc.git", from: "0.1.0"),
         .package(url: "https://github.com/Kingpin-Apps/swift-yaci-api.git", from: "0.2.0"),
-        .package(url: "https://github.com/Kingpin-Apps/swift-cardano-network.git", from: "1.1.1"),
-        .package(url: "https://github.com/Kingpin-Apps/swift-cardano-uplc.git", from: "0.8.1"),
+        .package(url: "https://github.com/Kingpin-Apps/swift-cardano-network.git", from: "1.3.1"),
+        .package(url: "https://github.com/Kingpin-Apps/swift-cardano-uplc.git", from: "0.8.2"),
         // Direct dep (was transitive via SwiftCardanoUtils, now trait-gated out): OfflineTransfer
         // uses FilePath. Apple package, iOS-safe.
         .package(url: "https://github.com/apple/swift-system.git", from: "1.8.1"),
