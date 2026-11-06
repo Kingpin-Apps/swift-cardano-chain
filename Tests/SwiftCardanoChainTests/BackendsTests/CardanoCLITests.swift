@@ -46,6 +46,42 @@ struct CardanoCLIContextTests {
         #expect(epoch == 450)
     }
 
+    @Test(
+        "The ttlBuffer argument reaches the CardanoConfig built from explicit paths",
+        arguments: [(Int?.none, 3600), (Int?.some(7200), 7200), (Int?.some(0), 0)])
+    func testTTLBufferReachesConfig(_ ttl: (argument: Int?, expected: Int)) async throws {
+        // A stand-in cardano-cli that only answers `--version`, which is all the
+        // CardanoCLI initialiser runs, so no node or real binary is needed.
+        let binary = FileManager.default.temporaryDirectory
+            .appendingPathComponent("stub-cardano-cli-\(UUID().uuidString)").path
+        let script = "#!/bin/sh\necho 'cardano-cli 10.8.0.0 - darwin-x86_64 - ghc-9.6'\n"
+        #expect(FileManager.default.createFile(atPath: binary, contents: Data(script.utf8)))
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: binary)
+        defer { try? FileManager.default.removeItem(atPath: binary) }
+
+        let context: CardanoCliChainContext
+        if let argument = ttl.argument {
+            context = try await CardanoCliChainContext(
+                nodeConfig: FilePath(configFilePath!),
+                binary: FilePath(binary),
+                socket: FilePath("/tmp/test-socket"),
+                network: .preview,
+                ttlBuffer: argument
+            )
+        } else {
+            context = try await CardanoCliChainContext(
+                nodeConfig: FilePath(configFilePath!),
+                binary: FilePath(binary),
+                socket: FilePath("/tmp/test-socket"),
+                network: .preview
+            )
+        }
+
+        let cardanoConfig = await context.cli.cardanoConfig
+        #expect(cardanoConfig.ttlBuffer == ttl.expected)
+        #expect(cardanoConfig.network == .preview)
+    }
+
     @Test("Test lastBlockSlot")
     func testLastBlockSlot() async throws {
         let config = createMockConfig()

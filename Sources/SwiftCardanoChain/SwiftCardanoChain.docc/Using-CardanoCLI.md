@@ -74,7 +74,10 @@ let context = try await CardanoCliChainContext(
 ```
 
 All three paths must be given for them to be used; with any of them missing, the context falls
-back to the environment as above.
+back to the environment as above. In this form `era` and `ttlBuffer` (default `3600`, the slots
+`CardanoCLI.getCurrentTTL()` adds to the tip) go into the `CardanoConfig` built for the CLI;
+the environment form always uses Conway and `3600`, and the forms below take both from the
+`CardanoConfig` or `CardanoCLI` you pass.
 
 ### With a Smaller UTxO Cache
 

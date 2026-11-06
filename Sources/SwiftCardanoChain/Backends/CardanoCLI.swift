@@ -226,13 +226,14 @@ public actor CardanoCliChainContext: ChainContext {
     ///   - network: The network this context reports through `networkId`. When the paths
     ///     are given, the CLI is also run against it.
     ///   - era: Era to use
-    ///   - ttlBuffer: The time to live buffer
+    ///   - ttlBuffer: Slots added to the tip by the CLI's `getCurrentTTL()`; it becomes the
+    ///     built `CardanoConfig`'s `ttlBuffer` when the paths are given.
     ///   - refetchChainTipInterval: Seconds between sync checks in the deprecated
     ///     `isChainTipUpdated()`; nothing else uses it.
     ///   - utxoCacheSize: Most address/slot entries the UTxO cache holds before it is cleared.
     ///   - datumCacheSize: Not used.
-    ///   - cli: A `CardanoCLI` to use instead of building one; the paths and `era` are then
-    ///     ignored.
+    ///   - cli: A `CardanoCLI` to use instead of building one; the paths, `era` and
+    ///     `ttlBuffer` are then ignored.
     public init(
         nodeConfig: FilePath? = nil,
         binary: FilePath? = nil,
@@ -265,7 +266,7 @@ public actor CardanoCliChainContext: ChainContext {
                         config: nodeConfig,
                         network: self._network,
                         era: era,
-                        ttlBuffer: 3600
+                        ttlBuffer: ttlBuffer
                     )
                 )
             )
