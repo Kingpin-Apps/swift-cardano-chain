@@ -1,3 +1,9 @@
+## 0.16.2 (2026-11-06)
+
+### Fix
+
+- honour ttlBuffer in the cardano-cli chain context
+
 ## 0.16.1 (2026-11-03)
 
 ### Fix
