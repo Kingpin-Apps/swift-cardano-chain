@@ -4,7 +4,7 @@
 
 # SwiftCardanoChain
 
-A Swift library for interacting with the Cardano blockchain through a unified `ChainContext` protocol backed by eight pluggable implementations.
+A Swift library for interacting with the Cardano blockchain through a unified `ChainContext` protocol backed by nine pluggable implementations.
 
 ## Installation
 
@@ -17,13 +17,34 @@ https://github.com/Kingpin-Apps/swift-cardano-chain.git
 Or add it to your `Package.swift`:
 
 ```swift
-.package(url: "https://github.com/Kingpin-Apps/swift-cardano-chain.git", from: "0.5.0")
+.package(url: "https://github.com/Kingpin-Apps/swift-cardano-chain.git", from: "0.16.1")
 ```
 
 Then import it in your source files:
 
 ```swift
 import SwiftCardanoChain
+```
+
+### Optional Traits: `CLIBackends` and `NodeSocket`
+
+Two contexts are **not built by default**. They exist only when you enable a package trait on
+the dependency, and only on macOS and Linux:
+
+| Trait | Builds | Notes |
+|---|---|---|
+| `CLIBackends` | `CardanoCliChainContext` and `NodeSocketChainContext` | Pulls in [SwiftCardanoUtils](https://github.com/Kingpin-Apps/swift-cardano-utils), which runs `cardano-cli` as a subprocess |
+| `NodeSocket` | `NodeSocketChainContext` only | No SwiftCardanoUtils. Builds nothing on iOS, tvOS, watchOS and visionOS, so a multi-platform app can turn it on |
+
+Package traits need `swift-tools-version: 6.1` or later in your manifest:
+
+```swift
+// swift-tools-version: 6.1
+.package(
+    url: "https://github.com/Kingpin-Apps/swift-cardano-chain.git",
+    from: "0.16.1",
+    traits: ["CLIBackends"]   // or ["NodeSocket"]
+)
 ```
 
 ## Overview
@@ -35,20 +56,23 @@ Pick the one that matches your environment — the rest of your code stays the s
 |---|---|
 | `BlockFrostChainContext` | Cloud API — no local node required |
 | `KoiosChainContext` | Decentralised community API — no local node required |
-| `CardanoCliChainContext` | Local node via `cardano-cli` |
-| `OgmiosChainContext` | Local node via the Ogmios WebSocket bridge |
+| `OgmiosChainContext` | A node through the Ogmios WebSocket/HTTP bridge |
 | `KupoChainContext` | Kupo chain index, alone or wrapping another context |
-| `NodeSocketChainContext` | Local node via the NtC Unix socket directly |
 | `UTxORPCChainContext` | UTxO RPC (gRPC): cardano-node 11.x's built-in server, Dolos, Demeter, or cardano-node-api |
 | `YaciDevkitChainContext` | Local throw-away devnet run by Yaci DevKit |
 | `OfflineTransferChainContext` | Air-gapped / offline transaction signing |
+| `CardanoCliChainContext` | Local node via `cardano-cli` — `CLIBackends` trait, macOS/Linux only |
+| `NodeSocketChainContext` | Local node via the NtC Unix socket directly — `NodeSocket` trait, macOS/Linux only |
 
-All contexts support:
+Every context conforms to the same protocol, which covers:
 
 - Reading blockchain data (UTxOs, protocol parameters, genesis parameters, epoch, era, slot, chain tip)
 - Submitting and evaluating transactions (with a backend-agnostic local UPLC evaluator for contexts that don't expose a remote evaluator)
 - Querying stake addresses, pools, DReps, governance actions, and committee members
 - Querying treasury balance, DRep / SPO stake distributions, full constitutional committee state, and per-proposal vote tallies
+
+Not every backend can answer every query: a call a backend has no source for throws
+`CardanoChainError.notImplemented`. The per-backend DocC guides list what each can and cannot do.
 
 ## Getting Started
 
@@ -70,6 +94,8 @@ let context = try await BlockFrostChainContext(
 )
 ```
 
+Supports `.mainnet`, `.preprod` and `.preview`.
+
 ### Koios (Community API — No Local Node)
 
 Supports `.mainnet`, `.preprod`, `.preview`, `.guildnet`, and `.sanchonet`.
@@ -85,18 +111,7 @@ let context = try await KoiosChainContext(
 )
 ```
 
-### Cardano CLI (Local Node)
-
-```swift
-let context = try await CardanoCliChainContext(
-    nodeConfig: FilePath("/opt/cardano/preview/config.json"),
-    binary:     FilePath("/usr/local/bin/cardano-cli"),
-    socket:     FilePath("/ipc/node.socket"),
-    network:    .preview
-)
-```
-
-### Ogmios (Local Node via WebSocket)
+### Ogmios (Node via WebSocket)
 
 ```swift
 let context = try await OgmiosChainContext(
@@ -105,6 +120,8 @@ let context = try await OgmiosChainContext(
     network: .mainnet
 )
 ```
+
+Ogmios is built by default and works on every supported platform, iOS and visionOS included.
 
 ### Kupo (Chain Index, Optionally Wrapping Ogmios)
 
@@ -143,10 +160,14 @@ To configure the HTTP client yourself, pass a swift-kupo `Kupo` or `Client` inst
 ### UTxO RPC (cardano-node 11.x, Dolos, Demeter)
 
 `UTxORPCChainContext` talks [UTxO RPC](https://utxorpc.org) v1beta over gRPC through
-[swift-utxorpc](https://github.com/Kingpin-Apps/swift-utxorpc). cardano-node 11.x serves it
-itself when started with `"EnableRpc": true`, on a `rpc.sock` next to `node.socket`:
+[swift-utxorpc](https://github.com/Kingpin-Apps/swift-utxorpc). The `UTxORPCEndpoint` type
+comes from swift-utxorpc's `UTxORPCClient` module, so add that product to your target and
+`import UTxORPCClient`. cardano-node 11.x serves UTxO RPC itself when started with
+`"EnableRpc": true`, on a `rpc.sock` next to `node.socket`:
 
 ```swift
+import UTxORPCClient
+
 let context = try UTxORPCChainContext(
     endpoint: .unixSocket("/opt/cardano/mainnet/socket/rpc.sock"),
     network: .mainnet
@@ -166,14 +187,14 @@ let context = try UTxORPCChainContext(
 ```
 
 It answers the tip, epoch, era, protocol and genesis parameters, UTxOs by address or
-reference, and submits and evaluates transactions on the server. Without a wrapped context, on
-a server with `ReadState`, `stakePools()` comes from its stake pool distribution, which leaves
-out registered pools that have no stake. UTxO RPC v1beta has no other stake
-queries and no governance queries, and cardano-node cannot look a transaction up by hash or
-answer `ReadState`. On its own the context throws `notImplemented` for those; pass `wrapping:`
-another context (Blockfrost, Ogmios, Kupo) and they go to it instead. A node's
-`SearchUtxos` scans the whole UTxO set, so `utxos(address:)` takes seconds on mainnet, as it
-does over the node socket.
+reference, and submits and evaluates transactions on the server (falling back to local
+evaluation when the server cannot evaluate an unsigned transaction). Without a wrapped
+context, on a server with `ReadState`, `stakePools()` comes from its stake pool distribution,
+which leaves out registered pools that have no stake. UTxO RPC v1beta has no other stake
+queries and no governance queries, and cardano-node cannot look a transaction up by hash.
+On its own the context throws `notImplemented` for those; pass `wrapping:` another context
+(Blockfrost, Ogmios, Kupo) and they go to it instead. A node's `SearchUtxos` scans the whole
+UTxO set, so `utxos(address:)` takes seconds on mainnet, as it does over the node socket.
 
 cardano-node-api speaks only the older v1alpha API. Give the endpoint `apiVersion: .v1alpha`
 and a wrapped context: it has no `ReadGenesis`, `EvalTx` or `ReadTx`, and its `ReadParams`
@@ -186,15 +207,6 @@ let context = try UTxORPCChainContext(
     endpoint: try UTxORPCEndpoint(url: URL(string: "http://127.0.0.1:9090")!, apiVersion: .v1alpha),
     network: .mainnet,
     wrapping: ogmios
-)
-```
-
-### NodeSocket (Local Node — Direct NtC)
-
-```swift
-let context = NodeSocketChainContext(
-    socketPath: FilePath("/ipc/node.socket"),
-    network: .mainnet
 )
 ```
 
@@ -224,12 +236,50 @@ outcome epochs are always `nil`, and `evaluateTx` needs DevKit started with
 ### OfflineTransfer (Air-Gapped Signing)
 
 ```swift
+import SystemPackage
+
 // Load a transfer file prepared by an online machine
 let context = try OfflineTransferChainContext(
     filePath: FilePath("/path/to/transfer.json"),
     network: .mainnet
 )
 ```
+
+### Cardano CLI (Local Node — `CLIBackends` Trait, macOS/Linux)
+
+Needs the `CLIBackends` trait (see [Installation](#optional-traits-clibackends-and-nodesocket)).
+
+```swift
+import SystemPackage
+
+let context = try await CardanoCliChainContext(
+    nodeConfig: FilePath("/opt/cardano/preview/config.json"),
+    binary:     FilePath("/usr/local/bin/cardano-cli"),
+    socket:     FilePath("/ipc/node.socket"),
+    network:    .preview
+)
+```
+
+With no paths, `CardanoCliChainContext(network:)` finds `cardano-cli` on `PATH` and reads the
+socket, node config and network from the `CARDANO_SOCKET_PATH`, `CARDANO_CONFIG` and
+`NETWORK` environment variables.
+
+### NodeSocket (Local Node — Direct NtC, `NodeSocket` Trait, macOS/Linux)
+
+Needs the `NodeSocket` or `CLIBackends` trait.
+
+```swift
+import SystemPackage
+
+let context = NodeSocketChainContext(
+    socketPath: FilePath("/ipc/node.socket"),
+    network: .mainnet
+)
+```
+
+`init(socketPath:network:)` has handshake presets for mainnet, preprod and preview. For any
+other network, set `connection.networkMagic` on a `CardanoNetworkConfiguration` and use
+`init(networkConfig:network:)`.
 
 ## Reading Blockchain Data
 
@@ -243,9 +293,9 @@ for utxo in utxos {
     print("\(utxo.input.transactionId.payload.toHex)#\(utxo.input.index)")
     print("  \(utxo.output.amount.coin) lovelace")
 
-    for (policyId, assets) in utxo.output.amount.multiAsset {
-        for (assetName, amount) in assets {
-            print("  \(policyId.payload.toHex).\(assetName.name.toHex) = \(amount)")
+    for (policyId, assets) in utxo.output.amount.multiAsset.data {
+        for (assetName, amount) in assets.data {
+            print("  \(policyId.payload.toHex).\(assetName.payload.toHex) = \(amount)")
         }
     }
 }
@@ -255,6 +305,9 @@ if let (utxo, isSpent) = try await context.utxo(input: input) {
     print(isSpent ? "Spent: \(utxo)" : "Unspent: \(utxo)")
 }
 ```
+
+Backends that only see the live UTxO set (CardanoCLI, NodeSocket, Ogmios, and UTxO RPC
+without a wrapped context) return `nil` for a spent output rather than `isSpent: true`.
 
 ### Protocol Parameters
 
@@ -269,18 +322,22 @@ print("UTxO cost/byte   : \(params.utxoCostPerByte)")
 
 ### Genesis Parameters
 
+Every field of `GenesisParameters` is optional:
+
 ```swift
 let genesis = try await context.genesisParameters()
 
-print("Network magic  : \(genesis.networkMagic)")
-print("Slot length    : \(genesis.slotLength)s")
-print("Epoch length   : \(genesis.epochLength) slots")
-print("Security param : \(genesis.securityParam)")
+print("Network magic  : \(genesis.networkMagic.map(String.init) ?? "n/a")")
+print("Slot length    : \(genesis.slotLength.map { "\($0) s" } ?? "n/a")")
+print("Epoch length   : \(genesis.epochLength.map { "\($0) slots" } ?? "n/a")")
+print("Security param : \(genesis.securityParam.map(String.init) ?? "n/a")")
 ```
 
 ### Transactions by Hash
 
-BlockFrost and Koios return a transaction already on chain, exactly as it was submitted.
+BlockFrost, Koios and UTxO RPC servers that serve `ReadTx` (Dolos) return a transaction already
+on chain, exactly as it was submitted; Kupo forwards to its wrapped context. Backends that only
+see the live ledger (a node, Ogmios, Yaci Store) throw `notImplemented`.
 `transaction(hash:)` decodes it and checks that its id is the one asked for:
 
 ```swift
@@ -305,16 +362,17 @@ For a single call that returns slot, block, epoch, era, and sync progress in one
 ```swift
 let tip = try await context.chainTip()
 
-print("Slot          : \(tip.slot)")
-print("Block         : \(tip.block ?? 0)")
-print("Epoch         : \(tip.epoch)")
+print("Slot          : \(tip.slot.map(String.init) ?? "n/a")")
+print("Block         : \(tip.block.map(String.init) ?? "n/a")")
+print("Epoch         : \(tip.epoch.map(String.init) ?? "n/a")")
 print("Era           : \(tip.era ?? "unknown")")
 print("Sync progress : \(tip.syncProgress.map { "\($0)%" } ?? "n/a")")
 ```
 
-`NodeSocket`, `Ogmios`, and `CardanoCLI` populate every field; cloud APIs derive the values
-they can and leave the rest `nil`. `OfflineTransfer` derives slot and epoch from cached
-genesis parameters and wall-clock time.
+Every field of `ChainTip` is optional. NodeSocket and CardanoCLI fill them all; Ogmios fills
+the block height, epoch, era and sync progress only when its `/health` check answers; cloud
+APIs and some UTxO RPC servers leave out what they cannot report. `OfflineTransfer` derives
+slot and epoch from cached genesis parameters and wall-clock time.
 
 ## Writing to the Blockchain
 
@@ -335,9 +393,13 @@ let txId = try await context.submitTx(tx: .string("84a700..."))
 print("Submitted: \(txId)")
 ```
 
+`OfflineTransferChainContext` does not broadcast: it saves the transaction into the transfer
+file.
+
 ### Evaluating Plutus Script Execution Units
 
-Contexts with a remote evaluator (BlockFrost, Koios, Ogmios, UTxO RPC) call out directly:
+`evaluateTx(tx:)` returns the execution units of each redeemer, keyed `<tag>:<index>`, on every
+context:
 
 ```swift
 let units = try await context.evaluateTx(tx: transaction)
@@ -347,27 +409,38 @@ for (redeemer, eu) in units {
 }
 ```
 
-For contexts without a remote evaluator (CardanoCLI, NodeSocket), the protocol exposes a
-local UPLC fallback. Fetch the resolved UTxOs for the transaction's inputs and reference
-inputs using whatever transport you have, then hand them off:
+| Context | How scripts are evaluated |
+|---|---|
+| BlockFrost, Koios, Ogmios | Remotely, by the service |
+| YaciDevkit | Remotely, through Yaci Store; needs DevKit started with Ogmios enabled |
+| UTxO RPC | Remote `EvalTx`, falling back to local evaluation when the server cannot evaluate |
+| CardanoCLI, NodeSocket | Locally: inputs are resolved from the node, then run through the UPLC CEK machine in-process |
+| Kupo | Forwarded to the wrapped context |
+| OfflineTransfer | From `OfflineTransfer.evaluations` saved on the online machine |
+
+The local evaluator is also available directly, when you already hold the UTxOs for every
+regular and reference input or want to evaluate without asking a remote service:
 
 ```swift
-let resolvedInputs = try await fetchResolvedInputs(for: transaction)
-let params         = try await context.protocolParameters()
+var resolvedInputs: [UTxO] = []
+let inputs = transaction.transactionBody.inputs.asArray
+    + (transaction.transactionBody.referenceInputs?.asList ?? [])
+for input in inputs {
+    if let (utxo, _) = try await context.utxo(input: input) {
+        resolvedInputs.append(utxo)
+    }
+}
 
 let units = try await context.evaluateTx(
     tx: transaction,
     resolvedInputs: resolvedInputs,
-    protocolParameters: params,
+    protocolParameters: try await context.protocolParameters(),
     slotTimeline: try await context.slotTimeline()
 )
 ```
 
 A transaction with a validity interval needs the slot timeline: its scripts see the
 interval as POSIX time. `slotTimeline()` reads it from the chain's genesis.
-
-`OfflineTransferChainContext` returns execution units from `OfflineTransfer.evaluations`
-populated on the online machine — see the offline signing section below.
 
 ## Staking Operations
 
@@ -377,8 +450,8 @@ let stakeInfo    = try await context.stakeAddressInfo(address: stakeAddress)
 
 for info in stakeInfo {
     print("Rewards : \(info.rewardAccountBalance) lovelace")
-    print("Pool    : \(info.stakeDelegation ?? "unregistered")")
-    print("DRep    : \(info.delegateRepresentative ?? "none")")
+    print("Pool    : \(info.stakeDelegation.map { "\($0)" } ?? "not delegated")")
+    print("DRep    : \(info.voteDelegation.map { "\($0)" } ?? "none")")
 }
 ```
 
@@ -415,20 +488,29 @@ expired). Each empty array means no votes have been recorded for that voter clas
 ```swift
 let votes = try await context.govActionVotes(govActionID: actionId)
 
-print("Status   : \(votes.status?.rawValue ?? "active")")
+print("Status   : \(votes.status.map { "\($0)" } ?? "not concluded")")
 print("Deposit  : \(votes.deposit) lovelace")
 print("CC votes : \(votes.committeeVotes.count)")
 print("DRep     : \(votes.dRepVotes.count)")
 print("Pool     : \(votes.stakePoolVotes.count)")
 ```
 
-To pull every active proposal in one round-trip (equivalent to
-`cardano-cli query gov-state | jq .proposals`):
+### Listing Proposals
+
+`openGovActions()` lists the actions that can still be voted on, without their votes.
+`govActionsAll()` returns a `GovActionVotes` for every proposal the backend lists:
 
 ```swift
-let all = try await context.govActionsAll()
-let activeOnly = all.filter { $0.status == nil }
+let open = try await context.openGovActions()
+let all  = try await context.govActionsAll()
+let notConcluded = all.filter { $0.status == nil }
 ```
+
+Contexts that read the node's ledger state (CardanoCLI, NodeSocket, Ogmios) answer
+`govActionsAll()` with the proposals in the current governance state in one query —
+equivalent to `cardano-cli query gov-state | jq .proposals`. BlockFrost and Koios return every
+proposal they have indexed, concluded ones included, and make further requests per proposal
+to fetch the votes.
 
 ### Stake Distributions
 
@@ -441,6 +523,10 @@ the inputs ratifier code uses to decide proposal outcomes. These map to
 let drepStake = try await context.drepStakeDistribution()
 let spoStake  = try await context.spoStakeDistribution()
 ```
+
+Only CardanoCLI and NodeSocket answer both. YaciDevkit answers the DRep distribution only;
+BlockFrost, Koios and Ogmios throw `notImplemented` for both; Kupo and UTxO RPC pass them to
+the wrapped context; OfflineTransfer serves the saved entries.
 
 ### Constitutional Committee State
 
@@ -456,25 +542,31 @@ for member in state.members {
 
 ## Offline Signing Workflow
 
-For air-gapped transaction signing, see the `OfflineTransferChainContext`:
+For air-gapped transaction signing, use `OfflineTransferChainContext`:
 
 ```swift
+import SystemPackage
+
 // --- Online machine ---
 var transfer = OfflineTransfer()
-transfer.addUtxos(try await onlineContext.utxos(address: address), for: address)
+transfer.addresses.append(
+    try AddressInfo(address: address, utxos: try await onlineContext.utxos(address: address))
+)
 transfer.protocol.protocolParameters = try await onlineContext.protocolParameters()
 transfer.protocol.genesisParameters  = try await onlineContext.genesisParameters()
 transfer.protocol.era                = try await onlineContext.era()
 transfer.protocol.network            = .mainnet
 
 // Optionally cache governance and committee snapshots for offline reads
+// (each call needs an online context that answers it)
 transfer.treasury               = try await onlineContext.treasury()
 transfer.govActionVotesList     = try await onlineContext.govActionsAll()
 transfer.drepStakeEntries       = try await onlineContext.drepStakeDistribution()
 transfer.spoStakeEntries        = try await onlineContext.spoStakeDistribution()
 transfer.committeeStateSnapshot = try await onlineContext.committeeState()
 
-// Optionally pre-compute Plutus execution units so the offline machine can serve them
+// Optionally pre-compute Plutus execution units so the offline machine can serve them.
+// They are matched on the exact transaction CBOR.
 let units = try await onlineContext.evaluateTx(tx: tx)
 transfer.evaluations.append(
     OfflineTransferEvaluation(txCborHex: tx.toCBORData().toHex, executionUnits: units)
@@ -491,19 +583,28 @@ let offlineContext = try OfflineTransferChainContext(
 )
 let utxos = try await offlineContext.utxos(address: address)  // from the file
 // ... build and sign transaction ...
-try await offlineContext.submitTx(tx: .string(signedCborHex)) // writes to file
+_ = try await offlineContext.submitTx(tx: .string(signedCborHex)) // writes to file
 
 // --- Copy file back and submit online ---
-let txId = try await onlineContext.submitTx(tx: .string(signedCborHex))
+let returned = try OfflineTransfer.load(from: FilePath("/path/to/transfer.json"))
+if let cborHex = returned.transactions.last?.txJson?.cborHex {
+    let txId = try await onlineContext.submitTx(tx: .string(cborHex))
+}
 ```
 
-Every read and write through the offline context appends a typed entry to
-`OfflineTransfer.history`, giving you a tamper-evident audit log of every action taken
-against the file.
+`OfflineTransfer.history` is a list of dated `HistoryType` entries describing what was done
+with the file. The offline context adds a `saveTransaction` entry each time `submitTx` saves a
+transaction; reads add nothing. It is a plain JSON array, not protected against editing.
+
+If a value was not saved into the file, single-item reads (parameters, a pool, a DRep, the
+treasury, an evaluation…) throw `CardanoChainError.offlineTransferError`, while list reads
+return an empty list. `transactionCBOR(hash:)` always throws `notImplemented`.
 
 ## Error Handling
 
-All contexts throw `CardanoChainError`:
+Contexts throw `CardanoChainError` for the failures they detect. Errors from an underlying
+client library (a network failure, for example) can also reach you unwrapped, so keep a
+final `catch`:
 
 ```swift
 do {
@@ -529,29 +630,41 @@ do {
 
 ## Network Support
 
-| Network | BlockFrost | Koios | CardanoCLI | Ogmios | NodeSocket | YaciDevkit | OfflineTransfer |
-|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| mainnet      | ✓ | ✓ | ✓ | ✓ | ✓ |   | ✓ |
-| preprod      | ✓ | ✓ | ✓ | ✓ | ✓ |   | ✓ |
-| preview      | ✓ | ✓ | ✓ | ✓ | ✓ |   | ✓ |
-| guildnet     |   | ✓ |   |   |   |   |   |
-| sanchonet    |   | ✓ |   |   |   |   |   |
-| local devnet |   |   | ✓ | ✓ | ✓ | ✓ |   |
+| Network | BlockFrost | Koios | Ogmios | Kupo | UTxO RPC | CardanoCLI | NodeSocket | YaciDevkit | OfflineTransfer |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| mainnet      | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |   | ✓ |
+| preprod      | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |   | ✓ |
+| preview      | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |   | ✓ |
+| guildnet     |   | ✓ | ✓ | ✓ | ✓ | ✓ | ✓¹ |   | ✓ |
+| sanchonet    |   | ✓ | ✓ | ✓ | ✓ | ✓ | ✓¹ |   | ✓ |
+| local devnet |   |   | ✓ | ✓ | ✓ | ✓ | ✓¹ | ✓ | ✓ |
+
+- BlockFrost and Koios throw `CardanoChainError.unsupportedNetwork` from their initialisers for
+  any other network.
+- Ogmios, Kupo, UTxO RPC and CardanoCLI work with whatever network the server or node behind
+  them follows; CardanoCLI passes `--testnet-magic` for every network except mainnet.
+- ¹ NodeSocket needs `init(networkConfig:network:)` with `connection.networkMagic` set for
+  networks other than mainnet, preprod and preview.
+- YaciDevkit talks to a DevKit devnet (magic `42` by default).
+- OfflineTransfer serves whatever network the transfer file was prepared on.
 
 ## Performance and Caching
 
 | Context | Cached data |
 |---|---|
-| BlockFrost | Protocol params (per epoch), genesis params (permanent) |
-| Koios | Protocol params (per epoch), genesis params (permanent) |
-| CardanoCLI | Genesis params (permanent), protocol params (per tip update), UTxOs (per slot+address), datums (LRU) |
-| Ogmios | Epoch + protocol params (60s TTL), genesis params (permanent) |
-| NodeSocket | Epoch (60s TTL), protocol params (per epoch), genesis params (permanent) |
-| UTxO RPC | Genesis params (permanent); one connection kept open for all calls |
-| YaciDevkit | Epoch (10s TTL), protocol params (per epoch), genesis params and files (permanent) |
+| BlockFrost | Epoch (until the epoch's end time), protocol params (per epoch), genesis params (permanent) |
+| Koios | Epoch (until the epoch's end time), protocol params (per epoch), genesis params (permanent) |
+| CardanoCLI | Tip slot and epoch (20s), protocol params (per epoch), genesis params (permanent), UTxOs (per tip slot + address) |
+| Ogmios | Epoch (20s), protocol params (per epoch), genesis params (permanent) |
+| NodeSocket | Epoch (20s), protocol params (per epoch), genesis params (permanent) |
+| Kupo | Nothing; forwarded calls are cached by the wrapped context |
+| UTxO RPC | Genesis params (permanent); one connection kept open for all calls when created from an endpoint |
+| YaciDevkit | Epoch (10s), protocol params (per epoch), genesis params and files (permanent) |
 | OfflineTransfer | Everything read from file — no caching needed |
 
-Configure CardanoCLI cache sizes at initialisation:
+The 20-second lifetime is `ChainStateCache.lifetime`. CardanoCLI's UTxO cache size is set at
+initialisation; its `refetchChainTipInterval` and `datumCacheSize` parameters do not affect
+caching:
 
 ```swift
 let context = try await CardanoCliChainContext(
@@ -559,13 +672,14 @@ let context = try await CardanoCliChainContext(
     binary:     FilePath("/usr/local/bin/cardano-cli"),
     socket:     FilePath("/ipc/node.socket"),
     network:    .preview,
-    refetchChainTipInterval: 30,   // seconds
-    utxoCacheSize: 5_000,
-    datumCacheSize: 1_000
+    utxoCacheSize: 5_000   // address/slot entries kept before the cache is cleared
 )
 ```
 
 ## Documentation
 
 Full DocC documentation with per-backend usage guides is available via Xcode's documentation
-browser (**Product › Build Documentation**) or at Swift Package Index.
+browser (**Product › Build Documentation**) or at
+[Swift Package Index](https://swiftpackageindex.com/Kingpin-Apps/swift-cardano-chain/documentation/swiftcardanochain).
+The SPI documentation is built with the default traits, so `CardanoCliChainContext` and
+`NodeSocketChainContext` have guides there but no symbol pages.

@@ -10,7 +10,7 @@ import SystemPackage
 ///    protocol/genesis parameters, evaluations, and any other chain data needed.
 ///    Save it to disk with `offlineTransfer.save(to:)`.
 /// 2. **Transfer**: Copy the JSON file to a cold offline machine (e.g. via USB).
-/// 3. **Offline machine**: Initialise `OfflineTransferChainContext(fileURL:)` and use
+/// 3. **Offline machine**: Initialise `OfflineTransferChainContext(filePath:network:)` and use
 ///    it to build and sign transactions without any network access.
 /// 4. **Return**: The signed transaction CBOR is written back into the same JSON file
 ///    (via `submitTxCBOR`). Transfer the file back and submit the tx online.

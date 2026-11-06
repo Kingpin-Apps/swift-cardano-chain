@@ -13,13 +13,18 @@ import SystemPackage
 /// environment and need full local-node fidelity without running Ogmios or the NtC socket
 /// directly.
 ///
-/// Protocol parameters, UTxO sets, and the chain tip are cached to avoid redundant CLI
-/// invocations. Cache lifetimes and sizes are configurable at initialisation time.
+/// It is compiled only when the package's `CLIBackends` trait is enabled, and only on
+/// macOS and Linux.
+///
+/// The tip slot and epoch are reused for ``ChainStateCache/lifetime`` seconds, protocol
+/// parameters until the epoch changes, genesis parameters for the life of the context, and
+/// UTxOs per address until the tip slot moves; `utxoCacheSize` bounds the UTxO cache.
 ///
 /// ## Creating a Context
 ///
 /// ```swift
-/// // Minimal — reads node config, binary and socket from ~/.cardano-cli/config
+/// // Minimal — cardano-cli from PATH; socket, node config and network from the
+/// // CARDANO_SOCKET_PATH, CARDANO_CONFIG and NETWORK environment variables
 /// let context = try await CardanoCliChainContext(network: .mainnet)
 ///
 /// // Explicit paths
@@ -30,15 +35,13 @@ import SystemPackage
 ///     network: .mainnet
 /// )
 ///
-/// // Tuned caching
+/// // A smaller UTxO cache
 /// let context = try await CardanoCliChainContext(
 ///     nodeConfig: FilePath("/opt/cardano/preview/config.json"),
 ///     binary: FilePath("/usr/local/bin/cardano-cli"),
 ///     socket: FilePath("/ipc/node.socket"),
 ///     network: .preview,
-///     refetchChainTipInterval: 30,
-///     utxoCacheSize: 5_000,
-///     datumCacheSize: 1_000
+///     utxoCacheSize: 5_000
 /// )
 /// ```
 ///
@@ -211,17 +214,25 @@ public actor CardanoCliChainContext: ChainContext {
 
     /// Initialize a new CardanoCliChainContext
     ///
+    /// When `cli` is `nil` and any of `nodeConfig`, `binary` and `socket` is missing, the
+    /// CLI is built from `Config.default()`: `cardano-cli` is looked up on `PATH`, and the
+    /// socket, node config and network come from the `CARDANO_SOCKET_PATH`,
+    /// `CARDANO_CONFIG` and `NETWORK` environment variables (`NETWORK` defaults to mainnet).
+    ///
     /// - Parameters:
     ///   - nodeConfig: Path to the cardano-node config file
     ///   - binary: Path to the cardano-cli binary
     ///   - socket: Path to the cardano-node socket
-    ///   - network: Network to use
+    ///   - network: The network this context reports through `networkId`. When the paths
+    ///     are given, the CLI is also run against it.
     ///   - era: Era to use
     ///   - ttlBuffer: The time to live buffer
-    ///   - refetchChainTipInterval: Interval in seconds to refetch the chain tip
-    ///   - utxoCacheSize: Size of the UTxO cache
-    ///   - datumCacheSize: Size of the datum cache
-    ///   - cli: An instance of a CLIClient. If nil, a default CardanoCLIClient will be created.
+    ///   - refetchChainTipInterval: Seconds between sync checks in the deprecated
+    ///     `isChainTipUpdated()`; nothing else uses it.
+    ///   - utxoCacheSize: Most address/slot entries the UTxO cache holds before it is cleared.
+    ///   - datumCacheSize: Not used.
+    ///   - cli: A `CardanoCLI` to use instead of building one; the paths and `era` are then
+    ///     ignored.
     public init(
         nodeConfig: FilePath? = nil,
         binary: FilePath? = nil,
@@ -263,6 +274,7 @@ public actor CardanoCliChainContext: ChainContext {
         }
     }
 
+    /// A context whose `cardano-cli` is configured from `cardanoConfig`, network included.
     public init(cardanoConfig: CardanoConfig) async throws {
         self.refetchChainTipInterval = 1000
         self.utxoCache = [:]
@@ -277,10 +289,10 @@ public actor CardanoCliChainContext: ChainContext {
 
     // MARK: - Public Methods
 
-    /// Query the chain tip
+    /// Query the chain tip with `cardano-cli query tip`.
     ///
-    /// - Returns: The chain tip as a dictionary
-    /// - Throws: CardanoChainError if the query fails
+    /// - Returns: The current chain tip as a `ChainTip`.
+    /// - Throws: An error if the query fails.
     public func chainTip() async throws -> ChainTip {
         let result = try await cli.query.tip()
 
@@ -291,7 +303,7 @@ public actor CardanoCliChainContext: ChainContext {
 
     /// Query the current protocol parameters
     ///
-    /// - Returns: The protocol parameters as a dictionary
+    /// - Returns: The current protocol parameters, fetched without the cache.
     /// - Throws: CardanoChainError if the query fails
     public func queryCurrentProtocolParams() async throws -> ProtocolParameters {
         let result = try await cli.query.protocolParameters()

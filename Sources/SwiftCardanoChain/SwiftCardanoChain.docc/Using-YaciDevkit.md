@@ -27,7 +27,7 @@ which is the context's default too.
 Add the package to your `Package.swift`:
 
 ```swift
-.package(url: "https://github.com/Kingpin-Apps/swift-cardano-chain.git", from: "0.8.0")
+.package(url: "https://github.com/Kingpin-Apps/swift-cardano-chain.git", from: "0.16.1")
 ```
 
 ## Creating a Context
@@ -152,7 +152,7 @@ Some consequences are worth planning around:
 - **Registration is read from certificates, not from the account.** Yaci answers
   `/accounts/{stakeAddress}` with 200 and zeroed amounts for any well-formed stake address,
   including one it has never seen, so a successful response says nothing about registration.
-  the `active` flag on `StakeAddressInfo` therefore comes from the stake certificate log, and
+  The `active` flag on `StakeAddressInfo` therefore comes from the stake certificate log, and
   an address with no certificate reports `false`.
 - **A pruned or still-syncing store misleads.** Reconstruction treats an unseen certificate as
   one that was never submitted.

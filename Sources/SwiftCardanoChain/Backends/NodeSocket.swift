@@ -18,17 +18,21 @@ import SystemPackage
 /// the query, and closes the connection automatically — even if the query throws.
 /// No explicit `close()` call is needed.
 ///
+/// It is compiled only when the package's `NodeSocket` trait (or `CLIBackends`, which
+/// enables it) is on, and only on macOS and Linux. The `CardanoConfig` initializer
+/// needs `CLIBackends`.
+///
 /// ## Creating a Context
 ///
 /// ```swift
-/// // From a CardanoConfig (the most common case)
-/// let context = try NodeSocketChainContext(cardanoConfig: cardanoConfig)
-///
-/// // Direct: socket path + network preset
+/// // Direct: socket path + network preset (mainnet, preprod or preview)
 /// let context = NodeSocketChainContext(
 ///     socketPath: FilePath("/ipc/node.socket"),
 ///     network: .mainnet
 /// )
+///
+/// // From a CardanoConfig (CLIBackends trait only)
+/// let context = try NodeSocketChainContext(cardanoConfig: cardanoConfig)
 ///
 /// // Custom CardanoNetworkConfiguration (override timeouts, NtC versions, etc.)
 /// var networkConfig = CardanoNetworkConfiguration.preview
@@ -186,6 +190,11 @@ public actor NodeSocketChainContext: ChainContext {
 
     /// Convenience initializer that builds a `CardanoNetworkConfiguration` from a socket
     /// path and a network preset.
+    ///
+    /// Presets exist for `.mainnet`, `.preprod` and `.preview`. Any other network gets a
+    /// default configuration whose handshake uses mainnet's network magic, so for a devnet
+    /// or SanchoNet build a `CardanoNetworkConfiguration` with `connection.networkMagic`
+    /// set and use ``init(networkConfig:network:)`` instead.
     public init(
         socketPath: FilePath,
         network: Network = .mainnet

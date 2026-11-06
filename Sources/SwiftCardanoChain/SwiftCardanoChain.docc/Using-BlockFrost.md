@@ -19,7 +19,7 @@ project ID — no `cardano-node`, no Ogmios, no local infrastructure.
 Add the package to your `Package.swift`:
 
 ```swift
-.package(url: "https://github.com/Kingpin-Apps/swift-cardano-chain.git", from: "0.3.0")
+.package(url: "https://github.com/Kingpin-Apps/swift-cardano-chain.git", from: "0.16.1")
 ```
 
 ## Creating a Context
@@ -80,14 +80,15 @@ for utxo in utxos {
 
 ### Protocol and Genesis Parameters
 
-Protocol parameters are cached per epoch; genesis parameters are cached permanently.
+Protocol parameters are cached until the epoch changes; genesis parameters are cached for
+the life of the context.
 
 ```swift
 let params  = try await context.protocolParameters()
 let genesis = try await context.genesisParameters()
 
 print("Min fee per byte: \(params.txFeePerByte)")
-print("Slot length: \(genesis.slotLength)s")
+print("Slot length: \(genesis.slotLength.map { "\($0)" } ?? "n/a")s")
 ```
 
 ### Current Epoch and Slot
@@ -150,9 +151,20 @@ let drepInfo = try await context.drepInfo(drep: someDRep)
 // Governance action
 let govInfo = try await context.govActionInfo(govActionID: someActionId)
 
-// Committee member state
+// Committee member state, by cold or hot credential
 let cmInfo = try await context.committeeMemberInfo(cold: cred)
+
+// Actions that can still be voted on
+let open = try await context.openGovActions()
 ```
+
+## Limitations
+
+- ``ChainContext/drepStakeDistribution()`` and ``ChainContext/spoStakeDistribution()`` are not
+  available from BlockFrost and throw ``CardanoChainError/notImplemented(_:)``.
+- ``ChainContext/govActionsAll()`` returns every proposal BlockFrost has indexed, concluded ones
+  included, and makes further requests per proposal for the votes. Use
+  ``ChainContext/openGovActions()`` for only the actions that can still be voted on.
 
 ## Error Handling
 
@@ -174,10 +186,11 @@ do {
 
 | Data | Cache lifetime |
 |---|---|
-| Protocol parameters | Per epoch (refreshed when epoch changes) |
+| Epoch | Until the end time BlockFrost reports for the current epoch |
+| Protocol parameters | Per epoch (refreshed when the epoch changes) |
 | Genesis parameters | Permanent (never re-fetched) |
 | UTxOs | Not cached — fetched on every call |
-| Epoch / slot | Per request |
+| Last block slot | Not cached — fetched on every call |
 
 ## See Also
 

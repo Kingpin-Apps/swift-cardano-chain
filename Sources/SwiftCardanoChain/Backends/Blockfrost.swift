@@ -241,7 +241,7 @@ public actor BlockFrostChainContext: ChainContext {
 
     /// Query the chain tip
     ///
-    /// - Returns: The chain tip as a dictionary
+    /// - Returns: The current chain tip as a `ChainTip`.
     /// - Throws: CardanoChainError if the query fails
     public func chainTip() async throws -> ChainTip {
         do {
@@ -265,7 +265,7 @@ public actor BlockFrostChainContext: ChainContext {
 
     /// Query the current protocol parameters
     ///
-    /// - Returns: The protocol parameters as a dictionary
+    /// - Returns: The current protocol parameters, fetched without the cache.
     /// - Throws: CardanoChainError if the query fails
     public func queryCurrentProtocolParams() async throws -> ProtocolParameters {
         do {

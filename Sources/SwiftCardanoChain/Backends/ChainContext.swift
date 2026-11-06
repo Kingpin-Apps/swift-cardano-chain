@@ -58,8 +58,9 @@ public protocol ChainContext: Sendable, CustomStringConvertible, CustomDebugStri
     /// - Parameter input: A transaction input identifying the UTxO by transaction hash and output index.
     /// - Returns: A tuple of the UTxO and a boolean indicating whether it has been spent,
     ///   or `nil` if the UTxO does not exist or cannot be found.
-    ///   Note: backends that only query the live UTxO set (CardanoCLI, Ogmios) will always
-    ///   return `isSpent: false` when a result is returned, and `nil` for spent UTxOs.
+    ///   Note: backends that only query the live UTxO set (CardanoCLI, NodeSocket, Ogmios,
+    ///   and UTxO RPC without a wrapped context) always return `isSpent: false` when a
+    ///   result is returned, and `nil` for spent UTxOs.
     func utxo(input: TransactionInput) async throws -> (UTxO, isSpent: Bool)?
 
     /// The bytes of a transaction already on chain, exactly as it was
@@ -76,8 +77,9 @@ public protocol ChainContext: Sendable, CustomStringConvertible, CustomDebugStri
     /// Submit a serialized transaction to the blockchain.
     ///
     /// - Parameter cbor: The serialized transaction to be submitted.
-    /// - Throws: `InvalidArgumentException` when the transaction is invalid.
-    /// - Throws: `TransactionFailedException` when submission fails.
+    /// - Returns: The transaction id as a hex string.
+    /// - Throws: An error, usually a ``CardanoChainError``, when the transaction cannot be
+    ///   decoded or the backend rejects it; which case depends on the backend.
     func submitTxCBOR(cbor: Data) async throws -> String
 
     /// Evaluate execution units of a transaction.
@@ -192,9 +194,11 @@ public protocol ChainContext: Sendable, CustomStringConvertible, CustomDebugStri
 public extension ChainContext {
     /// Submit a transaction to the blockchain.
     ///
-    /// - Parameter tx: The transaction to be submitted.
-    /// - Throws: `InvalidArgumentException` when the transaction is invalid.
-    /// - Throws: `TransactionFailedException` when submission fails.
+    /// - Parameter tx: The transaction to be submitted, as a `Transaction`, CBOR bytes or
+    ///   a CBOR hex string.
+    /// - Returns: The transaction id as a hex string.
+    /// - Throws: An error, usually a ``CardanoChainError``, when the transaction cannot be
+    ///   decoded or the backend rejects it; which case depends on the backend.
     func submitTx(tx: TransactionData) async throws -> String {
         switch tx {
         case .transaction(let transaction):
@@ -241,10 +245,12 @@ public extension ChainContext {
 
     /// Evaluate execution units of a transaction locally via the UPLC CEK machine.
     ///
-    /// This is a backend-agnostic helper for chain contexts that don't expose a remote
-    /// `evaluateTransaction` RPC (CardanoCLI, NodeSocket). Callers fetch the resolved
-    /// UTxOs for `tx.transactionBody.inputs + referenceInputs` and the current protocol
-    /// parameters using whatever transport they have available, then hand them off here.
+    /// This is a backend-agnostic helper. CardanoCLI and NodeSocket, which have no remote
+    /// evaluator, call it from their `evaluateTxCBOR(cbor:)`, as UTxO RPC does when the
+    /// server cannot evaluate; on those contexts `evaluateTx(tx:)` already evaluates
+    /// locally. Call it yourself when you already hold the resolved UTxOs for
+    /// `tx.transactionBody.inputs + referenceInputs` and the protocol parameters, or to
+    /// evaluate without asking a remote server.
     ///
     /// - Parameters:
     ///   - tx: The transaction to evaluate.

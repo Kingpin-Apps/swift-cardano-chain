@@ -17,8 +17,9 @@ The workflow is:
 4. **Return** — copy the file back to the online machine and submit the transaction.
 
 Unlike every other context, `OfflineTransferChainContext` has `type == .offline` — it never
-opens a network connection and throws ``CardanoChainError/notImplemented(_:)`` for operations
-that inherently require one (e.g. `stakePools()`).
+opens a network connection. Every query is answered from the data saved in the file; the one
+it cannot answer at all is ``ChainContext/transactionCBOR(hash:)``, which throws
+``CardanoChainError/notImplemented(_:)``.
 
 ## Prerequisites
 
@@ -28,7 +29,7 @@ that inherently require one (e.g. `stakePools()`).
 Add the package to your `Package.swift`:
 
 ```swift
-.package(url: "https://github.com/Kingpin-Apps/swift-cardano-chain.git", from: "0.5.0")
+.package(url: "https://github.com/Kingpin-Apps/swift-cardano-chain.git", from: "0.16.1")
 ```
 
 ## Step 1 — Prepare the Transfer File (Online Machine)
@@ -37,6 +38,8 @@ Use any online ``ChainContext`` to populate the data and save it:
 
 ```swift
 import SwiftCardanoChain
+
+import SystemPackage
 
 // Any online context will do
 let onlineContext = try await BlockFrostChainContext(
@@ -49,8 +52,12 @@ var transfer = OfflineTransfer()
 
 // Add UTxOs for each address that will be spent
 let address = try Address(from: .string("addr1..."))
-let utxos   = try await onlineContext.utxos(address: address)
-transfer.addUtxos(utxos, for: address)
+transfer.addresses.append(
+    try AddressInfo(
+        address: address,
+        utxos: try await onlineContext.utxos(address: address)
+    )
+)
 
 // Capture protocol and genesis parameters
 transfer.protocol.protocolParameters = try await onlineContext.protocolParameters()
@@ -112,8 +119,10 @@ print("Recorded as: \(txId)")
 let transfer = try OfflineTransfer.load(from: FilePath("/path/to/transfer.json"))
 
 // Extract the signed transaction and submit it
-let cborHex = transfer.signedTransactions.last!.cborHex
-let txId    = try await onlineContext.submitTx(tx: .string(cborHex))
+guard let cborHex = transfer.transactions.last?.txJson?.cborHex else {
+    fatalError("No signed transaction in the transfer file")
+}
+let txId = try await onlineContext.submitTx(tx: .string(cborHex))
 print("Submitted: \(txId)")
 ```
 
@@ -149,33 +158,43 @@ if context.type == .offline {
 
 Every read is served from the data that was populated on the online machine and
 serialised into the file. If a field was not populated before the file was transferred,
-the corresponding call throws ``CardanoChainError/offlineTransferError(_:)``.
+the result depends on the call: lookups of a single item (protocol or genesis parameters, a
+pool, a DRep, a governance action, a committee member, the treasury, the committee state, an
+evaluation, KES info) throw ``CardanoChainError/offlineTransferError(_:)``, while list reads
+(`utxos(address:)`, `stakeAddressInfo(address:)`, `stakePools()`, `govActionsAll()`, the stake
+distributions) return an empty list, `utxo(input:)` returns `nil` and `era()` returns `nil`.
 
 | Call | Source field on `OfflineTransfer` |
 |---|---|
 | `utxos(address:)` / `utxo(input:)` | `addresses` |
 | `protocolParameters()` | `protocol.protocolParameters` |
 | `genesisParameters()` | `protocol.genesisParameters` |
-| `era()` / `epoch()` / `lastBlockSlot()` / `chainTip()` | `protocol` + system clock |
+| `era()` | `protocol.era` |
+| `epoch()` / `lastBlockSlot()` / `chainTip()` | `protocol.genesisParameters` + system clock |
 | `stakePools()` / `stakePoolInfo(poolId:)` | `stakePools`, `stakePoolInfos` |
 | `stakeAddressInfo(address:)` | `addresses[].stakeAddressInfo` |
-| `kesPeriodInfo(...)` | `kesPeriodInfos` |
+| `kesPeriodInfo(...)` | `kesPeriodInfos` (the first entry, whatever `pool` is passed) |
 | `treasury()` | `treasury` |
 | `drepInfo(drep:)` | `drepInfos` |
 | `govActionInfo(govActionID:)` | `govActionInfos` |
-| `govActionVotes(govActionID:)` / `govActionsAll()` | `govActionVotesList` |
+| `govActionVotes(govActionID:)` / `govActionsAll()` / `openGovActions()` | `govActionVotesList` (`openGovActions()` also needs `epoch()`) |
 | `committeeMemberInfo(cold:)` / `committeeMemberInfo(hot:)` | `committeeMemberInfos` |
 | `committeeState()` | `committeeStateSnapshot` |
 | `drepStakeDistribution()` / `spoStakeDistribution()` | `drepStakeEntries`, `spoStakeEntries` |
-| `evaluateTx(...)` / `evaluateTxCBOR(cbor:)` | `evaluations` (matched by tx CBOR hex) |
+| `evaluateTx(tx:)` / `evaluateTxCBOR(cbor:)` | `evaluations` (matched by the exact tx CBOR hex) |
 | `submitTxCBOR(cbor:)` (writes signed CBOR back into the file) | `transactions`, `history` |
 
 `submitTx` does not broadcast to the network — it appends the signed CBOR to the file
-so the online side can submit it on return.
+so the online side can submit it on return. The CBOR must decode as a transaction; the
+returned id is its hash.
+
+Evaluations are matched on the exact transaction bytes, so the transaction evaluated on the
+online machine must be byte-for-byte the one evaluated offline. Adding a signature changes the
+bytes, so save the evaluation of exactly the transaction the offline machine will evaluate.
 
 ## Error Handling
 
-Offline errors surface as ``CardanoChainError/offlineTransferError(_:)``:
+Missing data surfaces as ``CardanoChainError/offlineTransferError(_:)``:
 
 ```swift
 do {
@@ -184,7 +203,7 @@ do {
     print("Offline transfer error: \(message ?? "unknown")")
     // Likely cause: protocol parameters were not included in the transfer file
 } catch CardanoChainError.notImplemented(let message) {
-    print("Operation requires network: \(message ?? "unknown")")
+    print("Not available offline: \(message ?? "unknown")")
 } catch {
     print("Unexpected error: \(error)")
 }
@@ -192,9 +211,10 @@ do {
 
 ## Audit Trail
 
-Every action taken on the transfer file is recorded in an `OfflineTransfer.history` array via
-`HistoryType` entries — giving you a tamper-evident audit log of what data was read, what
-transactions were built, and when each step occurred.
+`OfflineTransfer.history` is a list of dated ``HistoryType`` entries describing what was done
+with the file. `OfflineTransferChainContext` adds one entry, `saveTransaction(txId:)`, each
+time `submitTx` saves a transaction; reads add nothing. Your own tooling can append further
+entries. The history is a plain JSON array and is not protected against editing.
 
 ## See Also
 

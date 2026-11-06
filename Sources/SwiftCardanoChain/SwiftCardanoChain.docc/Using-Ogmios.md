@@ -8,11 +8,14 @@ Connect to a local Cardano node through the Ogmios WebSocket/HTTP bridge.
 process that sits in front of `cardano-node` and exposes the Ouroboros mini-protocols over a
 WebSocket and HTTP API.
 
-Compared to ``CardanoCliChainContext``, Ogmios is lower latency (no subprocess overhead) and
-exposes richer query semantics. Compared to ``NodeSocketChainContext``, it requires the extra
-Ogmios process but works on all platforms including those without Unix socket support.
+Compared to `CardanoCliChainContext`, Ogmios has no subprocess overhead. Compared to
+`NodeSocketChainContext`, it needs the extra Ogmios process, but it is built by default and
+works on every platform the package supports, iOS and visionOS included, because it talks to
+Ogmios over the network rather than through a local Unix socket. (Both of those contexts need
+a package trait and run only on macOS and Linux.)
 
-**Supported networks:** `.mainnet`, `.preprod`, `.preview` (any network your local node runs)
+**Supported networks:** any network the node behind Ogmios runs. The `network` you pass sets
+the context's `networkId`; the data comes from whichever node Ogmios is connected to.
 
 ## Prerequisites
 
@@ -23,14 +26,14 @@ Ogmios process but works on all platforms including those without Unix socket su
 Add the package to your `Package.swift`:
 
 ```swift
-.package(url: "https://github.com/Kingpin-Apps/swift-cardano-chain.git", from: "0.3.0")
+.package(url: "https://github.com/Kingpin-Apps/swift-cardano-chain.git", from: "0.16.1")
 ```
 
 ## Creating a Context
 
 ### Default Local Instance (`localhost:1337`)
 
-If Ogmios is running with its default settings, you can connect with no arguments:
+If Ogmios is running with its default settings, you only need to name the network:
 
 ```swift
 import SwiftCardanoChain
@@ -55,20 +58,28 @@ let context = try await OgmiosChainContext(
 let context = try await OgmiosChainContext(
     host: "ogmios.example.com",
     port: 443,
-    path: "/",
     secure: true,
     network: .mainnet
 )
 ```
+
+`host` and `port` are used only when both are given; leave either out and the context
+connects to `localhost:1337`.
 
 ### Injecting an Existing `OgmiosClient`
 
 Share a client across multiple contexts or inject a mock in tests:
 
 ```swift
+import SwiftOgmios
+
 let client = try await OgmiosClient(host: "localhost", port: 1337)
 let context = try await OgmiosChainContext(network: .mainnet, client: client)
 ```
+
+SwiftOgmios declares its own `Address`, `Transaction` and other Cardano types. In a file that
+imports it, write the ledger types with their module, such as `SwiftCardanoCore.Address`, or
+the compiler reports them as ambiguous.
 
 ## Reading Chain Data
 
@@ -91,15 +102,17 @@ let params  = try await context.protocolParameters()
 let genesis = try await context.genesisParameters()
 
 print("Min fee per byte: \(params.txFeePerByte)")
-print("Slot length: \(genesis.slotLength)s")
+print("Slot length: \(genesis.slotLength.map { "\($0)" } ?? "n/a")s")
 ```
 
 ### Chain Tip
 
-Ogmios exposes a richer chain tip than most backends:
+``OgmiosChainContext/chainTip()`` combines Ogmios's ledger tip (slot and hash) with its
+`/health` endpoint, which supplies the block height, epoch, era and sync progress. If the
+health check fails, those fields are left `nil`:
 
 ```swift
-let tip = try await context.queryChainTip()
+let tip = try await context.chainTip()
 
 print("Block  : \(tip.block ?? 0)")
 print("Slot   : \(tip.slot ?? 0)")
@@ -121,6 +134,9 @@ print("Epoch \(epoch), slot \(slot)")
 // From a transaction object
 let txId = try await context.submitTx(tx: .transaction(transaction))
 
+// From CBOR bytes
+let txId = try await context.submitTx(tx: .bytes(cborData))
+
 // From a CBOR hex string
 let txId = try await context.submitTx(tx: .string("84a700..."))
 
@@ -129,7 +145,8 @@ print("Submitted: \(txId)")
 
 ## Evaluating Plutus Scripts
 
-Ogmios forwards evaluation requests to the node's local UPLC evaluator:
+Ogmios evaluates the scripts remotely, against the ledger state of the node it is connected
+to. Redeemer keys use this library's tag names (`cert:0`, not Ogmios's `publish:0`):
 
 ```swift
 let units = try await context.evaluateTx(tx: transaction)
@@ -147,11 +164,26 @@ let stakeInfo = try await context.stakeAddressInfo(address: stakeAddress)
 
 // All registered stake pools
 let pools = try await context.stakePools()
+
+// Details for a specific pool
+let pool = try await context.stakePoolInfo(poolId: "pool1...")
 ```
+
+## Limitations
+
+- ``ChainContext/transactionCBOR(hash:)`` throws ``CardanoChainError/notImplemented(_:)``:
+  Ogmios serves the live ledger state and cannot look transactions up.
+- ``ChainContext/drepStakeDistribution()`` and ``ChainContext/spoStakeDistribution()`` throw
+  ``CardanoChainError/notImplemented(_:)``.
+- ``ChainContext/utxo(input:)`` reads the live UTxO set, so a spent output returns `nil`
+  rather than `isSpent: true`. Wrap Ogmios in a ``KupoChainContext`` to learn whether an
+  output was spent.
 
 ## Error Handling
 
-Ogmios errors surface as ``CardanoChainError/operationError(_:)``:
+Context-level failures surface as ``CardanoChainError/operationError(_:)`` or
+``CardanoChainError/valueError(_:)``; errors from the underlying SwiftOgmios client (a
+connection failure, for example) can reach you unwrapped:
 
 ```swift
 do {
@@ -167,7 +199,8 @@ do {
 
 | Data | Cache lifetime |
 |---|---|
-| Epoch / protocol parameters | 60-second TTL |
+| Epoch | ``ChainStateCache/lifetime`` (20 seconds) |
+| Protocol parameters | Per epoch |
 | Genesis parameters | Permanent |
 | UTxOs | Not cached |
 

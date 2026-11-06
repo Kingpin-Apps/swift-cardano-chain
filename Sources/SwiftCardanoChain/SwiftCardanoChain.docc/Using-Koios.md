@@ -13,7 +13,9 @@ limits.
 
 **Supported networks:** `.mainnet`, `.preprod`, `.preview`, `.guildnet`, `.sanchonet`
 
-> Note: Koios is the only backend in this library that supports `.guildnet` and `.sanchonet`.
+> Note: Koios is the only hosted API backend in this library that serves `.guildnet` and
+> `.sanchonet`. The node-backed contexts (Ogmios, Kupo, UTxO RPC, `cardano-cli`) work on
+> those networks too when you run a node on them.
 
 ## Prerequisites
 
@@ -23,7 +25,7 @@ limits.
 Add the package to your `Package.swift`:
 
 ```swift
-.package(url: "https://github.com/Kingpin-Apps/swift-cardano-chain.git", from: "0.3.0")
+.package(url: "https://github.com/Kingpin-Apps/swift-cardano-chain.git", from: "0.16.1")
 ```
 
 ## Creating a Context
@@ -35,6 +37,9 @@ import SwiftCardanoChain
 
 let context = try await KoiosChainContext(network: .mainnet)
 ```
+
+Creating a context reads the current epoch from Koios, so the initialiser makes network
+requests and throws if Koios cannot be reached.
 
 ### From an Environment Variable (Recommended for Production)
 
@@ -98,14 +103,15 @@ for utxo in utxos {
 
 ### Protocol and Genesis Parameters
 
-Protocol parameters are cached per epoch; genesis parameters are cached permanently.
+Protocol parameters are cached until the epoch changes; genesis parameters are cached for
+the life of the context.
 
 ```swift
 let params  = try await context.protocolParameters()
 let genesis = try await context.genesisParameters()
 
 print("Min fee per byte: \(params.txFeePerByte)")
-print("Network magic: \(genesis.networkMagic)")
+print("Network magic: \(genesis.networkMagic.map(String.init) ?? "n/a")")
 ```
 
 ### Current Epoch and Slot
@@ -129,6 +135,8 @@ print("Submitted: \(txId)")
 ```
 
 ## Evaluating Plutus Scripts
+
+Koios evaluates the transaction remotely, through its Ogmios-compatible endpoint:
 
 ```swift
 let units = try await context.evaluateTx(tx: transaction)
@@ -157,7 +165,16 @@ let pool = try await context.stakePoolInfo(poolId: "pool1...")
 let drepInfo = try await context.drepInfo(drep: someDRep)
 let govInfo  = try await context.govActionInfo(govActionID: someActionId)
 let cmInfo   = try await context.committeeMemberInfo(cold: cred)
+let open     = try await context.openGovActions()
 ```
+
+## Limitations
+
+- ``ChainContext/drepStakeDistribution()`` and ``ChainContext/spoStakeDistribution()`` are not
+  available from Koios and throw ``CardanoChainError/notImplemented(_:)``.
+- ``ChainContext/govActionsAll()`` returns every proposal Koios has indexed, concluded ones
+  included, and makes further requests per proposal for the votes. Use
+  ``ChainContext/openGovActions()`` for only the actions that can still be voted on.
 
 ## Error Handling
 
@@ -179,6 +196,7 @@ do {
 
 | Data | Cache lifetime |
 |---|---|
+| Epoch | Until the end time Koios reports for the current epoch |
 | Protocol parameters | Per epoch |
 | Genesis parameters | Permanent |
 | UTxOs | Not cached |

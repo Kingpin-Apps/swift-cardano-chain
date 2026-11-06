@@ -271,7 +271,7 @@ public actor KoiosChainContext: ChainContext {
 
     /// Query the chain tip
     ///
-    /// - Returns: The chain tip as a dictionary
+    /// - Returns: The current chain tip as a `ChainTip`.
     /// - Throws: CardanoChainError if the query fails
     public func chainTip() async throws -> ChainTip {
         do {
@@ -313,7 +313,7 @@ public actor KoiosChainContext: ChainContext {
 
     /// Query the current protocol parameters
     ///
-    /// - Returns: The protocol parameters as a dictionary
+    /// - Returns: The current protocol parameters, fetched without the cache.
     /// - Throws: CardanoChainError if the query fails
     public func queryCurrentProtocolParams() async throws -> ProtocolParameters {
         do {
@@ -433,7 +433,7 @@ public actor KoiosChainContext: ChainContext {
     // MARK: - Private Helper Methods
 
     /// Parse a script from a dictionary (typically from reference_script field)
-    /// - Parameter scriptDict: Dictionary containing script type and data
+    /// - Parameter referenceScript: The `reference_script` field of a Koios UTxO.
     /// - Returns: A ScriptType object
     private func getScript(
         from referenceScript: Components.Schemas.UtxoInfosPayload.ReferenceScriptPayload
