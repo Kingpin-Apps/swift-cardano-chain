@@ -1,3 +1,9 @@
+## 0.16.3 (2026-11-07)
+
+### Fix
+
+- report offline-transfer dates outside the network's slot range
+
 ## 0.16.2 (2026-11-06)
 
 ### Fix
