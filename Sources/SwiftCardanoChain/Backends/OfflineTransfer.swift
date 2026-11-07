@@ -113,14 +113,18 @@ public actor OfflineTransferChainContext: ChainContext {
                     "Genesis slot length \(slotLength)s is not a whole number of milliseconds."
                 )
             }
-            timeline = SlotTimeline(systemStart: systemStart, slotLengthMilliseconds: slotMilliseconds)
+            timeline = try SlotTimeline(systemStart: systemStart, slotLengthMilliseconds: slotMilliseconds)
             byronEpochs = 0
         }
         guard epochLength > 0 else {
             throw CardanoChainError.offlineTransferError("Genesis epoch length is zero.")
         }
 
-        let slot = timeline.slot(atMilliseconds: Int64((date.timeIntervalSince1970 * 1000).rounded(.down)))
+        let milliseconds = (date.timeIntervalSince1970 * 1000).rounded(.down)
+        guard let posixMilliseconds = Int64(exactly: milliseconds),
+              let slot = timeline.slot(atMilliseconds: posixMilliseconds) else {
+            throw CardanoChainError.offlineTransferError("\(date) is outside the slot range of this network.")
+        }
         let byronEpochLength: UInt64 = 21600
         let byronSlots = byronEpochs * byronEpochLength
         let epoch = slot < byronSlots
